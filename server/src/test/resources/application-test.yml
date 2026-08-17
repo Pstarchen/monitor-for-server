@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:monitor-test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  flyway:
+    enabled: false
+app:
+  bootstrap-admin-username: test-admin
+  bootstrap-admin-password: Test-only-password-123
+  redis-enabled: false
+  allowed-origins: http://localhost:5173,http://127.0.0.1:5173

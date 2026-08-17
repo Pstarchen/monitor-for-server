@@ -1,0 +1,16 @@
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+.env
+*.log
+
+agent/bin/
+agent/coverage.out
+server/target/
+server/data/
+web/node_modules/
+web/dist/
+web/coverage/
+*.tsbuildinfo

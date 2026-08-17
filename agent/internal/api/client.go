@@ -1,0 +1,44 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"net/http"
+	"time"
+)
+
+type Client struct {
+	endpoint string
+	deviceID string
+	agentKey string
+	http     *http.Client
+}
+
+func NewClient(serverURL, deviceID, agentKey string, timeout time.Duration) *Client {
+	return &Client{
+		endpoint: serverURL + "/api/agent/v1/reports",
+		deviceID: deviceID,
+		agentKey: agentKey,
+		http:     &http.Client{Timeout: timeout},
+	}
+}
+
+func (c *Client) Send(ctx context.Context, payload []byte) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Device-Id", c.deviceID)
+	request.Header.Set("X-Agent-Key", c.agentKey)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("server returned HTTP %d", response.StatusCode)
+	}
+	return nil
+}

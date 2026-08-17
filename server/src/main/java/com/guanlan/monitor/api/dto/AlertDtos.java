@@ -1,0 +1,37 @@
+package com.guanlan.monitor.api.dto;
+
+import com.guanlan.monitor.domain.AlertEvent;
+import com.guanlan.monitor.domain.AlertRule;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
+
+import java.time.Instant;
+
+public final class AlertDtos {
+    private AlertDtos() {}
+
+    public record RuleRequest(
+            @NotBlank @Size(max = 100) String name,
+            String deviceId,
+            @NotNull AlertRule.Metric metric,
+            @PositiveOrZero double threshold,
+            @NotNull AlertRule.Severity severity,
+            boolean enabled
+    ) {}
+
+    public record RuleView(
+            Long id, String name, String deviceId, String deviceName,
+            AlertRule.Metric metric, double threshold, AlertRule.Severity severity,
+            boolean enabled, Instant updatedAt
+    ) {}
+
+    public record EventView(
+            Long id, String deviceId, String deviceName, Long ruleId, String ruleName,
+            AlertRule.Severity severity, AlertEvent.Status status, double value,
+            String message, Instant startedAt, Instant acknowledgedAt,
+            String acknowledgedBy, Instant resolvedAt
+    ) {}
+}
+

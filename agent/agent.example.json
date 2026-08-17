@@ -1,0 +1,12 @@
+{
+  "server_url": "https://monitor.example.com",
+  "device_id": "replace-with-device-id",
+  "agent_key": "replace-with-one-time-agent-key",
+  "interval": "3s",
+  "request_timeout": "10s",
+  "spool_dir": "data/spool",
+  "max_buffered_reports": 10000,
+  "allow_insecure_http": false,
+  "monitored_services": ["nginx", "mysql"]
+}
+
