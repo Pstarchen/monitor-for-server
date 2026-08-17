@@ -19,6 +19,7 @@ flowchart LR
 ### Agent
 
 - 使用 `gopsutil` 采集主机、CPU、内存、交换分区、磁盘、网络、进程、温度和指定服务状态。
+- 可按挂载点限制磁盘采集，并可跳过进程扫描与 TCP 连接枚举以降低主机开销。
 - 支持 1 秒、3 秒、10 秒或 1–60 秒自定义采集周期。
 - 每次采集先原子写入本地磁盘队列，再按时间顺序上报；网络恢复后自动补传。
 - 使用设备 ID 与一次性生成的设备密钥认证。非本机地址默认强制 HTTPS。
@@ -56,13 +57,14 @@ flowchart LR
 - `metric_snapshots`：按时间记录聚合指标及磁盘、进程、服务 JSON 快照。
 - `alert_rules`：全局或设备级阈值规则。
 - `alert_events`：告警开启、确认、恢复时间和处理人。
-- `system_settings`：非敏感运行参数；通知密钥不进入数据库。
+- `system_settings`：运行参数与使用 AES-256-GCM 加密的通知凭据；API 只返回配置状态，不回传明文。
 - `audit_logs`：关键管理操作的操作者、目标和摘要。
 
 ## 可靠性与安全边界
 
 - Agent 的磁盘队列有容量上限，满载时按 FIFO 删除最旧报告，避免占满主机磁盘。
 - Agent 上报接口不使用浏览器会话和 CSRF，而使用独立设备凭据；其他写接口必须通过会话与 CSRF 双重校验。
-- SMTP 密码和机器人 Webhook 只允许从环境变量注入，不通过设置 API 返回。
+- SMTP 密码和机器人 Webhook 可从环境变量回退，或以 AES-256-GCM 密文保存；设置 API 永不返回明文。
+- `SETTINGS_ENCRYPTION_KEY` 必须独立保管并随数据库备份保存，丢失后数据库中的通知凭据无法恢复。
 - 生产环境必须在 Web 网关前终止 TLS，并设置 `SESSION_COOKIE_SECURE=true` 与精确的 `ALLOWED_ORIGINS`。
 - 数据库与 Redis 仅位于 Docker 内部网络，不在 Compose 中发布宿主机端口。

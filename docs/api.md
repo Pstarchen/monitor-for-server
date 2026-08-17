@@ -105,7 +105,9 @@ Content-Type: application/json
 | --- | --- | --- | --- |
 | GET | `/api/dashboard` | 登录 | 设备、告警和资源均值汇总 |
 | GET | `/api/settings` | ADMIN | 非敏感系统设置及通知通道配置状态 |
-| PUT | `/api/settings` | ADMIN | 更新留存天数、离线判定和默认采集周期 |
+| GET | `/api/settings/agent-bootstrap` | ADMIN / OPERATOR | Agent 公网入口与默认采集周期 |
+| PUT | `/api/settings` | ADMIN | 更新系统设置与通知通道；敏感字段仅接受替换值 |
+| POST | `/api/settings/notifications/{channel}/test` | ADMIN | 测试 `email`、`dingtalk` 或 `wecom` 通道 |
 | GET | `/api/admin/users` | ADMIN | 账号列表 |
 | POST | `/api/admin/users` | ADMIN | 创建账号，密码至少 12 位 |
 | PUT | `/api/admin/users/{id}` | ADMIN | 更新名称、角色、状态和可选新密码 |
@@ -118,9 +120,28 @@ Content-Type: application/json
 {
   "metricRetentionDays": 30,
   "deviceOfflineAfterSeconds": 30,
-  "defaultCollectionSeconds": 3
+  "defaultCollectionSeconds": 3,
+  "siteName": "观澜监控",
+  "publicBaseUrl": "https://monitor.example.com",
+  "timezone": "Asia/Shanghai",
+  "email": {
+    "enabled": false,
+    "host": "",
+    "port": 587,
+    "username": "",
+    "password": null,
+    "clearPassword": false,
+    "from": "",
+    "recipients": "",
+    "auth": true,
+    "startTls": true
+  },
+  "dingtalk": { "enabled": false, "webhookUrl": null, "clearWebhook": false },
+  "wecom": { "enabled": false, "webhookUrl": null, "clearWebhook": false }
 }
 ```
+
+敏感值使用 `null` 或空字符串表示保留当前值，`clearPassword` / `clearWebhook` 用于删除数据库覆盖值。响应只包含 `configured`、`source` 等状态字段。
 
 ## WebSocket
 

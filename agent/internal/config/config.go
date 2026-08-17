@@ -13,27 +13,33 @@ import (
 )
 
 type Config struct {
-	ServerURL          string
-	DeviceID           string
-	AgentKey           string
-	Interval           time.Duration
-	RequestTimeout     time.Duration
-	SpoolDir           string
-	MaxBufferedReports int
-	AllowInsecureHTTP  bool
-	MonitoredServices  []string
+	ServerURL           string
+	DeviceID            string
+	AgentKey            string
+	Interval            time.Duration
+	RequestTimeout      time.Duration
+	SpoolDir            string
+	MaxBufferedReports  int
+	AllowInsecureHTTP   bool
+	MonitoredServices   []string
+	SkipProcesses       bool
+	SkipConnectionCount bool
+	DiskMountpoints     []string
 }
 
 type fileConfig struct {
-	ServerURL          string   `json:"server_url"`
-	DeviceID           string   `json:"device_id"`
-	AgentKey           string   `json:"agent_key"`
-	Interval           string   `json:"interval"`
-	RequestTimeout     string   `json:"request_timeout"`
-	SpoolDir           string   `json:"spool_dir"`
-	MaxBufferedReports int      `json:"max_buffered_reports"`
-	AllowInsecureHTTP  bool     `json:"allow_insecure_http"`
-	MonitoredServices  []string `json:"monitored_services"`
+	ServerURL           string   `json:"server_url"`
+	DeviceID            string   `json:"device_id"`
+	AgentKey            string   `json:"agent_key"`
+	Interval            string   `json:"interval"`
+	RequestTimeout      string   `json:"request_timeout"`
+	SpoolDir            string   `json:"spool_dir"`
+	MaxBufferedReports  int      `json:"max_buffered_reports"`
+	AllowInsecureHTTP   bool     `json:"allow_insecure_http"`
+	MonitoredServices   []string `json:"monitored_services"`
+	SkipProcesses       bool     `json:"skip_process_collection"`
+	SkipConnectionCount bool     `json:"skip_connection_count"`
+	DiskMountpoints     []string `json:"disk_mountpoints"`
 }
 
 func Load(args []string) (Config, error) {
@@ -70,17 +76,37 @@ func Load(args []string) (Config, error) {
 	}
 
 	cfg := Config{
-		ServerURL:          strings.TrimRight(strings.TrimSpace(file.ServerURL), "/"),
-		DeviceID:           strings.TrimSpace(file.DeviceID),
-		AgentKey:           strings.TrimSpace(file.AgentKey),
-		Interval:           interval,
-		RequestTimeout:     timeout,
-		SpoolDir:           spoolDir,
-		MaxBufferedReports: maxBuffered,
-		AllowInsecureHTTP:  file.AllowInsecureHTTP,
-		MonitoredServices:  file.MonitoredServices,
+		ServerURL:           strings.TrimRight(strings.TrimSpace(file.ServerURL), "/"),
+		DeviceID:            strings.TrimSpace(file.DeviceID),
+		AgentKey:            strings.TrimSpace(file.AgentKey),
+		Interval:            interval,
+		RequestTimeout:      timeout,
+		SpoolDir:            spoolDir,
+		MaxBufferedReports:  maxBuffered,
+		AllowInsecureHTTP:   file.AllowInsecureHTTP,
+		MonitoredServices:   file.MonitoredServices,
+		SkipProcesses:       file.SkipProcesses,
+		SkipConnectionCount: file.SkipConnectionCount,
+		DiskMountpoints:     cleanList(file.DiskMountpoints),
 	}
 	return cfg, cfg.Validate()
+}
+
+func cleanList(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func (c Config) Validate() error {

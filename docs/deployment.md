@@ -15,11 +15,12 @@
 Copy-Item .env.example .env
 ```
 
-为 `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD` 和 `BOOTSTRAP_ADMIN_PASSWORD` 设置互不相同的强随机值。生产环境还应设置：
+为 `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD` 和 `BOOTSTRAP_ADMIN_PASSWORD` 设置互不相同的强随机值。`SETTINGS_ENCRYPTION_KEY` 必须是 Base64 编码的 32 字节随机值，可使用 `openssl rand -base64 32` 生成。生产环境还应设置：
 
 ```dotenv
 SESSION_COOKIE_SECURE=true
 ALLOWED_ORIGINS=https://monitor.example.com
+PUBLIC_BASE_URL=https://monitor.example.com
 ```
 
 不要提交 `.env`。启动服务：
@@ -57,9 +58,13 @@ sudo --preserve-env=GUANLAN_AGENT_KEY ./deploy/install-agent.sh \
   --server-url https://monitor.example.com \
   --device-id '<设备ID>' \
   --interval 3s \
+  --disk / \
+  --disk /data \
   --service nginx \
   --service mysql
 ```
+
+低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。不传 `--disk` 时采集全部可用分区。
 
 使用预编译二进制时添加 `--binary /path/to/guanlan-agent`。安装结果：
 
@@ -85,8 +90,11 @@ $env:GUANLAN_AGENT_KEY = '<一次性密钥>'
   -ServerUrl 'https://monitor.example.com' `
   -DeviceId '<设备ID>' `
   -Interval '3s' `
+  -DiskMountpoint 'C:\','D:\' `
   -MonitoredService 'W3SVC','MSSQLSERVER'
 ```
+
+轻量采集可添加 `-SkipProcesses -SkipConnections`；不传 `-DiskMountpoint` 时采集全部可用分区。
 
 使用预编译程序时添加 `-BinaryPath 'C:\staging\guanlan-agent.exe'`。脚本注册自动启动的 `GuanlanAgent` Windows 服务，并将配置写入 `%ProgramData%\GuanlanMonitor\agent.json`，ACL 仅允许 SYSTEM 与管理员访问。
 
@@ -101,7 +109,7 @@ Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Se
 
 ## 通知配置
 
-邮件、钉钉和企业微信通道通过 `.env` 配置。Webhook URL 和 SMTP 密码属于密钥，不会通过 Web 设置页面读取或返回。修改后重建服务端容器：
+邮件、钉钉和企业微信可在 Web 控制台的“系统设置”中启用、编辑和测试。SMTP 密码与 Webhook 写入数据库前使用 AES-256-GCM 加密，页面只显示是否已配置；`.env` 中的值作为未设置数据库覆盖值时的回退。修改环境回退值后重建服务端容器：
 
 ```powershell
 docker compose up -d --force-recreate server
@@ -109,7 +117,7 @@ docker compose up -d --force-recreate server
 
 ## 备份与升级
 
-备份前创建一致性 MySQL 逻辑备份，并保留部署使用的 `.env` 于独立秘密管理系统。Redis 仅用于在线状态加速，不是主要备份目标。
+备份前创建一致性 MySQL 逻辑备份，并将部署使用的 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，保存在独立秘密管理系统。Redis 仅用于在线状态加速，不是主要备份目标。
 
 ```powershell
 docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump -umonitor monitor' > monitor-backup.sql

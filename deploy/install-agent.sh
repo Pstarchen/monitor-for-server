@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url URL --device-id ID [--binary PATH] [--interval 1s|3s|10s] [--service NAME]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url URL --device-id ID [--binary PATH] [--interval 1s|3s|10s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -11,6 +11,9 @@ agent_key="${GUANLAN_AGENT_KEY:-}"
 binary_path=""
 interval="3s"
 services=()
+disks=()
+skip_processes=false
+skip_connections=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -19,6 +22,9 @@ while [[ $# -gt 0 ]]; do
     --binary) binary_path="${2:-}"; shift 2 ;;
     --interval) interval="${2:-}"; shift 2 ;;
     --service) services+=("${2:-}"); shift 2 ;;
+    --disk) disks+=("${2:-}"); shift 2 ;;
+    --skip-processes) skip_processes=true; shift ;;
+    --skip-connections) skip_connections=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -76,9 +82,15 @@ for service in "${services[@]}"; do
   service_json+="\"$(json_escape "${service}")\""
 done
 
+disk_json=""
+for mountpoint in "${disks[@]}"; do
+  [[ -n "${disk_json}" ]] && disk_json+=","
+  disk_json+="\"$(json_escape "${mountpoint}")\""
+done
+
 config_tmp="${temp_dir}/agent.json"
-printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "monitored_services": [%s]\n}\n' \
-  "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${service_json}" > "${config_tmp}"
+printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s]\n}\n' \
+  "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" > "${config_tmp}"
 install -o guanlan-agent -g guanlan-agent -m 0600 "${config_tmp}" /etc/guanlan-agent/agent.json
 
 unit_tmp="${temp_dir}/guanlan-agent.service"

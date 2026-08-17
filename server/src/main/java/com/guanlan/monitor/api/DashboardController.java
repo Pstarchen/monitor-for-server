@@ -28,7 +28,8 @@ public class DashboardController {
     @GetMapping
     DashboardView get() {
         List<DeviceDtos.View> devices = deviceService.list();
-        List<DeviceDtos.View> measured = devices.stream().filter(device -> device.latest() != null).toList();
+        List<DeviceDtos.View> measured = devices.stream()
+                .filter(device -> device.status() == Device.Status.ONLINE && device.latest() != null).toList();
         List<DeviceDtos.View> top = measured.stream()
                 .sorted(Comparator.comparingDouble((DeviceDtos.View device) -> device.latest().cpuUsage()).reversed())
                 .limit(5).toList();
@@ -36,9 +37,12 @@ public class DashboardController {
                 deviceRepository.count(),
                 deviceRepository.countByStatus(Device.Status.ONLINE),
                 deviceRepository.countByStatus(Device.Status.OFFLINE),
+                deviceRepository.countByStatus(Device.Status.PENDING),
                 alertRepository.countByStatusIn(List.of(AlertEvent.Status.OPEN, AlertEvent.Status.ACKNOWLEDGED)),
                 average(measured, "cpu"), average(measured, "memory"), average(measured, "disk"),
-                top, alertService.listEvents(6)
+                measured.stream().mapToDouble(device -> device.latest().networkSentBps()).sum(),
+                measured.stream().mapToDouble(device -> device.latest().networkRecvBps()).sum(),
+                devices, top, alertService.listEvents(6)
         );
     }
 
@@ -51,9 +55,9 @@ public class DashboardController {
     }
 
     public record DashboardView(
-            long totalDevices, long onlineDevices, long offlineDevices, long activeAlerts,
+            long totalDevices, long onlineDevices, long offlineDevices, long pendingDevices, long activeAlerts,
             double averageCpu, double averageMemory, double averageDisk,
-            List<DeviceDtos.View> topDevices, List<AlertDtos.EventView> recentAlerts
+            double networkSentBps, double networkRecvBps,
+            List<DeviceDtos.View> devices, List<DeviceDtos.View> topDevices, List<AlertDtos.EventView> recentAlerts
     ) {}
 }
-

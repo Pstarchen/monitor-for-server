@@ -31,7 +31,12 @@ func main() {
 	}
 
 	client := api.NewClient(cfg.ServerURL, cfg.DeviceID, cfg.AgentKey, cfg.RequestTimeout)
-	metrics := collector.New(cfg.MonitoredServices)
+	metrics := collector.New(collector.Options{
+		MonitoredServices:   cfg.MonitoredServices,
+		SkipProcesses:       cfg.SkipProcesses,
+		SkipConnectionCount: cfg.SkipConnectionCount,
+		DiskMountpoints:     cfg.DiskMountpoints,
+	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

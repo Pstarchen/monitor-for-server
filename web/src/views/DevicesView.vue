@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Copy, KeyRound, Pencil, Plus, RefreshCw, Search, Server, Trash2 } from 'lucide-vue-next'
+import { Copy, KeyRound, Pencil, Plus, RefreshCw, Search, Server, Terminal, Trash2 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -10,7 +10,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { percent, relativeTime } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth'
-import type { Device, DeviceCredential, DeviceStatus } from '@/types'
+import type { AgentBootstrap, Device, DeviceCredential, DeviceStatus } from '@/types'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -23,6 +23,11 @@ const dialog = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
 const credential = ref<DeviceCredential | null>(null)
+const credentialPlatform = ref<'linux' | 'windows'>('linux')
+const agentServerUrl = ref(window.location.origin)
+const collectionSeconds = ref(3)
+const lightweight = ref(false)
+const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '' })
 let refreshTimer = 0
 
@@ -31,6 +36,21 @@ const filtered = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return devices.value.filter((device) => (!status.value || device.status === status.value)
     && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName].some((value) => value?.toLowerCase().includes(needle))))
+})
+const installCommand = computed(() => {
+  if (!credential.value) return ''
+  const url = agentServerUrl.value.trim().replace(/\/$/, '')
+  const disks = diskMountpoints.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean)
+  if (credentialPlatform.value === 'windows') {
+    const diskArgs = disks.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
+    const lightArgs = lightweight.value ? ' -SkipProcesses -SkipConnections' : ''
+    return `$env:GUANLAN_AGENT_KEY = '${powerShellQuote(credential.value.agentKey)}'\n` +
+      `.\\deploy\\install-agent.ps1 -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
+  }
+  const diskArgs = disks.map((value) => ` --disk '${shellQuote(value)}'`).join('')
+  const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
+  return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
+    `sudo --preserve-env=GUANLAN_AGENT_KEY ./deploy/install-agent.sh --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
 })
 
 async function load(background = false) {
@@ -43,6 +63,23 @@ async function load(background = false) {
   } finally {
     loading.value = false
   }
+}
+
+async function loadAgentBootstrap() {
+  try {
+    const data = (await api.get<AgentBootstrap>('/settings/agent-bootstrap')).data
+    if (data.publicBaseUrl) agentServerUrl.value = data.publicBaseUrl
+    if ([1, 3, 10, 30, 60].includes(data.defaultCollectionSeconds)) collectionSeconds.value = data.defaultCollectionSeconds
+  } catch {
+    // Viewers cannot create credentials; operators still fall back to the current origin on older servers.
+  }
+}
+
+function showCredential(value: DeviceCredential) {
+  credential.value = value
+  credentialPlatform.value = 'linux'
+  lightweight.value = false
+  diskMountpoints.value = ''
 }
 
 function openCreate() {
@@ -69,7 +106,7 @@ async function save() {
       await api.put(`/devices/${editingId.value}`, payload)
       ElMessage.success('设备信息已更新')
     } else {
-      credential.value = (await api.post<DeviceCredential>('/devices', payload)).data
+      showCredential((await api.post<DeviceCredential>('/devices', payload)).data)
     }
     dialog.value = false
     await load(true)
@@ -83,7 +120,7 @@ async function save() {
 async function rotateKey(device: Device) {
   try {
     await ElMessageBox.confirm(`轮换后，设备“${device.name}”使用的旧密钥会立即失效。`, '轮换 Agent 密钥', { type: 'warning', confirmButtonText: '确认轮换', cancelButtonText: '取消' })
-    credential.value = (await api.post<DeviceCredential>(`/devices/${device.id}/rotate-key`)).data
+    showCredential((await api.post<DeviceCredential>(`/devices/${device.id}/rotate-key`)).data)
     await load(true)
   } catch (cause) {
     if (cause !== 'cancel' && cause !== 'close') ElMessage.error(errorMessage(cause))
@@ -111,6 +148,23 @@ async function copyKey() {
   }
 }
 
+async function copyInstallCommand() {
+  try {
+    await navigator.clipboard.writeText(installCommand.value)
+    ElMessage.success('安装命令已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择命令')
+  }
+}
+
+function shellQuote(value: string) {
+  return value.split("'").join("'\"'\"'")
+}
+
+function powerShellQuote(value: string) {
+  return value.split("'").join("''")
+}
+
 function scheduleRefresh() {
   window.clearTimeout(refreshTimer)
   refreshTimer = window.setTimeout(() => load(true), 400)
@@ -118,6 +172,7 @@ function scheduleRefresh() {
 
 onMounted(() => {
   load()
+  loadAgentBootstrap()
   window.addEventListener('guanlan:realtime', scheduleRefresh)
 })
 onBeforeUnmount(() => {
@@ -183,12 +238,26 @@ onBeforeUnmount(() => {
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ editingId ? '保存修改' : '创建设备' }}</el-button></template>
     </el-dialog>
 
-    <el-dialog :model-value="Boolean(credential)" title="保存 Agent 接入凭据" width="min(580px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) credential = null }">
+    <el-dialog :model-value="Boolean(credential)" title="Agent 接入" width="min(720px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) credential = null }">
       <div v-if="credential" class="credential-panel">
         <div class="credential-warning"><KeyRound :size="18" /><p><strong>密钥仅显示这一次</strong><span>关闭窗口后无法再次查看。请立即写入目标服务器的 Agent 配置。</span></p></div>
         <dl><div><dt>设备 ID</dt><dd>{{ credential.device.id }}</dd></div><div><dt>Agent 密钥</dt><dd>{{ credential.agentKey }}</dd></div></dl>
+        <div class="agent-install-options">
+          <el-form label-position="top">
+            <el-form-item label="监控平台地址"><el-input v-model="agentServerUrl" /></el-form-item>
+            <div class="form-grid two-fields">
+              <el-form-item label="采集周期"><el-select v-model="collectionSeconds"><el-option v-for="value in [1, 3, 10, 30, 60]" :key="value" :label="`${value} 秒`" :value="value" /></el-select></el-form-item>
+              <el-form-item label="磁盘白名单"><el-input v-model="diskMountpoints" placeholder="例如：/, /data" /></el-form-item>
+            </div>
+            <el-checkbox v-model="lightweight">轻量采集（跳过进程与 TCP 连接统计）</el-checkbox>
+          </el-form>
+        </div>
+        <el-tabs v-model="credentialPlatform" class="install-tabs">
+          <el-tab-pane label="Linux" name="linux" /><el-tab-pane label="Windows" name="windows" />
+        </el-tabs>
+        <div class="install-command"><Terminal :size="16" /><code>{{ installCommand }}</code><button type="button" title="复制安装命令" aria-label="复制安装命令" @click="copyInstallCommand"><Copy :size="15" /></button></div>
       </div>
-      <template #footer><el-button @click="credential = null">我已保存</el-button><el-button type="primary" @click="copyKey"><Copy :size="16" />复制密钥</el-button></template>
+      <template #footer><el-button @click="credential = null">完成</el-button><el-button @click="copyKey"><KeyRound :size="16" />复制密钥</el-button><el-button type="primary" @click="copyInstallCommand"><Copy :size="16" />复制安装命令</el-button></template>
     </el-dialog>
   </section>
 </template>

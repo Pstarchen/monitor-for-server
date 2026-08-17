@@ -59,11 +59,20 @@ app:
   timezone: ${APP_TIMEZONE:Asia/Shanghai}
   bootstrap-admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
   bootstrap-admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  site-name: ${SITE_NAME:观澜监控}
+  public-base-url: ${PUBLIC_BASE_URL:}
+  settings-encryption-key: ${SETTINGS_ENCRYPTION_KEY:}
   metric-retention-days: ${METRIC_RETENTION_DAYS:30}
   device-offline-after-seconds: ${DEVICE_OFFLINE_AFTER_SECONDS:30}
   redis-enabled: ${REDIS_ENABLED:false}
   allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
   notification:
+    smtp-host: ${SMTP_HOST:}
+    smtp-port: ${SMTP_PORT:587}
+    smtp-username: ${SMTP_USERNAME:}
+    smtp-password: ${SMTP_PASSWORD:}
+    smtp-auth: ${SMTP_AUTH:true}
+    smtp-start-tls: ${SMTP_STARTTLS:true}
     email-from: ${ALERT_EMAIL_FROM:}
     email-to: ${ALERT_EMAIL_TO:}
     dingtalk-webhook-url: ${DINGTALK_WEBHOOK_URL:}
@@ -90,4 +99,3 @@ server:
     session:
       cookie:
         secure: ${SESSION_COOKIE_SECURE:false}
-

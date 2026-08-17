@@ -4,7 +4,10 @@ param(
     [Parameter(Mandatory = $true)] [string] $DeviceId,
     [ValidateSet('1s', '3s', '10s')] [string] $Interval = '3s',
     [string] $BinaryPath,
-    [string[]] $MonitoredService = @()
+    [string[]] $MonitoredService = @(),
+    [string[]] $DiskMountpoint = @(),
+    [switch] $SkipProcesses,
+    [switch] $SkipConnections
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,6 +68,9 @@ try {
         max_buffered_reports = 10000
         allow_insecure_http = $false
         monitored_services = $MonitoredService
+        skip_process_collection = $SkipProcesses.IsPresent
+        skip_connection_count = $SkipConnections.IsPresent
+        disk_mountpoints = $DiskMountpoint
     }
     $config | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath -Encoding UTF8
     & icacls.exe $configPath /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)' | Out-Null

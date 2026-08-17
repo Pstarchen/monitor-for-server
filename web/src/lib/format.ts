@@ -19,6 +19,16 @@ export function rate(value: number | null | undefined): string {
   return `${bytes(value)}/s`
 }
 
+export function uptime(value: number | null | undefined): string {
+  const seconds = Math.max(0, Math.floor(Number(value ?? 0)))
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return `${days} 天 ${hours} 小时`
+  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`
+  return `${minutes} 分钟`
+}
+
 export function dateTime(value: string | null | undefined): string {
   if (!value) return '--'
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value))
@@ -37,4 +47,3 @@ export function safeLocalPath(value: unknown): string {
   if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('://')) return '/dashboard'
   return value
 }
-

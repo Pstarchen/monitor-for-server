@@ -111,21 +111,55 @@ export interface Dashboard {
   totalDevices: number
   onlineDevices: number
   offlineDevices: number
+  pendingDevices: number
   activeAlerts: number
   averageCpu: number
   averageMemory: number
   averageDisk: number
+  networkSentBps: number
+  networkRecvBps: number
+  devices: Device[]
   topDevices: Device[]
   recentAlerts: AlertEvent[]
+}
+
+export interface EmailSettings {
+  enabled: boolean
+  configured: boolean
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE'
+  host: string
+  port: number
+  username: string
+  from: string
+  recipients: string
+  auth: boolean
+  startTls: boolean
+  passwordConfigured: boolean
+}
+
+export interface WebhookSettings {
+  enabled: boolean
+  configured: boolean
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE'
+  webhookConfigured: boolean
 }
 
 export interface Settings {
   metricRetentionDays: number
   deviceOfflineAfterSeconds: number
   defaultCollectionSeconds: number
-  emailConfigured: boolean
-  dingtalkConfigured: boolean
-  wecomConfigured: boolean
+  siteName: string
+  publicBaseUrl: string
+  timezone: string
+  secretStorageReady: boolean
+  email: EmailSettings
+  dingtalk: WebhookSettings
+  wecom: WebhookSettings
+}
+
+export interface AgentBootstrap {
+  publicBaseUrl: string
+  defaultCollectionSeconds: number
 }
 
 export interface AuditLog {

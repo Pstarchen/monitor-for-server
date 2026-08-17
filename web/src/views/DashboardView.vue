@@ -1,22 +1,52 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Activity, BellRing, Cpu, HardDrive, MemoryStick, RefreshCw, Server } from 'lucide-vue-next'
+import {
+  Activity, ArrowDown, ArrowUp, BellRing, Clock3, Cpu, HardDrive,
+  MapPin, MemoryStick, RefreshCw, Search, Server, WifiOff,
+} from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
-import { dateTime, percent, relativeTime } from '@/lib/format'
-import type { Dashboard } from '@/types'
+import { dateTime, percent, rate, relativeTime, uptime } from '@/lib/format'
+import type { Dashboard, Device, DeviceStatus } from '@/types'
+
+type SortKey = 'attention' | 'cpu' | 'memory' | 'disk' | 'name'
 
 const router = useRouter()
 const dashboard = ref<Dashboard | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
+const search = ref('')
+const status = ref<DeviceStatus | ''>('')
+const group = ref('')
+const sort = ref<SortKey>('attention')
 let refreshTimer = 0
+
+const groups = computed(() => Array.from(new Set(
+  (dashboard.value?.devices ?? []).map((device) => device.groupName).filter((value): value is string => Boolean(value)),
+)).sort((left, right) => left.localeCompare(right, 'zh-CN')))
+
+const filteredDevices = computed(() => {
+  const needle = search.value.trim().toLowerCase()
+  const statusRank: Record<DeviceStatus, number> = { OFFLINE: 0, PENDING: 1, ONLINE: 2 }
+  return (dashboard.value?.devices ?? [])
+    .filter((device) => (!status.value || device.status === status.value)
+      && (!group.value || device.groupName === group.value)
+      && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName, device.os]
+        .some((value) => value?.toLowerCase().includes(needle))))
+    .slice()
+    .sort((left, right) => {
+      if (sort.value === 'name') return left.name.localeCompare(right.name, 'zh-CN')
+      if (sort.value === 'attention') return statusRank[left.status] - statusRank[right.status]
+        || metric(right, 'cpuUsage') - metric(left, 'cpuUsage')
+      return metric(right, `${sort.value}Usage`) - metric(left, `${sort.value}Usage`)
+    })
+})
 
 async function load(background = false) {
   if (background) refreshing.value = true
@@ -30,6 +60,23 @@ async function load(background = false) {
     loading.value = false
     refreshing.value = false
   }
+}
+
+function metric(device: Device, key: 'cpuUsage' | 'memoryUsage' | 'diskUsage') {
+  return device.latest?.[key] ?? 0
+}
+
+function progressTone(value: number) {
+  if (value >= 90) return 'critical'
+  if (value >= 75) return 'warning'
+  return 'normal'
+}
+
+function uptimeSeconds(device: Device) {
+  const host = device.hardware?.host
+  if (!host || typeof host !== 'object') return 0
+  const value = (host as Record<string, unknown>).uptimeSeconds
+  return typeof value === 'number' ? value : Number(value ?? 0)
 }
 
 function scheduleRefresh() {
@@ -49,7 +96,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <PageHeader eyebrow="MONITORING OVERVIEW" title="运行总览" description="汇总当前设备可用性、资源水位与需要处理的告警。">
+    <PageHeader eyebrow="MONITORING OVERVIEW" title="运行总览" description="查看全部节点的在线状态、实时吞吐与资源负载。">
       <template #actions>
         <el-button class="button-press" :loading="refreshing" @click="load(true)"><RefreshCw :size="16" />刷新</el-button>
       </template>
@@ -61,42 +108,67 @@ onBeforeUnmount(() => {
     </div>
     <template v-else-if="dashboard">
       <div class="metrics-grid stagger-grid">
-        <MetricCard label="设备总数" :value="dashboard.totalDevices" hint="已登记的监控节点" tone="info"><template #icon><Server :size="17" /></template></MetricCard>
+        <MetricCard label="设备总数" :value="dashboard.totalDevices" :hint="`${dashboard.pendingDevices} 台等待接入`" tone="info"><template #icon><Server :size="17" /></template></MetricCard>
         <MetricCard label="在线设备" :value="dashboard.onlineDevices" :hint="`${dashboard.offlineDevices} 台离线`" :tone="dashboard.offlineDevices ? 'warning' : 'success'"><template #icon><Activity :size="17" /></template></MetricCard>
         <MetricCard label="活动告警" :value="dashboard.activeAlerts" hint="待处理与已确认" :tone="dashboard.activeAlerts ? 'danger' : 'success'"><template #icon><BellRing :size="17" /></template></MetricCard>
-        <MetricCard label="平均 CPU" :value="percent(dashboard.averageCpu)" :hint="`内存 ${percent(dashboard.averageMemory)}`" :tone="dashboard.averageCpu >= 80 ? 'danger' : 'neutral'"><template #icon><Cpu :size="17" /></template></MetricCard>
+        <MetricCard label="实时下行" :value="rate(dashboard.networkRecvBps)" :hint="`上行 ${rate(dashboard.networkSentBps)}`" tone="neutral"><template #icon><ArrowDown :size="17" /></template></MetricCard>
       </div>
 
-      <div class="section two-column">
-        <article class="panel">
-          <div class="panel-head"><div><h2>高负载设备</h2><p>按最新 CPU 使用率排序</p></div><Cpu :size="17" /></div>
-          <div v-if="dashboard.topDevices.length" class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>设备</th><th>状态</th><th>CPU</th><th>内存</th><th>磁盘</th><th>最近上报</th></tr></thead>
-              <tbody>
-                <tr v-for="device in dashboard.topDevices" :key="device.id" class="clickable-row" tabindex="0" @click="router.push(`/devices/${device.id}`)" @keydown.enter="router.push(`/devices/${device.id}`)">
-                  <td><strong>{{ device.name }}</strong><small>{{ device.primaryIp || device.hostname || '--' }}</small></td>
-                  <td><StatusBadge :status="device.status" /></td>
-                  <td><span class="usage-value" :data-level="(device.latest?.cpuUsage ?? 0) >= 80 ? 'high' : 'normal'">{{ percent(device.latest?.cpuUsage) }}</span></td>
-                  <td>{{ percent(device.latest?.memoryUsage) }}</td>
-                  <td>{{ percent(device.latest?.diskUsage) }}</td>
-                  <td>{{ relativeTime(device.lastSeenAt) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <EmptyState v-else title="暂无监控样本" description="Agent 上报首个指标后，这里会显示资源负载排行。" />
-        </article>
-
-        <article class="panel">
-          <div class="panel-head"><div><h2>资源水位</h2><p>全部在线设备的最新均值</p></div><MemoryStick :size="17" /></div>
-          <div class="watermark-list">
-            <div><span><Cpu :size="15" />CPU</span><strong>{{ percent(dashboard.averageCpu) }}</strong><el-progress :percentage="Math.round(dashboard.averageCpu)" :show-text="false" :stroke-width="7" /></div>
-            <div><span><MemoryStick :size="15" />内存</span><strong>{{ percent(dashboard.averageMemory) }}</strong><el-progress :percentage="Math.round(dashboard.averageMemory)" :show-text="false" :stroke-width="7" /></div>
-            <div><span><HardDrive :size="15" />磁盘</span><strong>{{ percent(dashboard.averageDisk) }}</strong><el-progress :percentage="Math.round(dashboard.averageDisk)" :show-text="false" :stroke-width="7" /></div>
-          </div>
-        </article>
+      <div class="resource-overview fade-in-up">
+        <div><span><Cpu :size="15" />平均 CPU</span><strong>{{ percent(dashboard.averageCpu) }}</strong><i><b :data-level="progressTone(dashboard.averageCpu)" :style="{ width: `${Math.min(100, dashboard.averageCpu)}%` }" /></i></div>
+        <div><span><MemoryStick :size="15" />平均内存</span><strong>{{ percent(dashboard.averageMemory) }}</strong><i><b :data-level="progressTone(dashboard.averageMemory)" :style="{ width: `${Math.min(100, dashboard.averageMemory)}%` }" /></i></div>
+        <div><span><HardDrive :size="15" />平均磁盘</span><strong>{{ percent(dashboard.averageDisk) }}</strong><i><b :data-level="progressTone(dashboard.averageDisk)" :style="{ width: `${Math.min(100, dashboard.averageDisk)}%` }" /></i></div>
       </div>
+
+      <section class="section">
+        <div class="section-heading">
+          <div><h2>全部服务器</h2><p>离线与待接入节点优先展示，点击卡片查看详细指标</p></div>
+          <span class="filter-count">{{ filteredDevices.length }} / {{ dashboard.devices?.length ?? 0 }} 台设备</span>
+        </div>
+        <div class="dashboard-filter-bar">
+          <el-input v-model="search" clearable class="search-input" placeholder="搜索设备、IP、系统或位置"><template #prefix><Search :size="15" /></template></el-input>
+          <el-select v-model="status" clearable placeholder="全部状态" class="compact-select">
+            <el-option label="在线" value="ONLINE" /><el-option label="离线" value="OFFLINE" /><el-option label="待接入" value="PENDING" />
+          </el-select>
+          <el-select v-model="group" clearable placeholder="全部分组" class="compact-select">
+            <el-option v-for="item in groups" :key="item" :label="item" :value="item" />
+          </el-select>
+          <el-select v-model="sort" class="sort-select" aria-label="设备排序">
+            <el-option label="异常优先" value="attention" /><el-option label="CPU 从高到低" value="cpu" />
+            <el-option label="内存从高到低" value="memory" /><el-option label="磁盘从高到低" value="disk" /><el-option label="按名称" value="name" />
+          </el-select>
+        </div>
+
+        <div v-if="filteredDevices.length" class="server-grid stagger-grid">
+          <article v-for="device in filteredDevices" :key="device.id" class="server-card" :data-status="device.status" tabindex="0" @click="router.push(`/devices/${device.id}`)" @keydown.enter="router.push(`/devices/${device.id}`)">
+            <header>
+              <span class="server-icon"><Server v-if="device.status !== 'OFFLINE'" :size="18" /><WifiOff v-else :size="18" /></span>
+              <span class="server-identity"><strong>{{ device.name }}</strong><small>{{ device.primaryIp || device.hostname || '等待 Agent 接入' }}</small></span>
+              <StatusBadge :status="device.status" />
+            </header>
+            <div class="server-meta">
+              <span><MapPin :size="13" />{{ device.groupName || '未分组' }} · {{ device.location || '未设置位置' }}</span>
+              <span><Clock3 :size="13" />{{ device.status === 'ONLINE' ? `运行 ${uptime(uptimeSeconds(device))}` : relativeTime(device.lastSeenAt) }}</span>
+            </div>
+            <div class="server-resources">
+              <div v-for="item in [
+                { label: 'CPU', value: metric(device, 'cpuUsage') },
+                { label: '内存', value: metric(device, 'memoryUsage') },
+                { label: '磁盘', value: metric(device, 'diskUsage') },
+              ]" :key="item.label">
+                <span>{{ item.label }}</span><strong>{{ device.latest ? percent(item.value) : '--' }}</strong>
+                <i><b :data-level="progressTone(item.value)" :style="{ width: `${device.latest ? Math.min(100, item.value) : 0}%` }" /></i>
+              </div>
+            </div>
+            <footer>
+              <span><ArrowDown :size="13" />{{ device.latest ? rate(device.latest.networkRecvBps) : '--' }}</span>
+              <span><ArrowUp :size="13" />{{ device.latest ? rate(device.latest.networkSentBps) : '--' }}</span>
+              <span class="server-os">{{ device.os || device.architecture || '系统待识别' }}</span>
+            </footer>
+          </article>
+        </div>
+        <div v-else class="panel"><EmptyState title="没有匹配的服务器" description="调整搜索词或筛选条件后重试。" /></div>
+      </section>
 
       <section class="section">
         <div class="section-heading"><div><h2>最近告警</h2><p>最近触发或恢复的事件</p></div><el-button text @click="router.push('/alerts')">查看全部</el-button></div>

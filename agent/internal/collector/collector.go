@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -29,13 +30,22 @@ type ioSample struct {
 }
 
 type Collector struct {
-	services []string
+	options  Options
 	mu       sync.Mutex
 	previous ioSample
 }
 
-func New(services []string) *Collector {
-	return &Collector{services: append([]string(nil), services...)}
+type Options struct {
+	MonitoredServices   []string
+	SkipProcesses       bool
+	SkipConnectionCount bool
+	DiskMountpoints     []string
+}
+
+func New(options Options) *Collector {
+	options.MonitoredServices = append([]string(nil), options.MonitoredServices...)
+	options.DiskMountpoints = append([]string(nil), options.DiskMountpoints...)
+	return &Collector{options: options}
 }
 
 func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
@@ -52,8 +62,8 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	disks, diskRead, diskWrite := collectDisks(ctx)
-	network, netSent, netRecv := collectNetwork(ctx)
+	disks, diskRead, diskWrite := collectDisks(ctx, c.options.DiskMountpoints)
+	network, netSent, netRecv := collectNetwork(ctx, c.options.SkipConnectionCount)
 
 	c.mu.Lock()
 	previous := c.previous
@@ -74,6 +84,10 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		}
 	}
 
+	processes := make([]model.ProcessStats, 0)
+	if !c.options.SkipProcesses {
+		processes = collectProcesses(ctx, 12)
+	}
 	return model.Report{
 		CollectedAt: now,
 		Host:        hostInfo,
@@ -81,8 +95,8 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		Memory:      memory,
 		Disks:       disks,
 		Network:     network,
-		Processes:   collectProcesses(ctx, 12),
-		Services:    collectServices(ctx, c.services),
+		Processes:   processes,
+		Services:    collectServices(ctx, c.options.MonitoredServices),
 	}, nil
 }
 
@@ -144,11 +158,14 @@ func collectMemory(ctx context.Context) (model.MemoryStats, error) {
 	return result, nil
 }
 
-func collectDisks(ctx context.Context) ([]model.DiskStats, uint64, uint64) {
+func collectDisks(ctx context.Context, allowlist []string) ([]model.DiskStats, uint64, uint64) {
 	partitions, _ := disk.PartitionsWithContext(ctx, false)
 	result := make([]model.DiskStats, 0, len(partitions))
 	seen := make(map[string]struct{})
 	for _, partition := range partitions {
+		if !allowedMountpoint(partition.Mountpoint, allowlist) {
+			continue
+		}
 		if _, exists := seen[partition.Mountpoint]; exists {
 			continue
 		}
@@ -171,14 +188,31 @@ func collectDisks(ctx context.Context) ([]model.DiskStats, uint64, uint64) {
 	return result, readBytes, writeBytes
 }
 
-func collectNetwork(ctx context.Context) (model.NetworkStats, uint64, uint64) {
+func collectNetwork(ctx context.Context, skipConnectionCount bool) (model.NetworkStats, uint64, uint64) {
 	counters, _ := netstat.IOCountersWithContext(ctx, false)
-	connections, _ := netstat.ConnectionsWithContext(ctx, "tcp")
-	result := model.NetworkStats{TCPConnections: len(connections)}
+	result := model.NetworkStats{}
+	if !skipConnectionCount {
+		connections, _ := netstat.ConnectionsWithContext(ctx, "tcp")
+		result.TCPConnections = len(connections)
+	}
 	if len(counters) == 0 {
 		return result, 0, 0
 	}
 	return result, counters[0].BytesSent, counters[0].BytesRecv
+}
+
+func allowedMountpoint(mountpoint string, allowlist []string) bool {
+	if len(allowlist) == 0 {
+		return true
+	}
+	cleaned := filepath.Clean(mountpoint)
+	for _, allowed := range allowlist {
+		candidate := filepath.Clean(allowed)
+		if cleaned == candidate || (runtime.GOOS == "windows" && strings.EqualFold(cleaned, candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 func collectProcesses(ctx context.Context, limit int) []model.ProcessStats {
