@@ -120,6 +120,10 @@ func (s *setupService) status(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *setupService) testDatabase(w http.ResponseWriter, r *http.Request) {
+	if configuredEnv() {
+		writeError(w, http.StatusConflict, "系统已经完成安装")
+		return
+	}
 	var request databaseTestRequest
 	if err := decodeJSON(r, &request); err != nil {
 		writeError(w, http.StatusBadRequest, "数据库连接信息格式不正确")
