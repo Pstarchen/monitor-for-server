@@ -61,7 +61,7 @@ docker compose logs --tail 100 server
 
 Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。生产环境应在其前方配置 Caddy、Nginx、Traefik 或云负载均衡器终止 TLS，并将流量转发到 `WEB_PORT`。入口必须：
 
-- 透传 `Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
+    - 透传 `Host`、`X-Forwarded-Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
 - 为 `/ws/` 开启 WebSocket Upgrade。
 - 仅允许公网访问 Web 入口，不发布 MySQL、Redis 和 Spring Boot 端口。
 - 配合 `SESSION_COOKIE_SECURE=true` 和精确的 HTTPS `ALLOWED_ORIGINS`。
