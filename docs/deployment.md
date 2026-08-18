@@ -24,7 +24,7 @@ Linux 使用：
 bash ./deploy/install-controller.sh
 ```
 
-安装器会先询问 MySQL 管理地址、端口、管理账号和密码，测试连接后创建目标数据库、应用用户并授予目标库权限；然后询问容器连接地址和应用密码，最后收集 Web、站点和管理员配置。MySQL 管理密码只在安装器进程中使用，不会写入 `.env`。发现已有同名库或用户时会停止，避免覆盖数据。安装器还会生成 `BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。
+安装器会询问 MySQL 管理地址、端口、管理账号和密码，测试连接后继续收集容器连接地址、应用密码以及 Web、站点和管理员配置；全部校验通过后才创建目标数据库、应用用户并授予目标库权限。MySQL 管理密码只在安装器进程中使用，不会写入 `.env`。发现已有同名库或用户时会停止，避免覆盖数据。安装器还会生成 `BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。
 
 生产环境生成的配置至少包含：
 
