@@ -2,7 +2,7 @@
 
 ## 范围
 
-观澜监控由 Go Agent、Spring Boot 服务端、Vue 3 Web 控制台、MySQL 与 Redis 组成。本仓库不包含鸿蒙 APP；移动浏览器通过响应式 Web 控制台访问相同能力。
+观澜监控由 Go Agent、Spring Boot 服务端、Vue 3 Web 控制台、外部 MySQL 与 Redis 组成。本仓库不包含鸿蒙 APP；移动浏览器通过响应式 Web 控制台访问相同能力。
 
 ```mermaid
 flowchart LR
@@ -67,4 +67,4 @@ flowchart LR
 - SMTP 密码和机器人 Webhook 可从环境变量回退，或以 AES-256-GCM 密文保存；设置 API 永不返回明文。
 - `SETTINGS_ENCRYPTION_KEY` 必须独立保管并随数据库备份保存，丢失后数据库中的通知凭据无法恢复。
 - 生产环境必须在 Web 网关前终止 TLS，并设置 `SESSION_COOKIE_SECURE=true` 与精确的 `ALLOWED_ORIGINS`。
-- 数据库与 Redis 仅位于 Docker 内部网络，不在 Compose 中发布宿主机端口。
+- Redis 仅位于 Docker 内部网络，不在 Compose 中发布宿主机端口；外部 MySQL 的监听与防火墙由部署者管理。

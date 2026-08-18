@@ -5,6 +5,7 @@
 ## 前置条件
 
 - Docker Engine 24+ 与 Docker Compose v2。
+- 外部 MySQL 8.0+；总终端 Compose 不再携带 MySQL 容器，安装向导只写入用户提供的连接信息。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
 - 每台被监控主机具备 systemd 或 Windows 服务管理权限。
 - 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
@@ -23,7 +24,7 @@ Linux 使用：
 bash ./deploy/install-controller.sh
 ```
 
-安装器会明确生成 `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。
+安装器会询问外部 `DB_URL`、`DB_USERNAME` 和数据库密码，并生成 `BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。运行前先按[总终端材料](controller-server.md)创建数据库和账号。
 
 生产环境生成的配置至少包含：
 
@@ -132,10 +133,10 @@ docker compose up -d --force-recreate server
 备份前创建一致性 MySQL 逻辑备份，并将部署使用的 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，保存在独立秘密管理系统。Redis 仅用于在线状态加速，不是主要备份目标。
 
 ```powershell
-docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump -umonitor monitor' > monitor-backup.sql
+mysqldump --defaults-extra-file=/secure/monitor-mysqldump.cnf monitor > monitor-backup.sql
 ```
 
-密码只在数据库容器内部从环境变量读取，不会展开到宿主机命令。升级步骤：
+数据库密码只通过 `.env` 注入服务端，不会展开到宿主机命令输出。升级步骤：
 
 ```powershell
 docker compose build --pull server web

@@ -1,12 +1,26 @@
 # 总终端服务器搭建材料
 
-总终端服务器是运行 Web 控制台、Spring Boot API、MySQL 和 Redis 的那台机器。被监控服务器只需要运行 Agent，不需要安装 Java、MySQL 或 Node.js。
+总终端服务器是运行 Web 控制台、Spring Boot API 和 Redis 的那台机器，并连接用户自行准备的外部 MySQL。被监控服务器只需要运行 Agent，不需要安装 Java、MySQL 或 Node.js。
 
 ## 必备材料
 
 - Docker Engine 24+ 和 Docker Compose v2。
+- 外部 MySQL 8.0+ 实例，并提前创建独立数据库和最小权限账号；总终端不会安装、初始化或覆盖 MySQL。
 - 一个生产域名及 TLS 证书。公网只暴露 Web 入口，MySQL、Redis 和 Spring Boot 端口保持内网。若先用 IP 初始化，必须显式启用临时 HTTP，完成宝塔反向代理和 HTTPS 后立即关闭。
-- 独立保存的 `.env`，尤其是 `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` 和 `SETTINGS_ENCRYPTION_KEY`。
+- 独立保存的 `.env`，尤其是 `DB_URL`、`DB_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` 和 `SETTINGS_ENCRYPTION_KEY`。
+
+### 准备外部 MySQL
+
+在 MySQL 管理端执行（按实际密码和来源网段调整）：
+
+```sql
+CREATE DATABASE monitor CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'monitor'@'%' IDENTIFIED BY '<数据库密码>';
+GRANT ALL PRIVILEGES ON monitor.* TO 'monitor'@'%';
+FLUSH PRIVILEGES;
+```
+
+生产环境建议把 `'%'` 收窄为总终端服务器的固定来源地址，并通过防火墙限制 3306；若 MySQL 与总终端同机，JDBC 地址使用 `127.0.0.1`。
 
 ## 首次部署
 
@@ -28,7 +42,7 @@ cd /path/to/monitor-for-server
 bash ./deploy/install-controller.sh
 ```
 
-安装器会逐项询问公网入口、Web 来源、站点名称、管理员、时区、端口和 Web 绑定地址，自动生成数据库密码与设置加密密钥，先执行 `docker compose config --quiet`，通过后才构建启动。它不会读取或覆盖隐式默认配置；已有 `.env` 时会停止，只有显式传入 `--overwrite` / `-Overwrite` 才会备份后重建。绑定地址填 `0.0.0.0` 可用 IP 直连，填 `127.0.0.1` 可限制为宝塔本机反代。
+安装器会逐项询问外部 MySQL JDBC URL、数据库账号、公网入口、Web 来源、站点名称、管理员、时区、端口和 Web 绑定地址，自动生成设置加密密钥，先执行 `docker compose config --quiet`，通过后才构建启动。它不会读取或覆盖隐式默认配置，也不会创建或修改数据库；已有 `.env` 时会停止，只有显式传入 `--overwrite` / `-Overwrite` 才会备份后重建。绑定地址填 `0.0.0.0` 可用 IP 直连，填 `127.0.0.1` 可限制为宝塔本机反代。
 
 生产环境生成的 `.env` 至少包含：
 
@@ -57,13 +71,13 @@ TLS 在 Caddy、Nginx、Traefik、宝塔或云负载均衡器终止，并转发�
 
 ## 更新与修改信息
 
-1. 先备份 MySQL，并保留当前 `.env` 和设置加密密钥。
+1. 先备份外部 MySQL，并保留当前 `.env` 和设置加密密钥。
 2. 拉取新版本后执行 `docker compose build --pull server web`。
 3. 执行 `docker compose up -d`，Flyway 会自动运行数据库迁移。
 4. 在“系统设置”修改站点名、入口 URL、采集周期、离线阈值和通知配置；敏感值会加密存储。
 
 ```powershell
-docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump -umonitor monitor' > monitor-backup.sql
+mysqldump --defaults-extra-file=/secure/monitor-mysqldump.cnf monitor > monitor-backup.sql
 docker compose up -d
 ```
 
