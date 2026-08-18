@@ -43,7 +43,7 @@ ask_secret() {
   local label="$1" value=""
   while [[ ${#value} -lt 12 ]]; do
     read -r -s -p "${label} (至少 12 位): " value
-    echo
+    echo >&2
   done
   printf '%s' "${value}"
 }
