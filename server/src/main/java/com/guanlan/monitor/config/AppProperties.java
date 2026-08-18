@@ -15,6 +15,7 @@ public class AppProperties {
     private String bootstrapAdminPassword;
     private String siteName = "观澜监控";
     private String publicBaseUrl = "";
+    private boolean allowInsecureHttp;
     private String settingsEncryptionKey;
     private int metricRetentionDays = 30;
     private int deviceOfflineAfterSeconds = 30;

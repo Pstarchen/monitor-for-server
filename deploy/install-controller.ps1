@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch] $Overwrite,
-    [switch] $AllowLocalHttp
+    [switch] $AllowLocalHttp,
+    [switch] $AllowInsecureHttp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,10 +44,13 @@ function New-Base64Secret {
 }
 
 $publicBaseUrl = Read-Required '公网入口 URL（HTTPS）'
-$uri = [Uri]$publicBaseUrl
+try { $uri = [Uri]$publicBaseUrl } catch { throw '公网入口 URL 格式无效。' }
 $localHttp = $uri.Scheme -eq 'http' -and @('localhost', '127.0.0.1', '::1') -contains $uri.Host
-if ([string]::IsNullOrWhiteSpace($uri.Host) -or $uri.Query -or $uri.Fragment -or ($uri.Scheme -ne 'https' -and -not ($AllowLocalHttp -and $localHttp))) {
-    throw '公网入口必须是 HTTPS；本地测试可使用 -AllowLocalHttp。'
+if ([string]::IsNullOrWhiteSpace($uri.Host) -or $uri.Query -or $uri.Fragment -or ($uri.Scheme -ne 'https' -and -not (($AllowInsecureHttp -and $uri.Scheme -eq 'http') -or ($AllowLocalHttp -and $localHttp)))) {
+    throw '公网入口必须是 HTTPS；临时 IP/HTTP 初始化请使用 -AllowInsecureHttp。'
+}
+if ($AllowInsecureHttp -and $uri.Scheme -eq 'http' -and -not $localHttp) {
+    Write-Warning '当前使用明文 HTTP，仅限初始化。绑定 HTTPS 域名后必须更新 .env 并重建 server。'
 }
 $allowedOrigins = Read-Required 'Web 来源（通常与公网入口相同）'
 $siteName = Read-Required '站点名称'
@@ -54,6 +58,8 @@ $adminUsername = Read-Required '初始管理员用户名'
 $timezone = Read-Required '服务时区（例如 Asia/Shanghai）'
 $webPort = Read-Required 'Web 端口（1-65535）'
 if ($webPort -notmatch '^[0-9]+$' -or [int]$webPort -lt 1 -or [int]$webPort -gt 65535) { throw 'Web 端口无效。' }
+$webBindAddress = Read-Required 'Web 绑定地址（0.0.0.0 允许 IP 直连；127.0.0.1 仅供宝塔反代）'
+if ($webBindAddress -notin @('0.0.0.0', '127.0.0.1', 'localhost', '::1')) { throw 'Web 绑定地址只支持 0.0.0.0、127.0.0.1、localhost 或 ::1。' }
 $adminPassword = Read-Secret '初始管理员密码'
 $adminPasswordConfirm = Read-Secret '再次输入初始管理员密码'
 if ($adminPassword -cne $adminPasswordConfirm) { throw '两次管理员密码不一致。' }
@@ -69,10 +75,12 @@ $secureLines = @(
     "BOOTSTRAP_ADMIN_PASSWORD=$adminPassword"
     "SETTINGS_ENCRYPTION_KEY=$settingsKey"
     "WEB_PORT=$webPort"
+    "WEB_BIND_ADDRESS=$webBindAddress"
     "APP_TIMEZONE=$timezone"
     "SITE_NAME=$siteName"
     "PUBLIC_BASE_URL=$publicBaseUrl"
     "SESSION_COOKIE_SECURE=$($uri.Scheme -eq 'https')"
+    "ALLOW_INSECURE_HTTP=$($uri.Scheme -eq 'http')"
     "ALLOWED_ORIGINS=$allowedOrigins"
     'METRIC_RETENTION_DAYS=30'
     'DEVICE_OFFLINE_AFTER_SECONDS=30'

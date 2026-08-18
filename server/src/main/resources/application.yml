@@ -61,6 +61,7 @@ app:
   bootstrap-admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
   site-name: ${SITE_NAME:观澜监控}
   public-base-url: ${PUBLIC_BASE_URL:}
+  allow-insecure-http: ${ALLOW_INSECURE_HTTP:false}
   settings-encryption-key: ${SETTINGS_ENCRYPTION_KEY:}
   metric-retention-days: ${METRIC_RETENTION_DAYS:30}
   device-offline-after-seconds: ${DEVICE_OFFLINE_AFTER_SECONDS:30}

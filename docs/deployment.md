@@ -5,7 +5,7 @@
 ## 前置条件
 
 - Docker Engine 24+ 与 Docker Compose v2。
-- 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。
+- 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
 - 每台被监控主机具备 systemd 或 Windows 服务管理权限。
 - 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
 
@@ -51,6 +51,8 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 - 为 `/ws/` 开启 WebSocket Upgrade。
 - 仅允许公网访问 Web 入口，不发布 MySQL、Redis 和 Spring Boot 端口。
 - 配合 `SESSION_COOKIE_SECURE=true` 和精确的 HTTPS `ALLOWED_ORIGINS`。
+
+宝塔反向代理可将 `http://127.0.0.1:<WEB_PORT>` 作为目标，并开启 WebSocket。域名证书生效后，将 `.env` 中的 `PUBLIC_BASE_URL`、`ALLOWED_ORIGINS` 改为 `https://monitor.xciy.cn`，把 `SESSION_COOKIE_SECURE=true`、`ALLOW_INSECURE_HTTP=false`，然后重建 `server web`。
 
 ## 创建设备
 

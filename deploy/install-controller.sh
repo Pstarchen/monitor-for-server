@@ -2,15 +2,17 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--overwrite] [--allow-local-http]"
+  echo "Usage: $0 [--overwrite] [--allow-local-http] [--allow-insecure-http]"
 }
 
 overwrite=false
 allow_local_http=false
+allow_insecure_http=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --overwrite) overwrite=true; shift ;;
     --allow-local-http) allow_local_http=true; shift ;;
+    --allow-insecure-http) allow_insecure_http=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -54,8 +56,12 @@ random_hex() { openssl rand -hex 32 | tr -d '\n'; }
 
 public_base_url="$(ask '公网入口 URL（HTTPS）')"
 if [[ ! "${public_base_url}" =~ ^https://[^/?#[:space:]]+(/[^?#[:space:]]*)?$ ]]; then
-  if [[ "${allow_local_http}" != true || ! "${public_base_url}" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/[^?#[:space:]]*)?$ ]]; then
-    echo "公网入口必须是 HTTPS；本地测试可使用 --allow-local-http。" >&2
+  if [[ "${allow_insecure_http}" == true && "${public_base_url}" =~ ^http://[^/?#[:space:]]+(:[0-9]+)?(/[^?#[:space:]]*)?$ ]]; then
+    echo "警告：当前使用明文 HTTP，仅限初始化。绑定 HTTPS 域名后必须更新 .env 并重建 server。" >&2
+  elif [[ "${allow_local_http}" == true && "${public_base_url}" =~ ^http://(localhost|127\.0\.0\.1)(:[0-9]+)?(/[^?#[:space:]]*)?$ ]]; then
+    :
+  else
+    echo "公网入口必须是 HTTPS；临时 IP/HTTP 初始化请使用 --allow-insecure-http。" >&2
     exit 2
   fi
 fi
@@ -66,6 +72,11 @@ timezone="$(ask '服务时区（例如 Asia/Shanghai）')"
 web_port="$(ask 'Web 端口（1-65535）')"
 if [[ ! "${web_port}" =~ ^[0-9]+$ ]] || (( web_port < 1 || web_port > 65535 )); then
   echo "Web 端口无效。" >&2
+  exit 2
+fi
+web_bind_address="$(ask 'Web 绑定地址（0.0.0.0 允许 IP 直连；127.0.0.1 仅供宝塔反代）')"
+if [[ ! "${web_bind_address}" =~ ^(0\.0\.0\.0|127\.0\.0\.1|localhost|::1)$ ]]; then
+  echo "Web 绑定地址只支持 0.0.0.0、127.0.0.1、localhost 或 ::1。" >&2
   exit 2
 fi
 admin_password="$(ask_secret '初始管理员密码')"
@@ -89,10 +100,12 @@ BOOTSTRAP_ADMIN_USERNAME=${admin_username}
 BOOTSTRAP_ADMIN_PASSWORD=${admin_password}
 SETTINGS_ENCRYPTION_KEY=${settings_key}
 WEB_PORT=${web_port}
+WEB_BIND_ADDRESS=${web_bind_address}
 APP_TIMEZONE=${timezone}
 SITE_NAME=${site_name}
 PUBLIC_BASE_URL=${public_base_url}
 SESSION_COOKIE_SECURE=$([[ "${public_base_url}" == https://* ]] && echo true || echo false)
+ALLOW_INSECURE_HTTP=$([[ "${public_base_url}" == http://* ]] && echo true || echo false)
 ALLOWED_ORIGINS=${allowed_origins}
 METRIC_RETENTION_DAYS=30
 DEVICE_OFFLINE_AFTER_SECONDS=30

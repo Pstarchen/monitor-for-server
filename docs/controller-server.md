@@ -5,7 +5,7 @@
 ## 必备材料
 
 - Docker Engine 24+ 和 Docker Compose v2。
-- 一个生产域名及 TLS 证书。公网只暴露 Web 入口，MySQL、Redis 和 Spring Boot 端口保持内网。
+- 一个生产域名及 TLS 证书。公网只暴露 Web 入口，MySQL、Redis 和 Spring Boot 端口保持内网。若先用 IP 初始化，必须显式启用临时 HTTP，完成宝塔反向代理和 HTTPS 后立即关闭。
 - 独立保存的 `.env`，尤其是 `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` 和 `SETTINGS_ENCRYPTION_KEY`。
 
 ## 首次部署
@@ -15,6 +15,12 @@ Set-Location <项目目录>
 powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
 ```
 
+IP 临时初始化（登录密码会经过明文 HTTP，仅用于首次部署）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1 -AllowInsecureHttp
+```
+
 Linux 总终端运行：
 
 ```bash
@@ -22,7 +28,7 @@ cd /path/to/monitor-for-server
 bash ./deploy/install-controller.sh
 ```
 
-安装器会逐项询问公网入口、Web 来源、站点名称、管理员、时区和端口，自动生成数据库密码与设置加密密钥，先执行 `docker compose config --quiet`，通过后才构建启动。它不会读取或覆盖隐式默认配置；已有 `.env` 时会停止，只有显式传入 `--overwrite` / `-Overwrite` 才会备份后重建。
+安装器会逐项询问公网入口、Web 来源、站点名称、管理员、时区、端口和 Web 绑定地址，自动生成数据库密码与设置加密密钥，先执行 `docker compose config --quiet`，通过后才构建启动。它不会读取或覆盖隐式默认配置；已有 `.env` 时会停止，只有显式传入 `--overwrite` / `-Overwrite` 才会备份后重建。绑定地址填 `0.0.0.0` 可用 IP 直连，填 `127.0.0.1` 可限制为宝塔本机反代。
 
 生产环境生成的 `.env` 至少包含：
 
@@ -30,7 +36,11 @@ bash ./deploy/install-controller.sh
 SESSION_COOKIE_SECURE=true
 ALLOWED_ORIGINS=https://monitor.example.com
 PUBLIC_BASE_URL=https://monitor.example.com
+WEB_BIND_ADDRESS=127.0.0.1
+ALLOW_INSECURE_HTTP=false
 ```
+
+使用 IP 临时部署时，安装器会生成 `ALLOW_INSECURE_HTTP=true` 和 `SESSION_COOKIE_SECURE=false`。宝塔反代和证书生效后，把 `PUBLIC_BASE_URL`、`ALLOWED_ORIGINS` 改为 `https://monitor.xciy.cn`，将 `SESSION_COOKIE_SECURE` 和 `ALLOW_INSECURE_HTTP` 分别改为 `true`、`false`，再执行 `docker compose up -d --force-recreate server web`。
 
 未完成安装时，Compose 会因为关键变量缺失而直接失败，不会静默使用 `localhost` 或不安全 Cookie 默认值。安装器完成后检查：
 
@@ -43,7 +53,7 @@ docker compose logs --tail 100 server
 
 ## 网关要求
 
-TLS 在 Caddy、Nginx、Traefik 或云负载均衡器终止，并转发到 Web 容器的 `WEB_PORT`。必须透传 `Host`、`X-Forwarded-For`、`X-Forwarded-Proto`，并为 `/ws/` 转发 Upgrade/Connection 头。鸿蒙端和浏览器都应使用同一个 HTTPS 域名。
+TLS 在 Caddy、Nginx、Traefik、宝塔或云负载均衡器终止，并转发到 Web 容器的 `WEB_PORT`。宝塔目标建议为 `http://127.0.0.1:<WEB_PORT>`；必须透传 `Host`、`X-Forwarded-For`、`X-Forwarded-Proto`，并为 `/ws/` 转发 Upgrade/Connection 头。鸿蒙端和浏览器都应使用同一个 HTTPS 域名。
 
 ## 更新与修改信息
 

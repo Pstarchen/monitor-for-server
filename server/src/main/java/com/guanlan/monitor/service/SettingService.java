@@ -181,7 +181,8 @@ public class SettingService {
             URI uri = URI.create(value.trim());
             boolean localHttp = "http".equalsIgnoreCase(uri.getScheme())
                     && Set.of("localhost", "127.0.0.1", "::1").contains(uri.getHost());
-            if (uri.getHost() == null || (!"https".equalsIgnoreCase(uri.getScheme()) && !localHttp)
+            boolean insecureHttp = "http".equalsIgnoreCase(uri.getScheme()) && properties.isAllowInsecureHttp();
+            if (uri.getHost() == null || (!("https".equalsIgnoreCase(uri.getScheme()) || insecureHttp) && !localHttp)
                     || uri.getQuery() != null || uri.getFragment() != null) {
                 throw new IllegalArgumentException();
             }

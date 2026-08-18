@@ -52,6 +52,7 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:?APP_TIMEZONE is required}
       SITE_NAME: ${SITE_NAME:?SITE_NAME is required}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
+      ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:?ALLOW_INSECURE_HTTP is required}
       METRIC_RETENTION_DAYS: ${METRIC_RETENTION_DAYS:?METRIC_RETENTION_DAYS is required}
       DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:?DEVICE_OFFLINE_AFTER_SECONDS is required}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:?SESSION_COOKIE_SECURE is required}
@@ -83,7 +84,7 @@ services:
       context: ./web
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:?WEB_PORT is required}:80"
+      - "${WEB_BIND_ADDRESS:?WEB_BIND_ADDRESS is required}:${WEB_PORT:?WEB_PORT is required}:80"
     depends_on:
       server:
         condition: service_healthy
