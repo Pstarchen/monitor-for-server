@@ -9,8 +9,7 @@ import (
 
 func validSetupRequest() setupRequest {
 	return setupRequest{
-		MySQLAdminHost: "host.docker.internal", MySQLAdminPort: 3306, MySQLAdminUsername: "root", MySQLAdminPassword: "admin-password",
-		MySQLAppHost: "host.docker.internal", MySQLAppPort: 3306, DatabaseName: "monitor", AppUsername: "monitor", AppPassword: "application-password", AppPasswordConfirm: "application-password",
+		MySQLHost: "host.docker.internal", MySQLPort: 3306, DatabaseName: "monitor", MySQLUsername: "monitor", MySQLPassword: "database-password",
 		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "观澜监控", Timezone: "Asia/Shanghai", WebPort: 18080, WebBindAddress: "127.0.0.1",
 		AdminUsername: "admin", AdminPassword: "administrator-password", AdminPasswordConfirm: "administrator-password",
 	}
@@ -32,6 +31,13 @@ func TestValidateDatabaseTestRequiresTargetDatabase(t *testing.T) {
 	request := databaseTestRequest{Host: "127.0.0.1", Port: 3306, Username: "root", Password: "secret"}
 	if err := validateDatabaseTest(request); err == nil {
 		t.Fatal("database connection test accepted an empty target database")
+	}
+}
+
+func TestSplitSQLStatementsRemovesComments(t *testing.T) {
+	statements := splitSQLStatements("-- first table\nCREATE TABLE one (id INT);\n\nCREATE TABLE two (id INT);")
+	if len(statements) != 2 || statements[0] != "CREATE TABLE one (id INT)" || statements[1] != "CREATE TABLE two (id INT)" {
+		t.Fatalf("splitSQLStatements() = %#v", statements)
 	}
 }
 

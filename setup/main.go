@@ -54,16 +54,11 @@ type databaseTestRequest struct {
 }
 
 type setupRequest struct {
-	MySQLAdminHost       string `json:"mysqlAdminHost"`
-	MySQLAdminPort       int    `json:"mysqlAdminPort"`
-	MySQLAdminUsername   string `json:"mysqlAdminUsername"`
-	MySQLAdminPassword   string `json:"mysqlAdminPassword"`
-	MySQLAppHost         string `json:"mysqlAppHost"`
-	MySQLAppPort         int    `json:"mysqlAppPort"`
+	MySQLHost            string `json:"mysqlHost"`
+	MySQLPort            int    `json:"mysqlPort"`
 	DatabaseName         string `json:"databaseName"`
-	AppUsername          string `json:"appUsername"`
-	AppPassword          string `json:"appPassword"`
-	AppPasswordConfirm   string `json:"appPasswordConfirm"`
+	MySQLUsername        string `json:"mysqlUsername"`
+	MySQLPassword        string `json:"mysqlPassword"`
 	PublicBaseURL        string `json:"publicBaseUrl"`
 	AllowedOrigins       string `json:"allowedOrigins"`
 	SiteName             string `json:"siteName"`
@@ -136,22 +131,17 @@ func (s *setupService) testDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	db, err := openMySQL(ctx, request.Host, request.Port, request.Username, request.Password, "")
+	db, err := openMySQL(ctx, request.Host, request.Port, request.Username, request.Password, request.DatabaseName)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "无法连接 MySQL，请检查地址、端口、账号、密码和防火墙")
+		writeError(w, http.StatusBadRequest, "无法连接 MySQL 或打开目标数据库，请检查地址、端口、数据库名、账号、密码和防火墙")
 		return
 	}
 	defer db.Close()
-	var databaseExists int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", request.DatabaseName).Scan(&databaseExists); err != nil {
-		writeError(w, http.StatusBadRequest, "MySQL 已连接，但无法检查目标数据库，请确认账号具有元数据读取权限")
+	if err := initializeMySQLSchema(ctx, db); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if databaseExists != 0 {
-		writeError(w, http.StatusConflict, fmt.Sprintf("MySQL 管理连接成功，但数据库 %s 已存在，请换一个未使用的数据库名", request.DatabaseName))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "MySQL 管理连接成功，目标数据库可创建"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "MySQL 连接和表结构初始化通过"})
 }
 
 func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +169,19 @@ func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
 	s.lastErr = ""
 	s.mu.Unlock()
 
-	if err := provisionDatabase(r.Context(), request); err != nil {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	db, err := openMySQL(ctx, request.MySQLHost, request.MySQLPort, request.MySQLUsername, request.MySQLPassword, request.DatabaseName)
+	if err != nil {
+		s.mu.Lock()
+		s.applying = false
+		s.lastErr = "无法连接 MySQL 或打开目标数据库"
+		s.mu.Unlock()
+		writeError(w, http.StatusBadRequest, "无法连接 MySQL 或打开目标数据库，请检查安装信息")
+		return
+	}
+	if err := initializeMySQLSchema(ctx, db); err != nil {
+		db.Close()
 		s.mu.Lock()
 		s.applying = false
 		s.lastErr = err.Error()
@@ -187,6 +189,7 @@ func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	db.Close()
 
 	if err := writeEnvironment(request); err != nil {
 		s.mu.Lock()
@@ -201,7 +204,7 @@ func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
 	s.baseURL = request.PublicBaseURL
 	s.mu.Unlock()
 	go s.applyCompose()
-	writeJSON(w, http.StatusAccepted, setupStatus{State: "applying", Message: "数据库和配置已完成，正在重建服务", BaseURL: request.PublicBaseURL})
+	writeJSON(w, http.StatusAccepted, setupStatus{State: "applying", Message: "数据库表结构和配置已完成，正在重建服务", BaseURL: request.PublicBaseURL})
 }
 
 func (s *setupService) applyCompose() {
@@ -223,49 +226,98 @@ func (s *setupService) applyCompose() {
 	s.mu.Unlock()
 }
 
-func provisionDatabase(ctx context.Context, request setupRequest) error {
-	db, err := openMySQL(ctx, request.MySQLAdminHost, request.MySQLAdminPort, request.MySQLAdminUsername, request.MySQLAdminPassword, "")
+var requiredSchemaTables = []string{"app_users", "devices", "metric_snapshots", "alert_rules", "alert_events", "system_settings", "audit_logs"}
+
+func initializeMySQLSchema(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'")
 	if err != nil {
-		return errors.New("无法连接 MySQL，请检查管理地址、端口、账号、密码和防火墙")
+		return errors.New("MySQL 已连接，但无法读取目标数据库表结构，请确认账号具有建表权限")
 	}
-	defer db.Close()
-
-	var databaseExists int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", request.DatabaseName).Scan(&databaseExists); err != nil {
-		return errors.New("无法检查目标数据库，请确认管理账号具有元数据读取权限")
+	defer rows.Close()
+	tables := make(map[string]bool)
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			return errors.New("读取目标数据库表结构失败")
+		}
+		tables[tableName] = true
 	}
-	if databaseExists != 0 {
-		return fmt.Errorf("数据库 %s 已存在，为避免覆盖数据安装已停止", request.DatabaseName)
+	if err := rows.Err(); err != nil {
+		return errors.New("读取目标数据库表结构失败")
 	}
-	var userExists int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mysql.user WHERE User = ?", request.AppUsername).Scan(&userExists); err != nil {
-		return errors.New("无法检查应用用户，请确认管理账号具有用户读取权限")
+	if len(tables) == 0 {
+		schemaPath := filepath.Join(workspace, "server", "src", "main", "resources", "db", "migration", "V1__initial_schema.sql")
+		contents, err := os.ReadFile(schemaPath)
+		if err != nil {
+			return errors.New("找不到服务端数据库表结构文件，请重新部署完整项目")
+		}
+		for _, statement := range splitSQLStatements(string(contents)) {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				return errors.New("数据库表结构初始化失败，请确认 MySQL 账号具有建表和索引权限")
+			}
+		}
+		return ensureFlywayBaseline(ctx, db)
 	}
-	if userExists != 0 {
-		return fmt.Errorf("应用用户 %s 已存在，为避免修改账号安装已停止", request.AppUsername)
-	}
-
-	databaseIdentifier := quoteIdentifier(request.DatabaseName)
-	userLiteral := quoteLiteral(request.AppUsername)
-	passwordLiteral := quoteLiteral(request.AppPassword)
-	statements := []string{
-		fmt.Sprintf("CREATE DATABASE %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", databaseIdentifier),
-		fmt.Sprintf("CREATE USER %s@'%%' IDENTIFIED BY %s", userLiteral, passwordLiteral),
-		fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO %s@'%%'", databaseIdentifier, userLiteral),
-		"FLUSH PRIVILEGES",
-	}
-	for _, statement := range statements {
-		if _, err := db.ExecContext(ctx, statement); err != nil {
-			return errors.New("创建数据库或应用用户失败，请检查 MySQL 管理权限")
+	for _, tableName := range requiredSchemaTables {
+		if !tables[tableName] {
+			return errors.New("目标数据库已有不完整表结构，请使用空数据库或先完成数据库迁移")
 		}
 	}
+	return ensureFlywayBaseline(ctx, db)
+}
 
-	appDB, err := openMySQL(ctx, request.MySQLAppHost, request.MySQLAppPort, request.AppUsername, request.AppPassword, request.DatabaseName)
-	if err != nil {
-		return errors.New("数据库已创建，但应用连接测试失败，请检查容器连接地址和 MySQL 监听配置")
+func ensureFlywayBaseline(ctx context.Context, db *sql.DB) error {
+	var tableCount int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'flyway_schema_history'").Scan(&tableCount); err != nil {
+		return errors.New("无法检查 Flyway 迁移记录，请确认 MySQL 账号具有建表权限")
 	}
-	defer appDB.Close()
+	if tableCount == 0 {
+		const createHistoryTable = `CREATE TABLE flyway_schema_history (
+            installed_rank INT NOT NULL,
+            version VARCHAR(50),
+            description VARCHAR(200) NOT NULL,
+            type VARCHAR(20) NOT NULL,
+            script VARCHAR(1000) NOT NULL,
+            checksum INT,
+            installed_by VARCHAR(100) NOT NULL,
+            installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time INT NOT NULL,
+            success BOOLEAN NOT NULL,
+            PRIMARY KEY (installed_rank)
+        ) ENGINE=InnoDB`
+		if _, err := db.ExecContext(ctx, createHistoryTable); err != nil {
+			return errors.New("无法创建 Flyway 迁移记录表，请确认 MySQL 账号具有建表权限")
+		}
+	}
+	var migrationCount int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM flyway_schema_history").Scan(&migrationCount); err != nil {
+		return errors.New("无法读取 Flyway 迁移记录")
+	}
+	if migrationCount == 0 {
+		if _, err := db.ExecContext(ctx, `INSERT INTO flyway_schema_history
+            (installed_rank, version, description, type, script, checksum, installed_by, execution_time, success)
+            VALUES (1, '1', '<< Flyway Baseline >>', 'BASELINE', '<< Flyway Baseline >>', NULL, CURRENT_USER(), 0, TRUE)`); err != nil {
+			return errors.New("无法写入 Flyway 初始迁移记录")
+		}
+	}
 	return nil
+}
+
+func splitSQLStatements(contents string) []string {
+	statements := make([]string, 0)
+	for _, raw := range strings.Split(contents, ";") {
+		lines := make([]string, 0)
+		for _, line := range strings.Split(raw, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "--") {
+				continue
+			}
+			lines = append(lines, line)
+		}
+		if statement := strings.TrimSpace(strings.Join(lines, "\n")); statement != "" {
+			statements = append(statements, statement)
+		}
+	}
+	return statements
 }
 
 func openMySQL(ctx context.Context, host string, port int, username, password, database string) (*sql.DB, error) {
@@ -301,9 +353,9 @@ func writeEnvironment(request setupRequest) error {
 	lines := []string{
 		"# Generated by the browser setup wizard. Keep this file private.",
 		"SPRING_PROFILES_ACTIVE=production",
-		"DB_URL=" + dotenvValue(fmt.Sprintf("jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC", request.MySQLAppHost, request.MySQLAppPort, request.DatabaseName)),
-		"DB_USERNAME=" + dotenvValue(request.AppUsername),
-		"DB_PASSWORD=" + dotenvValue(request.AppPassword),
+		"DB_URL=" + dotenvValue(fmt.Sprintf("jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC", request.MySQLHost, request.MySQLPort, request.DatabaseName)),
+		"DB_USERNAME=" + dotenvValue(request.MySQLUsername),
+		"DB_PASSWORD=" + dotenvValue(request.MySQLPassword),
 		"BOOTSTRAP_ADMIN_USERNAME=" + dotenvValue(request.AdminUsername),
 		"BOOTSTRAP_ADMIN_PASSWORD=" + dotenvValue(request.AdminPassword),
 		"SETTINGS_ENCRYPTION_KEY=" + dotenvValue(settingsKey),
@@ -395,26 +447,14 @@ func validateDatabaseTest(request databaseTestRequest) error {
 		return errors.New("数据库名必须以字母开头，只能包含字母、数字和下划线")
 	}
 	if strings.TrimSpace(request.Username) == "" || request.Password == "" {
-		return errors.New("请输入 MySQL 管理账号和密码")
+		return errors.New("请输入 MySQL 用户名和密码")
 	}
 	return nil
 }
 
 func validateSetupRequest(request setupRequest) error {
-	if err := validateDatabaseTest(databaseTestRequest{Host: request.MySQLAdminHost, Port: request.MySQLAdminPort, DatabaseName: request.DatabaseName, Username: request.MySQLAdminUsername, Password: request.MySQLAdminPassword}); err != nil {
+	if err := validateDatabaseTest(databaseTestRequest{Host: request.MySQLHost, Port: request.MySQLPort, DatabaseName: request.DatabaseName, Username: request.MySQLUsername, Password: request.MySQLPassword}); err != nil {
 		return err
-	}
-	if err := validateHostPort(request.MySQLAppHost, request.MySQLAppPort); err != nil {
-		return errors.New("容器连接 MySQL 地址或端口无效")
-	}
-	if !identifierPattern.MatchString(request.DatabaseName) {
-		return errors.New("数据库名必须以字母开头，只能包含字母、数字和下划线")
-	}
-	if !identifierPattern.MatchString(request.AppUsername) {
-		return errors.New("应用数据库用户名格式无效")
-	}
-	if len(request.AppPassword) < 12 || request.AppPassword != request.AppPasswordConfirm {
-		return errors.New("应用数据库密码至少 12 位且两次输入必须一致")
 	}
 	if len(request.AdminPassword) < 12 || request.AdminPassword != request.AdminPasswordConfirm {
 		return errors.New("管理员密码至少 12 位且两次输入必须一致")
@@ -444,16 +484,6 @@ func validateHostPort(host string, port int) error {
 		return errors.New("MySQL 地址或端口无效")
 	}
 	return nil
-}
-
-func quoteIdentifier(value string) string {
-	return "`" + strings.ReplaceAll(value, "`", "``") + "`"
-}
-
-func quoteLiteral(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, "'", "''")
-	return "'" + value + "'"
 }
 
 func dotenvValue(value string) string {

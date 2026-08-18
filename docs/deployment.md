@@ -5,7 +5,7 @@
 ## 前置条件
 
 - Docker Engine 24+ 与 Docker Compose v2。
-- 外部 MySQL 8.0+；总终端 Compose 不再携带 MySQL 容器，首次运行网页向导使用用户提供的管理账号创建数据库和应用账号。
+- 外部 MySQL 8.0+；总终端 Compose 不再携带 MySQL 容器，部署前由用户创建空数据库和具备建表权限的账号，首次运行向导负责初始化表结构。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
 - 每台被监控主机具备 systemd 或 Windows 服务管理权限。
 - 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
@@ -25,7 +25,7 @@ docker compose ps
 http://<服务器IP>:18080/setup
 ```
 
-向导第一步要求同时填写 MySQL 地址、端口、目标数据库名、管理用户名和密码，并检测管理连接及目标数据库是否可创建；下一步再设置容器连接地址、应用账号和密码。随后安装器创建数据库和应用账号，写入生产 `.env`，再自动执行 `docker compose up -d --build server web`。管理员账号在生产数据库迁移后由服务端创建。MySQL 管理密码只在安装服务内存中使用，不会写入 `.env`。发现已有同名库或用户时会停止，避免覆盖数据。
+向导第一步要求同时填写 MySQL 地址、端口、目标数据库名、用户名和密码，并检测连接；空数据库会初始化服务端 V1 表结构和 Flyway 初始记录，已有完整表结构则复用。随后向导写入生产 `.env`，再自动执行 `docker compose up -d --build server web`。管理员账号在生产数据库迁移后由服务端创建。数据库账号密码只写入总终端私有配置，不会进入日志。发现不完整表结构时会停止，避免覆盖数据。
 
 无法使用浏览器时，命令行安装器仍然可用：
 
@@ -61,7 +61,7 @@ docker compose logs --tail 100 server
 
 Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。生产环境应在其前方配置 Caddy、Nginx、Traefik 或云负载均衡器终止 TLS，并将流量转发到 `WEB_PORT`。入口必须：
 
-    - 透传 `Host`、`X-Forwarded-Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
+- 透传 `Host`、`X-Forwarded-Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
 - 为 `/ws/` 开启 WebSocket Upgrade。
 - 仅允许公网访问 Web 入口，不发布 MySQL、Redis 和 Spring Boot 端口。
 - 配合 `SESSION_COOKIE_SECURE=true` 和精确的 HTTPS `ALLOWED_ORIGINS`。

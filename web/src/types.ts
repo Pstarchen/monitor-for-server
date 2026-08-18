@@ -179,16 +179,11 @@ export interface SetupStatus {
 }
 
 export interface SetupRequest {
-  mysqlAdminHost: string
-  mysqlAdminPort: number
-  mysqlAdminUsername: string
-  mysqlAdminPassword: string
-  mysqlAppHost: string
-  mysqlAppPort: number
+  mysqlHost: string
+  mysqlPort: number
   databaseName: string
-  appUsername: string
-  appPassword: string
-  appPasswordConfirm: string
+  mysqlUsername: string
+  mysqlPassword: string
   publicBaseUrl: string
   allowedOrigins: string
   siteName: string
