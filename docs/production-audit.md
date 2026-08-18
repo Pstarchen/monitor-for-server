@@ -37,8 +37,11 @@
 - `go vet ./...`
 - PowerShell 安装器语法解析
 - `git diff --check`
+- 显式外部 MySQL 变量的 `docker compose config --quiet`
+- 目标服务器只读环境检查：CentOS Stream 8、Docker 26.1.3、Compose v2.27、宝塔运行状态、监听端口和部署目录
+- 目标服务器安装器 `bash -n` 与代码/文档同步校验
 
-当前环境限制：没有 Maven CLI、Docker daemon 或可用的 GitHub SSH 远端，因此 Spring Boot 集成测试、Compose 实际启动和远端推送仍需在具备对应凭据/运行时的环境执行。生产发布前应补跑：
+当前限制：本地没有 Maven CLI；目标服务器的 MySQL 已运行但 root socket 认证拒绝，尚未获得外部 `DB_URL/DB_USERNAME/DB_PASSWORD`，因此服务端容器尚未启动。用户按总终端材料准备数据库后，应在目标服务器补跑：
 
 ```powershell
 mvn -q test
@@ -46,5 +49,3 @@ docker compose config
 docker compose up --build -d
 docker compose ps
 ```
-
-若 GitHub 地址仍使用 `git@github.com/monitor-for-server.git`，需要先提供有效的仓库 owner；当前仓库配置的远端是 `git@github.com:Pstarchen/monitor-for-server.git`。
