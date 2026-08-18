@@ -20,7 +20,7 @@ GRANT ALL PRIVILEGES ON monitor.* TO 'monitor'@'%';
 FLUSH PRIVILEGES;
 ```
 
-生产环境建议把 `'%'` 收窄为总终端服务器的固定来源地址，并通过防火墙限制 3306；若 MySQL 与总终端同机，JDBC 地址使用 `127.0.0.1`。
+生产环境建议把 `'%'` 收窄为 Docker 网桥的实际来源网段，并通过防火墙限制 3306；若 MySQL 与总终端同机，JDBC 地址使用 `host.docker.internal`（Compose 已映射到宿主机），不要填容器内的 `127.0.0.1`。
 
 ## 首次部署
 

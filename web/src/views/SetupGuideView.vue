@@ -19,7 +19,7 @@ const updateCommand = computed(() => platform.value === 'linux'
   : 'git pull; docker compose up --build -d')
 
 const steps = [
-  { number: '01', title: '准备总终端主机', description: '准备 Docker Engine 24+、Compose v2 和外部 MySQL 数据库账号。', icon: ServerCog },
+  { number: '01', title: '准备总终端主机', description: '准备 Docker Engine 24+、Compose v2 和外部 MySQL 数据库账号；同机数据库使用 host.docker.internal。', icon: ServerCog },
   { number: '02', title: '运行交互式安装器', description: '安装器会询问数据库连接、入口、站点、时区和管理员信息，并生成私有加密密钥。', icon: Terminal },
   { number: '03', title: '完成首登检查', description: '打开入口登录，确认健康状态，再在设备管理中创建第一台受监控服务器。', icon: CheckCircle2 },
 ]

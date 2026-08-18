@@ -88,7 +88,7 @@ fi
 
 tmp_file="$(mktemp)"
 trap 'rm -f "${tmp_file}"; unset admin_password admin_password_confirm db_password db_password_confirm settings_key' EXIT
-db_url="$(ask '外部 MySQL JDBC URL（例如 jdbc:mysql://127.0.0.1:3306/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC）')"
+db_url="$(ask '外部 MySQL JDBC URL（同机用 host.docker.internal，例如 jdbc:mysql://host.docker.internal:3306/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC）')"
 if [[ ! "${db_url}" =~ ^jdbc:mysql://[^[:space:]]+$ ]]; then
   echo "数据库 URL 必须是 jdbc:mysql:// 开头的 JDBC 地址。" >&2
   exit 2

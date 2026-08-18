@@ -64,7 +64,7 @@ $adminPassword = Read-Secret '初始管理员密码'
 $adminPasswordConfirm = Read-Secret '再次输入初始管理员密码'
 if ($adminPassword -cne $adminPasswordConfirm) { throw '两次管理员密码不一致。' }
 
-$dbUrl = Read-Required '外部 MySQL JDBC URL（例如 jdbc:mysql://127.0.0.1:3306/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC）'
+$dbUrl = Read-Required '外部 MySQL JDBC URL（同机用 host.docker.internal，例如 jdbc:mysql://host.docker.internal:3306/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC）'
 if ($dbUrl -notmatch '^jdbc:mysql://[^\s]+$') { throw '数据库 URL 必须是 jdbc:mysql:// 开头的 JDBC 地址。' }
 $dbUsername = Read-Required '数据库用户名'
 $dbPassword = Read-Secret '数据库密码'

@@ -46,6 +46,8 @@ services:
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
       WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy
