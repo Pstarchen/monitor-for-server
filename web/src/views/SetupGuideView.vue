@@ -11,13 +11,16 @@ const cloneCommand = 'git clone https://github.com/Pstarchen/monitor-for-server.
 const installCommand = computed(() => platform.value === 'linux'
   ? 'bash ./deploy/install-controller.sh'
   : 'powershell -ExecutionPolicy Bypass -File .\\deploy\\install-controller.ps1')
+const temporaryHttpCommand = computed(() => platform.value === 'linux'
+  ? 'bash ./deploy/install-controller.sh --allow-insecure-http'
+  : 'powershell -ExecutionPolicy Bypass -File .\\deploy\\install-controller.ps1 -AllowInsecureHttp')
 const updateCommand = computed(() => platform.value === 'linux'
   ? 'git pull && docker compose up --build -d'
   : 'git pull; docker compose up --build -d')
 
 const steps = [
-  { number: '01', title: '准备总终端主机', description: '准备 Docker Engine 24+、Compose v2、生产域名和 TLS 证书。', icon: ServerCog },
-  { number: '02', title: '运行交互式安装器', description: '安装器会明确询问入口、站点、时区和管理员信息，并自动生成数据库与加密密钥。', icon: Terminal },
+  { number: '01', title: '准备总终端主机', description: '准备 Docker Engine 24+、Compose v2 和外部 MySQL 数据库账号。', icon: ServerCog },
+  { number: '02', title: '运行交互式安装器', description: '安装器会询问数据库连接、入口、站点、时区和管理员信息，并生成私有加密密钥。', icon: Terminal },
   { number: '03', title: '完成首登检查', description: '打开入口登录，确认健康状态，再在设备管理中创建第一台受监控服务器。', icon: CheckCircle2 },
 ]
 
@@ -75,6 +78,8 @@ async function copy(value: string, key: string) {
             <div class="setup-command-row"><code>{{ installCommand }}</code><button type="button" title="复制安装命令" aria-label="复制安装命令" @click="copy(installCommand, 'install')"><Clipboard :size="16" /><span>{{ copied === 'install' ? '已复制' : '复制' }}</span></button></div>
           </div>
           <p class="setup-command-hint">安装器会拒绝覆盖现有 `.env`。需要重做配置时先备份，再显式使用 `--overwrite` 或 `-Overwrite`。</p>
+          <p class="setup-insecure-note"><LockKeyhole :size="15" /><span>暂时没有域名时，只有在确认风险后才使用临时 IP/HTTP 命令。登录密码会经过明文网络；宝塔反代和 HTTPS 生效后必须切换回安全配置。</span></p>
+          <div class="setup-command-row"><code>{{ temporaryHttpCommand }}</code><button type="button" title="复制临时 HTTP 安装命令" aria-label="复制临时 HTTP 安装命令" @click="copy(temporaryHttpCommand, 'temporary')"><Clipboard :size="16" /><span>{{ copied === 'temporary' ? '已复制' : '临时 HTTP' }}</span></button></div>
         </div>
 
         <div class="setup-checklist">

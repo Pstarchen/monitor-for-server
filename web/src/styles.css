@@ -447,6 +447,8 @@ p, h1, h2, h3 { margin: 0; }
 .setup-command-row button, .setup-update-row button { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; padding: 5px 6px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; font-size: 10px; cursor: pointer; }
 .setup-command-row button:hover, .setup-update-row button:hover { color: var(--foreground); background: var(--surface); }
 .setup-command-hint { margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.setup-insecure-note { display: flex; align-items: flex-start; gap: 7px; margin: 14px 0 8px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border)); border-radius: 6px; color: var(--warning); background: var(--warning-bg); font-size: 10px; line-height: 1.55; }
+.setup-insecure-note svg { flex: 0 0 auto; margin-top: 1px; }
 .setup-checklist ul { display: grid; gap: 11px; margin: 18px 0 0; padding: 0; list-style: none; }
 .setup-checklist li { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .setup-checklist li svg { flex: 0 0 auto; margin-top: 1px; color: var(--success); }
