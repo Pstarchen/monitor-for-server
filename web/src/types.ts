@@ -170,3 +170,32 @@ export interface AuditLog {
   summary: string
   createdAt: string
 }
+
+export interface SetupStatus {
+  configured: boolean
+  state: 'ready' | 'applying' | 'configured' | 'error' | 'unavailable'
+  message?: string
+  baseUrl?: string
+}
+
+export interface SetupRequest {
+  mysqlAdminHost: string
+  mysqlAdminPort: number
+  mysqlAdminUsername: string
+  mysqlAdminPassword: string
+  mysqlAppHost: string
+  mysqlAppPort: number
+  databaseName: string
+  appUsername: string
+  appPassword: string
+  appPasswordConfirm: string
+  publicBaseUrl: string
+  allowedOrigins: string
+  siteName: string
+  timezone: string
+  webPort: number
+  webBindAddress: '0.0.0.0' | '127.0.0.1'
+  adminUsername: string
+  adminPassword: string
+  adminPasswordConfirm: string
+}

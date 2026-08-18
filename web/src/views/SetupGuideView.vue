@@ -1,38 +1,136 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Activity, ArrowRight, CheckCircle2, Clipboard, Database, ExternalLink, FileKey2, LockKeyhole, ServerCog, Terminal } from 'lucide-vue-next'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Activity, ArrowLeft, ArrowRight, CheckCircle2, Database, Eye, EyeOff, FileKey2, Globe2, KeyRound, LockKeyhole, ServerCog, ShieldCheck } from 'lucide-vue-next'
+import { api, errorMessage, getSetupStatus, testSetupDatabase } from '@/lib/api'
+import type { SetupRequest, SetupStatus } from '@/types'
 
-type Platform = 'linux' | 'windows'
+const currentStep = ref(0)
+const testingDatabase = ref(false)
+const submitting = ref(false)
+const completed = ref(false)
+const error = ref('')
+const databaseTested = ref(false)
+const reveal = reactive({ adminDatabase: false, appDatabase: false, admin: false })
+const setupStatus = ref<SetupStatus | null>(null)
 
-const platform = ref<Platform>('linux')
-const copied = ref('')
-
-const cloneCommand = 'git clone https://github.com/Pstarchen/monitor-for-server.git'
-const installCommand = computed(() => platform.value === 'linux'
-  ? 'bash ./deploy/install-controller.sh'
-  : 'powershell -ExecutionPolicy Bypass -File .\\deploy\\install-controller.ps1')
-const temporaryHttpCommand = computed(() => platform.value === 'linux'
-  ? 'bash ./deploy/install-controller.sh --allow-insecure-http'
-  : 'powershell -ExecutionPolicy Bypass -File .\\deploy\\install-controller.ps1 -AllowInsecureHttp')
-const updateCommand = computed(() => platform.value === 'linux'
-  ? 'git pull && docker compose up --build -d'
-  : 'git pull; docker compose up --build -d')
+const initialOrigin = window.location.origin === 'http://localhost:5173' ? 'http://localhost:18080' : window.location.origin
+const form = reactive<SetupRequest>({
+  mysqlAdminHost: 'host.docker.internal',
+  mysqlAdminPort: 3306,
+  mysqlAdminUsername: '',
+  mysqlAdminPassword: '',
+  mysqlAppHost: 'host.docker.internal',
+  mysqlAppPort: 3306,
+  databaseName: 'monitor',
+  appUsername: 'monitor',
+  appPassword: '',
+  appPasswordConfirm: '',
+  publicBaseUrl: initialOrigin,
+  allowedOrigins: initialOrigin,
+  siteName: '观澜监控',
+  timezone: 'Asia/Shanghai',
+  webPort: 18080,
+  webBindAddress: '0.0.0.0',
+  adminUsername: 'admin',
+  adminPassword: '',
+  adminPasswordConfirm: '',
+})
 
 const steps = [
-  { number: '01', title: '准备总终端主机', description: '准备 Docker Engine 24+、Compose v2、MySQL 客户端和有建库授权权限的 MySQL 管理账号。', icon: ServerCog },
-  { number: '02', title: '安装器初始化 MySQL', description: '安装器会测试管理连接，创建新的数据库和应用用户并授权；同名对象会被拒绝覆盖。', icon: Database },
-  { number: '03', title: '交接控制台配置', description: '服务启动后打开入口登录。站点、通知、采集策略和受监控设备由你在控制台继续配置。', icon: CheckCircle2 },
+  { title: '连接 MySQL', caption: '管理连接', icon: ServerCog },
+  { title: '创建应用库', caption: '数据库账号', icon: Database },
+  { title: '设置管理员', caption: '站点入口', icon: ShieldCheck },
 ]
+const currentTitle = computed(() => steps[currentStep.value]?.title ?? '完成安装')
 
-async function copy(value: string, key: string) {
+function messageFor(cause: unknown) {
+  error.value = errorMessage(cause)
+}
+
+function validateStep(step: number) {
+  if (step === 0 && (!form.mysqlAdminHost.trim() || !form.mysqlAdminUsername.trim() || !form.mysqlAdminPassword)) {
+    error.value = '请填写 MySQL 管理地址、用户名和密码'
+    return false
+  }
+  if (step === 1 && (!form.databaseName.trim() || !form.appUsername.trim() || form.appPassword.length < 12 || form.appPassword !== form.appPasswordConfirm)) {
+    error.value = '请填写数据库信息，并确认应用密码至少 12 位且两次一致'
+    return false
+  }
+  if (step === 2 && (!form.publicBaseUrl.trim() || !form.allowedOrigins.trim() || !form.siteName.trim() || !form.timezone.trim() || !form.adminUsername.trim() || form.adminPassword.length < 12 || form.adminPassword !== form.adminPasswordConfirm)) {
+    error.value = '请完成站点和管理员信息，并确认管理员密码至少 12 位且两次一致'
+    return false
+  }
+  return true
+}
+
+async function testDatabase() {
+  if (!validateStep(0)) return
+  testingDatabase.value = true
+  error.value = ''
   try {
-    await navigator.clipboard.writeText(value)
-    copied.value = key
-    window.setTimeout(() => { if (copied.value === key) copied.value = '' }, 1600)
-  } catch {
-    copied.value = ''
+    await testSetupDatabase(form)
+    databaseTested.value = true
+    currentStep.value = 1
+  } catch (cause) {
+    messageFor(cause)
+  } finally {
+    testingDatabase.value = false
   }
 }
+
+function nextStep() {
+  error.value = ''
+  if (currentStep.value === 0) return testDatabase()
+  if (!validateStep(currentStep.value)) return
+  if (currentStep.value < 2) currentStep.value += 1
+  else completeSetup()
+}
+
+function previousStep() {
+  error.value = ''
+  if (currentStep.value > 0) currentStep.value -= 1
+}
+
+async function completeSetup() {
+  submitting.value = true
+  error.value = ''
+  try {
+    await api.post<SetupStatus>('/setup/complete', form, { timeout: 60_000 })
+    completed.value = true
+    currentStep.value = 3
+    await waitForService()
+  } catch (cause) {
+    messageFor(cause)
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function waitForService() {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    await new Promise(resolve => window.setTimeout(resolve, 1500))
+    try {
+      const status = await getSetupStatus()
+      setupStatus.value = status
+      if (status.state === 'error') {
+        error.value = status.message ?? '服务重建失败，请检查 Docker 日志'
+        return
+      }
+      if (status.configured) return
+    } catch {
+      // The web container may briefly restart while the production server is recreated.
+    }
+  }
+}
+
+onMounted(async () => {
+  try {
+    setupStatus.value = await getSetupStatus()
+    if (setupStatus.value.configured) completed.value = true
+  } catch {
+    setupStatus.value = { configured: false, state: 'unavailable', message: '安装服务暂不可用' }
+  }
+})
 </script>
 
 <template>
@@ -42,55 +140,96 @@ async function copy(value: string, key: string) {
         <span class="brand-mark"><Activity :size="19" /></span>
         <span><strong>观澜监控</strong><small>PRIVATE OPS</small></span>
       </RouterLink>
-      <div class="setup-topbar-actions">
-        <span class="setup-topbar-label">总终端安装指引</span>
-        <RouterLink class="setup-login-link" to="/login">返回登录 <ArrowRight :size="15" /></RouterLink>
-      </div>
+      <span class="setup-topbar-label">首次运行安装向导</span>
     </header>
 
-    <div class="setup-layout">
+    <div class="setup-layout setup-wizard-layout">
       <aside class="setup-intro">
         <span class="setup-intro-icon"><FileKey2 :size="22" /></span>
-        <p class="eyebrow">CONTROLLER INSTALLATION</p>
-        <h1>把首次部署<br>变成一条清晰路径</h1>
-        <p class="setup-intro-copy">不依赖隐藏的环境默认值。安装器会在本机完成 MySQL 建库与授权，生成私有配置并校验 Compose，然后启动总终端服务。</p>
-        <div class="setup-security-note"><LockKeyhole :size="15" /><span>MySQL 管理密码只用于初始化；`.env` 仅保存应用账号和部署密钥，不会发送到本页面。</span></div>
+        <p class="eyebrow">FIRST-RUN SETUP</p>
+        <h1>先把边界<br>配置清楚</h1>
+        <p class="setup-intro-copy">这是总终端第一次运行时的安装向导。配置会写入服务器本地，完成后才开放登录和监控数据。</p>
+        <div class="setup-security-note"><LockKeyhole :size="15" /><span>MySQL 管理密码只用于本次建库，不会写入配置文件，也不会进入日志。</span></div>
       </aside>
 
-      <section class="setup-workspace" aria-label="安装步骤">
-        <div class="setup-step-list">
-          <article v-for="step in steps" :key="step.number" class="setup-step">
-            <span class="setup-step-number">{{ step.number }}</span>
-            <span class="setup-step-icon"><component :is="step.icon" :size="17" /></span>
-            <div><h2>{{ step.title }}</h2><p>{{ step.description }}</p></div>
-          </article>
+      <section class="setup-workspace setup-wizard" aria-label="首次运行安装向导">
+        <div v-if="completed" class="setup-complete-state">
+          <span class="setup-complete-icon"><CheckCircle2 :size="25" /></span>
+          <p class="eyebrow">READY TO SIGN IN</p>
+          <h2>{{ setupStatus?.state === 'error' ? '配置已保存，服务需要检查' : '总终端正在切换到生产配置' }}</h2>
+          <p>{{ error || '数据库和管理员信息已保存。服务重建完成后即可登录控制台。' }}</p>
+          <a class="primary-command button-press" :href="setupStatus?.baseUrl || form.publicBaseUrl"><Globe2 :size="16" />打开站点</a>
+          <RouterLink class="setup-login-link setup-complete-login" to="/login">前往登录 <ArrowRight :size="15" /></RouterLink>
         </div>
 
-        <div class="setup-command-section">
-          <div class="setup-section-heading"><div><p class="eyebrow">START HERE</p><h2>复制安装命令</h2></div><span class="setup-local-badge">交互式配置</span></div>
-          <div class="setup-segmented" role="group" aria-label="选择总终端主机系统">
-            <button type="button" :aria-pressed="platform === 'linux'" :class="{ active: platform === 'linux' }" @click="platform = 'linux'">Linux</button>
-            <button type="button" :aria-pressed="platform === 'windows'" :class="{ active: platform === 'windows' }" @click="platform = 'windows'">Windows</button>
+        <template v-else>
+          <div class="setup-wizard-head">
+            <div>
+              <p class="eyebrow">STEP {{ currentStep + 1 }} OF 3</p>
+              <h2>{{ currentTitle }}</h2>
+            </div>
+            <span class="setup-wizard-state">未完成</span>
           </div>
 
-          <div class="setup-command-block">
-            <div class="setup-command-row"><code>{{ cloneCommand }}</code><button type="button" title="复制仓库命令" aria-label="复制仓库命令" @click="copy(cloneCommand, 'clone')"><Clipboard :size="16" /><span>{{ copied === 'clone' ? '已复制' : '复制' }}</span></button></div>
-            <div class="setup-command-row"><code>{{ installCommand }}</code><button type="button" title="复制安装命令" aria-label="复制安装命令" @click="copy(installCommand, 'install')"><Clipboard :size="16" /><span>{{ copied === 'install' ? '已复制' : '复制' }}</span></button></div>
+          <div class="setup-progress" aria-label="安装步骤">
+            <div v-for="(step, index) in steps" :key="step.title" class="setup-progress-item" :data-active="index === currentStep" :data-done="index < currentStep">
+              <span>{{ index < currentStep ? '✓' : `0${index + 1}` }}</span>
+              <strong>{{ step.title }}</strong>
+              <small>{{ step.caption }}</small>
+            </div>
           </div>
-          <p class="setup-command-hint">安装器会拒绝覆盖现有 `.env`、数据库和应用用户。需要重做配置时先备份，再显式使用 `--overwrite` 或 `-Overwrite`，并使用新的数据库名和用户名。</p>
-          <p class="setup-insecure-note"><LockKeyhole :size="15" /><span>暂时没有域名时，只有在确认风险后才使用临时 IP/HTTP 命令。登录密码会经过明文网络；宝塔反代和 HTTPS 生效后必须切换回安全配置。</span></p>
-          <div class="setup-command-row"><code>{{ temporaryHttpCommand }}</code><button type="button" title="复制临时 HTTP 安装命令" aria-label="复制临时 HTTP 安装命令" @click="copy(temporaryHttpCommand, 'temporary')"><Clipboard :size="16" /><span>{{ copied === 'temporary' ? '已复制' : '临时 HTTP' }}</span></button></div>
-        </div>
 
-        <div class="setup-checklist">
-          <div class="setup-section-heading"><div><p class="eyebrow">HAND OFF</p><h2>启动后交给你</h2></div><ExternalLink :size="17" /></div>
-          <ul>
-            <li><CheckCircle2 :size="16" /><span>访问安装器最后提示的入口，使用刚设置的管理员账号登录。</span></li>
-            <li><CheckCircle2 :size="16" /><span>在系统设置完成站点入口、时区、采集周期和通知渠道配置。</span></li>
-            <li><CheckCircle2 :size="16" /><span>在设备管理创建节点，再到受监控服务器材料完成 Agent 安装。</span></li>
-          </ul>
-          <div class="setup-update-row"><span><Terminal :size="15" />升级总终端</span><code>{{ updateCommand }}</code><button type="button" title="复制升级命令" aria-label="复制升级命令" @click="copy(updateCommand, 'update')"><Clipboard :size="15" /></button></div>
-        </div>
+          <form class="setup-form" novalidate @submit.prevent="nextStep">
+            <div v-if="currentStep === 0" class="setup-form-section">
+              <div class="setup-form-copy"><Database :size="18" /><div><h3>先连接负责建库的 MySQL</h3><p>这里填写安装服务所在 Docker 网络能够访问的 MySQL 管理账号。连接测试通过后才能继续。</p></div></div>
+              <div class="setup-form-grid setup-form-grid-two">
+                <label class="setup-field"><span>管理地址</span><input v-model="form.mysqlAdminHost" autocomplete="off" placeholder="host.docker.internal" /></label>
+                <label class="setup-field"><span>管理端口</span><input v-model.number="form.mysqlAdminPort" type="number" min="1" max="65535" inputmode="numeric" /></label>
+                <label class="setup-field"><span>管理用户名</span><input v-model="form.mysqlAdminUsername" autocomplete="username" placeholder="root" /></label>
+                <label class="setup-field"><span>管理密码</span><div class="setup-secret-field"><input v-model="form.mysqlAdminPassword" :type="reveal.adminDatabase ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.adminDatabase ? '隐藏管理密码' : '显示管理密码'" :title="reveal.adminDatabase ? '隐藏密码' : '显示密码'" @click="reveal.adminDatabase = !reveal.adminDatabase"><EyeOff v-if="reveal.adminDatabase" :size="16" /><Eye v-else :size="16" /></button></div></label>
+              </div>
+              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 请使用 <code>host.docker.internal</code>，不要填写容器内的 <code>127.0.0.1</code>。</p>
+            </div>
+
+            <div v-else-if="currentStep === 1" class="setup-form-section">
+              <div class="setup-form-copy"><Database :size="18" /><div><h3>创建总终端应用数据库</h3><p>安装器只创建新库和新账号。发现同名对象会停止，不会删除或覆盖现有业务数据。</p></div></div>
+              <div class="setup-form-grid setup-form-grid-two">
+                <label class="setup-field"><span>容器连接地址</span><input v-model="form.mysqlAppHost" autocomplete="off" placeholder="host.docker.internal" /></label>
+                <label class="setup-field"><span>容器连接端口</span><input v-model.number="form.mysqlAppPort" type="number" min="1" max="65535" inputmode="numeric" /></label>
+                <label class="setup-field"><span>新数据库名</span><input v-model="form.databaseName" autocomplete="off" placeholder="monitor" /></label>
+                <label class="setup-field"><span>新应用用户名</span><input v-model="form.appUsername" autocomplete="off" placeholder="monitor" /></label>
+                <label class="setup-field"><span>应用数据库密码</span><div class="setup-secret-field"><input v-model="form.appPassword" :type="reveal.appDatabase ? 'text' : 'password'" autocomplete="new-password" /><button type="button" :aria-label="reveal.appDatabase ? '隐藏应用数据库密码' : '显示应用数据库密码'" :title="reveal.appDatabase ? '隐藏密码' : '显示密码'" @click="reveal.appDatabase = !reveal.appDatabase"><EyeOff v-if="reveal.appDatabase" :size="16" /><Eye v-else :size="16" /></button></div></label>
+                <label class="setup-field"><span>再次输入应用密码</span><input v-model="form.appPasswordConfirm" type="password" autocomplete="new-password" /></label>
+              </div>
+            </div>
+
+            <div v-else class="setup-form-section">
+              <div class="setup-form-copy"><ShieldCheck :size="18" /><div><h3>设置管理员和站点入口</h3><p>管理员账号会在生产数据库迁移完成后创建。登录后仍可在系统设置中修改站点和通知信息。</p></div></div>
+              <div class="setup-form-grid setup-form-grid-two">
+                <label class="setup-field setup-field-wide"><span>公网入口</span><input v-model="form.publicBaseUrl" type="url" autocomplete="url" placeholder="https://monitor.example.com" /></label>
+                <label class="setup-field setup-field-wide"><span>允许的 Web 来源</span><input v-model="form.allowedOrigins" autocomplete="url" placeholder="https://monitor.example.com" /></label>
+                <label class="setup-field"><span>站点名称</span><input v-model="form.siteName" autocomplete="organization" /></label>
+                <label class="setup-field"><span>服务时区</span><input v-model="form.timezone" autocomplete="off" placeholder="Asia/Shanghai" /></label>
+                <label class="setup-field"><span>Web 端口</span><input v-model.number="form.webPort" type="number" min="1" max="65535" inputmode="numeric" /></label>
+                <label class="setup-field"><span>Web 绑定地址</span><select v-model="form.webBindAddress"><option value="0.0.0.0">0.0.0.0（允许 IP 直连）</option><option value="127.0.0.1">127.0.0.1（仅宝塔反代）</option></select></label>
+                <label class="setup-field"><span>管理员用户名</span><input v-model="form.adminUsername" autocomplete="username" /></label>
+                <label class="setup-field"><span>管理员密码</span><div class="setup-secret-field"><input v-model="form.adminPassword" :type="reveal.admin ? 'text' : 'password'" autocomplete="new-password" /><button type="button" :aria-label="reveal.admin ? '隐藏管理员密码' : '显示管理员密码'" :title="reveal.admin ? '隐藏密码' : '显示密码'" @click="reveal.admin = !reveal.admin"><EyeOff v-if="reveal.admin" :size="16" /><Eye v-else :size="16" /></button></div></label>
+                <label class="setup-field"><span>再次输入管理员密码</span><input v-model="form.adminPasswordConfirm" type="password" autocomplete="new-password" /></label>
+              </div>
+            </div>
+
+            <p v-if="error" class="form-error setup-form-error" role="alert">{{ error }}</p>
+            <div class="setup-form-actions">
+              <button v-if="currentStep > 0" class="setup-secondary-command" type="button" @click="previousStep"><ArrowLeft :size="16" />上一步</button>
+              <span v-else class="setup-form-spacer" />
+              <button class="primary-command button-press" type="submit" :disabled="testingDatabase || submitting">
+                <span v-if="testingDatabase || submitting" class="spinner" />
+                <span>{{ testingDatabase ? '正在测试连接' : submitting ? '正在保存配置' : currentStep === 2 ? '完成安装并启动' : '继续' }}</span>
+                <ArrowRight v-if="!testingDatabase && !submitting" :size="16" />
+              </button>
+            </div>
+          </form>
+        </template>
       </section>
     </div>
   </main>

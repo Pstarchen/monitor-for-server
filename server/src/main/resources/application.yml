@@ -83,6 +83,19 @@ app:
 spring:
   config:
     activate:
+      on-profile: bootstrap
+  jpa:
+    hibernate:
+      ddl-auto: update
+  flyway:
+    enabled: false
+app:
+  redis-enabled: false
+
+---
+spring:
+  config:
+    activate:
       on-profile: production
   jpa:
     hibernate:

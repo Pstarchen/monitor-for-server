@@ -1,6 +1,17 @@
 name: guanlan-monitor
 
 services:
+  setup:
+    build:
+      context: ./setup
+    restart: unless-stopped
+    environment:
+      SETUP_WORKSPACE: /workspace
+    volumes:
+      - ./:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [monitor]
+
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
@@ -19,23 +30,23 @@ services:
       context: ./server
     restart: unless-stopped
     environment:
-      SPRING_PROFILES_ACTIVE: production
-      DB_URL: ${DB_URL:?DB_URL is required}
-      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
-      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-bootstrap}
+      DB_URL: ${DB_URL:-jdbc:h2:mem:bootstrap;MODE=MySQL;DB_CLOSE_DELAY=-1}
+      DB_USERNAME: ${DB_USERNAME:-sa}
+      DB_PASSWORD: ${DB_PASSWORD:-}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:?BOOTSTRAP_ADMIN_USERNAME is required}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD is required}
-      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY is required}
-      APP_TIMEZONE: ${APP_TIMEZONE:?APP_TIMEZONE is required}
-      SITE_NAME: ${SITE_NAME:?SITE_NAME is required}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
-      ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:?ALLOW_INSECURE_HTTP is required}
-      METRIC_RETENTION_DAYS: ${METRIC_RETENTION_DAYS:?METRIC_RETENTION_DAYS is required}
-      DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:?DEVICE_OFFLINE_AFTER_SECONDS is required}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:?SESSION_COOKIE_SECURE is required}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-Ym9vdHN0cmFwLXNldHVwLWtleS1wbGFjZWhvbGRlciE=}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
+      SITE_NAME: ${SITE_NAME:-观澜监控}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:18080}
+      ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-true}
+      METRIC_RETENTION_DAYS: ${METRIC_RETENTION_DAYS:-30}
+      DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:-30}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:18080}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -57,16 +68,18 @@ services:
       timeout: 5s
       retries: 12
     networks: [monitor]
+    volumes:
+      - server-bootstrap-data:/data
 
   web:
     build:
       context: ./web
     restart: unless-stopped
     ports:
-      - "${WEB_BIND_ADDRESS:?WEB_BIND_ADDRESS is required}:${WEB_PORT:?WEB_PORT is required}:80"
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-18080}:80"
     depends_on:
-      server:
-        condition: service_healthy
+      setup:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthz"]
       interval: 15s
@@ -76,6 +89,7 @@ services:
 
 volumes:
   redis-data:
+  server-bootstrap-data:
 
 networks:
   monitor:

@@ -13,7 +13,17 @@
 
 ## 快速启动
 
-1. 进入“总终端安装指引”页面，或直接运行对应平台安装器。安装器会交互式收集配置，不依赖隐藏的 `.env` 默认值。
+1. 准备 Docker Engine、Compose v2 和外部 MySQL 管理账号。项目不携带 MySQL 容器。
+
+```powershell
+docker compose up --build -d
+```
+
+2. 打开 `http://<服务器IP>:18080/setup`。首次运行向导会逐步测试 MySQL、创建数据库和应用账号、设置站点入口，并创建首个管理员。
+
+3. 向导完成后服务会自动切换到生产配置，再使用刚创建的管理员登录。
+
+需要无人值守或无法访问浏览器时，仍可使用对应平台安装器：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
@@ -25,13 +35,6 @@ Linux：
 bash ./deploy/install-controller.sh
 ```
 
-2. 安装器会构建并启动服务：
-
-```powershell
-docker compose up --build -d
-```
-
-3. 打开安装器提示的入口，使用刚刚明确设置的管理员账号登录。
 4. 在“设备管理”中创建设备并保存一次性显示的 Agent 密钥。
 5. 按 [Agent 安装说明](docs/deployment.md) 在被监控服务器启动 Agent。
 
@@ -42,7 +45,7 @@ go test ./...
 pnpm --dir web install
 pnpm --dir web test
 pnpm --dir web build
-docker compose build server web
+docker compose build setup server web
 ```
 
 ## 项目文档

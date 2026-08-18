@@ -5,26 +5,39 @@
 ## 前置条件
 
 - Docker Engine 24+ 与 Docker Compose v2。
-- 外部 MySQL 8.0+；总终端 Compose 不再携带 MySQL 容器，安装向导使用用户提供的管理账号创建数据库和应用账号。
+- 外部 MySQL 8.0+；总终端 Compose 不再携带 MySQL 容器，首次运行网页向导使用用户提供的管理账号创建数据库和应用账号。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
 - 每台被监控主机具备 systemd 或 Windows 服务管理权限。
 - 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
 
 ## Docker Compose 部署
 
-在项目根目录运行交互式总终端安装器。它会逐项询问部署信息、生成密钥并在启动前校验 Compose：
+在项目根目录直接启动 Compose。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+然后打开：
+
+```bash
+http://<服务器IP>:18080/setup
+```
+
+向导会测试 MySQL 管理连接，创建数据库和应用账号，写入生产 `.env`，再自动执行 `docker compose up -d --build server web`。管理员账号在生产数据库迁移后由服务端创建。MySQL 管理密码只在安装服务内存中使用，不会写入 `.env`。发现已有同名库或用户时会停止，避免覆盖数据。
+
+无法使用浏览器时，命令行安装器仍然可用：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
 ```
 
-Linux 使用：
+Linux：
 
 ```bash
 bash ./deploy/install-controller.sh
 ```
-
-安装器会询问 MySQL 管理地址、端口、管理账号和密码，测试连接后继续收集容器连接地址、应用密码以及 Web、站点和管理员配置；全部校验通过后才创建目标数据库、应用用户并授予目标库权限。MySQL 管理密码只在安装器进程中使用，不会写入 `.env`。发现已有同名库或用户时会停止，避免覆盖数据。安装器还会生成 `BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。
 
 生产环境生成的配置至少包含：
 
@@ -42,7 +55,7 @@ docker compose ps
 docker compose logs --tail 100 server
 ```
 
-入口以安装器提示为准。首次启动时，服务端从明确填写的 `BOOTSTRAP_ADMIN_USERNAME` 与 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。关键变量缺失时 Compose 会直接失败，不会使用 localhost 或不安全 Cookie 默认值。
+完成向导后入口以页面提示为准。首次生产启动时，服务端从向导写入的 `BOOTSTRAP_ADMIN_USERNAME` 与 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。
 
 ## TLS 入口
 
