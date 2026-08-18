@@ -9,7 +9,6 @@ const testingDatabase = ref(false)
 const submitting = ref(false)
 const completed = ref(false)
 const error = ref('')
-const databaseTested = ref(false)
 const reveal = reactive({ adminDatabase: false, appDatabase: false, admin: false })
 const setupStatus = ref<SetupStatus | null>(null)
 
@@ -37,8 +36,8 @@ const form = reactive<SetupRequest>({
 })
 
 const steps = [
-  { title: '连接 MySQL', caption: '管理连接', icon: ServerCog },
-  { title: '创建应用库', caption: '数据库账号', icon: Database },
+  { title: '检测 MySQL', caption: '连接信息', icon: ServerCog },
+  { title: '创建应用账号', caption: '授权信息', icon: Database },
   { title: '设置管理员', caption: '站点入口', icon: ShieldCheck },
 ]
 const currentTitle = computed(() => steps[currentStep.value]?.title ?? '完成安装')
@@ -48,12 +47,12 @@ function messageFor(cause: unknown) {
 }
 
 function validateStep(step: number) {
-  if (step === 0 && (!form.mysqlAdminHost.trim() || !form.mysqlAdminUsername.trim() || !form.mysqlAdminPassword)) {
-    error.value = '请填写 MySQL 管理地址、用户名和密码'
+  if (step === 0 && (!form.mysqlAdminHost.trim() || !form.mysqlAdminPort || !form.databaseName.trim() || !form.mysqlAdminUsername.trim() || !form.mysqlAdminPassword)) {
+    error.value = '请填写 MySQL 地址、端口、数据库名、用户名和密码'
     return false
   }
-  if (step === 1 && (!form.databaseName.trim() || !form.appUsername.trim() || form.appPassword.length < 12 || form.appPassword !== form.appPasswordConfirm)) {
-    error.value = '请填写数据库信息，并确认应用密码至少 12 位且两次一致'
+  if (step === 1 && (!form.mysqlAppHost.trim() || !form.mysqlAppPort || !form.appUsername.trim() || form.appPassword.length < 12 || form.appPassword !== form.appPasswordConfirm)) {
+    error.value = '请填写应用连接信息，并确认应用密码至少 12 位且两次一致'
     return false
   }
   if (step === 2 && (!form.publicBaseUrl.trim() || !form.allowedOrigins.trim() || !form.siteName.trim() || !form.timezone.trim() || !form.adminUsername.trim() || form.adminPassword.length < 12 || form.adminPassword !== form.adminPasswordConfirm)) {
@@ -69,7 +68,10 @@ async function testDatabase() {
   error.value = ''
   try {
     await testSetupDatabase(form)
-    databaseTested.value = true
+    if (form.mysqlAppHost === 'host.docker.internal' && form.mysqlAppPort === 3306) {
+      form.mysqlAppHost = form.mysqlAdminHost
+      form.mysqlAppPort = form.mysqlAdminPort
+    }
     currentStep.value = 1
   } catch (cause) {
     messageFor(cause)
@@ -181,22 +183,22 @@ onMounted(async () => {
 
           <form class="setup-form" novalidate @submit.prevent="nextStep">
             <div v-if="currentStep === 0" class="setup-form-section">
-              <div class="setup-form-copy"><Database :size="18" /><div><h3>先连接负责建库的 MySQL</h3><p>这里填写安装服务所在 Docker 网络能够访问的 MySQL 管理账号。连接测试通过后才能继续。</p></div></div>
+              <div class="setup-form-copy"><Database :size="18" /><div><h3>填写 MySQL 连接信息并检测</h3><p>一次填写访问地址、端口、目标数据库名、用户名和密码。数据库不存在时，后续步骤会自动创建；已存在的数据库不会被覆盖。</p></div></div>
               <div class="setup-form-grid setup-form-grid-two">
-                <label class="setup-field"><span>管理地址</span><input v-model="form.mysqlAdminHost" autocomplete="off" placeholder="host.docker.internal" /></label>
-                <label class="setup-field"><span>管理端口</span><input v-model.number="form.mysqlAdminPort" type="number" min="1" max="65535" inputmode="numeric" /></label>
-                <label class="setup-field"><span>管理用户名</span><input v-model="form.mysqlAdminUsername" autocomplete="username" placeholder="root" /></label>
-                <label class="setup-field"><span>管理密码</span><div class="setup-secret-field"><input v-model="form.mysqlAdminPassword" :type="reveal.adminDatabase ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.adminDatabase ? '隐藏管理密码' : '显示管理密码'" :title="reveal.adminDatabase ? '隐藏密码' : '显示密码'" @click="reveal.adminDatabase = !reveal.adminDatabase"><EyeOff v-if="reveal.adminDatabase" :size="16" /><Eye v-else :size="16" /></button></div></label>
+                <label class="setup-field"><span>MySQL 访问地址</span><input v-model="form.mysqlAdminHost" autocomplete="off" placeholder="host.docker.internal" /></label>
+                <label class="setup-field"><span>MySQL 端口</span><input v-model.number="form.mysqlAdminPort" type="number" min="1" max="65535" inputmode="numeric" placeholder="3306" /></label>
+                <label class="setup-field"><span>目标数据库名</span><input v-model="form.databaseName" autocomplete="off" placeholder="monitor" /></label>
+                <label class="setup-field"><span>MySQL 用户名</span><input v-model="form.mysqlAdminUsername" autocomplete="username" placeholder="root" /></label>
+                <label class="setup-field"><span>MySQL 密码</span><div class="setup-secret-field"><input v-model="form.mysqlAdminPassword" :type="reveal.adminDatabase ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.adminDatabase ? '隐藏 MySQL 密码' : '显示 MySQL 密码'" :title="reveal.adminDatabase ? '隐藏密码' : '显示密码'" @click="reveal.adminDatabase = !reveal.adminDatabase"><EyeOff v-if="reveal.adminDatabase" :size="16" /><Eye v-else :size="16" /></button></div></label>
               </div>
-              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 请使用 <code>host.docker.internal</code>，不要填写容器内的 <code>127.0.0.1</code>。</p>
+              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 请使用 <code>host.docker.internal</code>，不要填写容器内的 <code>127.0.0.1</code>。点击继续会先检测连接和数据库名。</p>
             </div>
 
             <div v-else-if="currentStep === 1" class="setup-form-section">
-              <div class="setup-form-copy"><Database :size="18" /><div><h3>创建总终端应用数据库</h3><p>安装器只创建新库和新账号。发现同名对象会停止，不会删除或覆盖现有业务数据。</p></div></div>
+              <div class="setup-form-copy"><Database :size="18" /><div><h3>设置应用连接和账号</h3><p>管理连接已通过检测。这里设置服务容器连接 MySQL 的地址，以及安装器创建的应用账号和授权密码。地址和端口默认沿用上一步，可按容器网络调整。</p></div></div>
               <div class="setup-form-grid setup-form-grid-two">
                 <label class="setup-field"><span>容器连接地址</span><input v-model="form.mysqlAppHost" autocomplete="off" placeholder="host.docker.internal" /></label>
                 <label class="setup-field"><span>容器连接端口</span><input v-model.number="form.mysqlAppPort" type="number" min="1" max="65535" inputmode="numeric" /></label>
-                <label class="setup-field"><span>新数据库名</span><input v-model="form.databaseName" autocomplete="off" placeholder="monitor" /></label>
                 <label class="setup-field"><span>新应用用户名</span><input v-model="form.appUsername" autocomplete="off" placeholder="monitor" /></label>
                 <label class="setup-field"><span>应用数据库密码</span><div class="setup-secret-field"><input v-model="form.appPassword" :type="reveal.appDatabase ? 'text' : 'password'" autocomplete="new-password" /><button type="button" :aria-label="reveal.appDatabase ? '隐藏应用数据库密码' : '显示应用数据库密码'" :title="reveal.appDatabase ? '隐藏密码' : '显示密码'" @click="reveal.appDatabase = !reveal.appDatabase"><EyeOff v-if="reveal.appDatabase" :size="16" /><Eye v-else :size="16" /></button></div></label>
                 <label class="setup-field"><span>再次输入应用密码</span><input v-model="form.appPasswordConfirm" type="password" autocomplete="new-password" /></label>

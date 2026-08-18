@@ -46,10 +46,11 @@ type setupStatus struct {
 }
 
 type databaseTestRequest struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	DatabaseName string `json:"databaseName"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
 }
 
 type setupRequest struct {
@@ -141,7 +142,16 @@ func (s *setupService) testDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer db.Close()
-	writeJSON(w, http.StatusOK, map[string]string{"message": "MySQL 管理连接成功"})
+	var databaseExists int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", request.DatabaseName).Scan(&databaseExists); err != nil {
+		writeError(w, http.StatusBadRequest, "MySQL 已连接，但无法检查目标数据库，请确认账号具有元数据读取权限")
+		return
+	}
+	if databaseExists != 0 {
+		writeError(w, http.StatusConflict, fmt.Sprintf("MySQL 管理连接成功，但数据库 %s 已存在，请换一个未使用的数据库名", request.DatabaseName))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "MySQL 管理连接成功，目标数据库可创建"})
 }
 
 func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
@@ -381,6 +391,9 @@ func validateDatabaseTest(request databaseTestRequest) error {
 	if err := validateHostPort(request.Host, request.Port); err != nil {
 		return err
 	}
+	if !identifierPattern.MatchString(request.DatabaseName) {
+		return errors.New("数据库名必须以字母开头，只能包含字母、数字和下划线")
+	}
 	if strings.TrimSpace(request.Username) == "" || request.Password == "" {
 		return errors.New("请输入 MySQL 管理账号和密码")
 	}
@@ -388,7 +401,7 @@ func validateDatabaseTest(request databaseTestRequest) error {
 }
 
 func validateSetupRequest(request setupRequest) error {
-	if err := validateDatabaseTest(databaseTestRequest{Host: request.MySQLAdminHost, Port: request.MySQLAdminPort, Username: request.MySQLAdminUsername, Password: request.MySQLAdminPassword}); err != nil {
+	if err := validateDatabaseTest(databaseTestRequest{Host: request.MySQLAdminHost, Port: request.MySQLAdminPort, DatabaseName: request.DatabaseName, Username: request.MySQLAdminUsername, Password: request.MySQLAdminPassword}); err != nil {
 		return err
 	}
 	if err := validateHostPort(request.MySQLAppHost, request.MySQLAppPort); err != nil {
@@ -471,7 +484,8 @@ func withOriginGuard(next http.Handler) http.Handler {
 			origin := r.Header.Get("Origin")
 			if origin != "" {
 				parsed, err := url.Parse(origin)
-				if err != nil || parsed.Host != r.Host {
+				forwardedHost := firstHeaderValue(r.Header.Get("X-Forwarded-Host"))
+				if err != nil || !validOriginURL(parsed) || (!originMatchesHost(parsed, r.Host) && !originMatchesHost(parsed, forwardedHost)) {
 					writeError(w, http.StatusForbidden, "来源校验失败")
 					return
 				}
@@ -479,6 +493,56 @@ func withOriginGuard(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func validOriginURL(origin *url.URL) bool {
+	return origin != nil && origin.User == nil && origin.Host != "" && origin.Path == "" && origin.RawQuery == "" && origin.Fragment == "" && (origin.Scheme == "http" || origin.Scheme == "https")
+}
+
+func originMatchesHost(origin *url.URL, expectedAuthority string) bool {
+	expectedHost, expectedPort := splitAuthority(firstHeaderValue(expectedAuthority))
+	if expectedHost == "" || !strings.EqualFold(strings.TrimSuffix(origin.Hostname(), "."), strings.TrimSuffix(expectedHost, ".")) {
+		return false
+	}
+	if expectedPort == "" {
+		return true
+	}
+	originPort := origin.Port()
+	if originPort == "" {
+		originPort = defaultPort(origin.Scheme)
+	}
+	return originPort == expectedPort
+}
+
+func splitAuthority(authority string) (string, string) {
+	authority = strings.TrimSpace(authority)
+	if authority == "" {
+		return "", ""
+	}
+	if host, port, err := net.SplitHostPort(authority); err == nil {
+		return strings.Trim(host, "[]"), port
+	}
+	if strings.Count(authority, ":") == 1 {
+		parts := strings.SplitN(authority, ":", 2)
+		if _, err := strconv.Atoi(parts[1]); err == nil {
+			return strings.Trim(parts[0], "[]"), parts[1]
+		}
+	}
+	return strings.Trim(authority, "[]"), ""
+}
+
+func defaultPort(scheme string) string {
+	if strings.EqualFold(scheme, "https") {
+		return "443"
+	}
+	return "80"
+}
+
+func firstHeaderValue(value string) string {
+	if index := strings.IndexByte(value, ','); index >= 0 {
+		value = value[:index]
+	}
+	return strings.TrimSpace(value)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
