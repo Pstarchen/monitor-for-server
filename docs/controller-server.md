@@ -5,22 +5,20 @@
 ## 必备材料
 
 - Docker Engine 24+ 和 Docker Compose v2。
-- 外部 MySQL 8.0+ 实例，并提前创建独立数据库和最小权限账号；总终端不会安装、初始化或覆盖 MySQL。
+- 外部 MySQL 8.0+ 实例，并准备一个有建库、建用户和授权权限的管理账号；总终端不会安装 MySQL 服务本身，但安装器会按向导创建独立数据库和最小权限应用账号。
 - 一个生产域名及 TLS 证书。公网只暴露 Web 入口，MySQL、Redis 和 Spring Boot 端口保持内网。若先用 IP 初始化，必须显式启用临时 HTTP，完成宝塔反向代理和 HTTPS 后立即关闭。
 - 独立保存的 `.env`，尤其是 `DB_URL`、`DB_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` 和 `SETTINGS_ENCRYPTION_KEY`。
 
 ### 准备外部 MySQL
 
-在 MySQL 管理端执行（按实际密码和来源网段调整）：
+确保安装器所在主机可以使用 `mysql` 或 `mariadb` 客户端连接 MySQL。安装器会依次询问管理地址/端口/账号、容器可达地址、目标数据库名、应用用户名和应用密码，然后：
 
-```sql
-CREATE DATABASE monitor CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'monitor'@'%' IDENTIFIED BY '<数据库密码>';
-GRANT ALL PRIVILEGES ON monitor.* TO 'monitor'@'%';
-FLUSH PRIVILEGES;
-```
+1. 测试管理账号连接。
+2. 检查目标数据库和应用用户名是否已存在。
+3. 仅在两者都不存在时创建数据库、创建 `'应用用户'@'%'` 并授予目标库权限。
+4. 将应用连接写入 `.env`；管理密码不会写入 `.env`。
 
-生产环境建议把 `'%'` 收窄为 Docker 网桥的实际来源网段，并通过防火墙限制 3306；若 MySQL 与总终端同机，JDBC 地址使用 `host.docker.internal`（Compose 已映射到宿主机），不要填容器内的 `127.0.0.1`。
+发现同名数据库或用户时安装器会停止，不执行覆盖、删库或改密。应用账号使用 `%` 以兼容 Docker 网桥；生产环境完成部署后，建议按实际网段收窄来源并通过防火墙限制 3306。若 MySQL 与总终端同机，容器连接地址使用 `host.docker.internal`，不要填容器内的 `127.0.0.1`。
 
 ## 首次部署
 
@@ -42,7 +40,7 @@ cd /path/to/monitor-for-server
 bash ./deploy/install-controller.sh
 ```
 
-安装器会逐项询问外部 MySQL JDBC URL、数据库账号、公网入口、Web 来源、站点名称、管理员、时区、端口和 Web 绑定地址，自动生成设置加密密钥，先执行 `docker compose config --quiet`，通过后才构建启动。它不会读取或覆盖隐式默认配置，也不会创建或修改数据库；已有 `.env` 时会停止，只有显式传入 `--overwrite` / `-Overwrite` 才会备份后重建。绑定地址填 `0.0.0.0` 可用 IP 直连，填 `127.0.0.1` 可限制为宝塔本机反代。
+安装器会先完成 MySQL 连接测试、建库和应用用户授权，再逐项询问公网入口、Web 来源、站点名称、管理员、时区、端口和 Web 绑定地址，自动生成设置加密密钥，先执行 `docker compose config --quiet`，通过后才构建启动。它不读取隐式 `.env` 默认值；已有 `.env` 时会停止，只有显式传入 `--overwrite` / `-Overwrite` 才会备份后重建。绑定地址填 `0.0.0.0` 可用 IP 直连，填 `127.0.0.1` 可限制为宝塔本机反代。服务启动后，后续站点、通知和设备配置由管理员在控制台完成。
 
 生产环境生成的 `.env` 至少包含：
 

@@ -5,7 +5,7 @@
 ## 前置条件
 
 - Docker Engine 24+ 与 Docker Compose v2。
-- 外部 MySQL 8.0+；总终端 Compose 不再携带 MySQL 容器，安装向导只写入用户提供的连接信息。
+- 外部 MySQL 8.0+；总终端 Compose 不再携带 MySQL 容器，安装向导使用用户提供的管理账号创建数据库和应用账号。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
 - 每台被监控主机具备 systemd 或 Windows 服务管理权限。
 - 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
@@ -24,7 +24,7 @@ Linux 使用：
 bash ./deploy/install-controller.sh
 ```
 
-安装器会询问外部 `DB_URL`、`DB_USERNAME` 和数据库密码，并生成 `BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。运行前先按[总终端材料](controller-server.md)创建数据库和账号。
+安装器会先询问 MySQL 管理地址、端口、管理账号和密码，测试连接后创建目标数据库、应用用户并授予目标库权限；然后询问容器连接地址和应用密码，最后收集 Web、站点和管理员配置。MySQL 管理密码只在安装器进程中使用，不会写入 `.env`。发现已有同名库或用户时会停止，避免覆盖数据。安装器还会生成 `BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。
 
 生产环境生成的配置至少包含：
 

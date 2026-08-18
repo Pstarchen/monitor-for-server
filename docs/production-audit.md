@@ -20,7 +20,7 @@
 
 ## 生产前必须确认
 
-- `.env` 中外部 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、管理员密码和 `SETTINGS_ENCRYPTION_KEY` 不提交 Git；`SETTINGS_ENCRYPTION_KEY` 丢失会使数据库中的通知凭据不可恢复。
+- `.env` 中外部 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、管理员密码和 `SETTINGS_ENCRYPTION_KEY` 不提交 Git；安装器使用的 MySQL 管理密码不会写入 `.env`；`SETTINGS_ENCRYPTION_KEY` 丢失会使数据库中的通知凭据不可恢复。
 - 外层 TLS 网关正确转发 `/api/`、`/ws/`、Cookie 和 `X-Forwarded-*`；生产设置 `SESSION_COOKIE_SECURE=true` 与精确的 `ALLOWED_ORIGINS`。
 - 外部 MySQL 仅开放给总终端所需来源，Redis 不发布到公网；按 `docs/controller-server.md` 做备份、升级和恢复演练。
 - 受监控主机使用预编译 Agent 时无需安装 Go；源码安装才需要 Go 1.24+。密钥轮换后必须在目标机重新部署配置。

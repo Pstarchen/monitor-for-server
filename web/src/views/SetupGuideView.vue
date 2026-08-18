@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Activity, ArrowRight, CheckCircle2, Clipboard, ExternalLink, FileKey2, LockKeyhole, ServerCog, Terminal } from 'lucide-vue-next'
+import { Activity, ArrowRight, CheckCircle2, Clipboard, Database, ExternalLink, FileKey2, LockKeyhole, ServerCog, Terminal } from 'lucide-vue-next'
 
 type Platform = 'linux' | 'windows'
 
@@ -19,9 +19,9 @@ const updateCommand = computed(() => platform.value === 'linux'
   : 'git pull; docker compose up --build -d')
 
 const steps = [
-  { number: '01', title: '准备总终端主机', description: '准备 Docker Engine 24+、Compose v2 和外部 MySQL 数据库账号；同机数据库使用 host.docker.internal。', icon: ServerCog },
-  { number: '02', title: '运行交互式安装器', description: '安装器会询问数据库连接、入口、站点、时区和管理员信息，并生成私有加密密钥。', icon: Terminal },
-  { number: '03', title: '完成首登检查', description: '打开入口登录，确认健康状态，再在设备管理中创建第一台受监控服务器。', icon: CheckCircle2 },
+  { number: '01', title: '准备总终端主机', description: '准备 Docker Engine 24+、Compose v2、MySQL 客户端和有建库授权权限的 MySQL 管理账号。', icon: ServerCog },
+  { number: '02', title: '安装器初始化 MySQL', description: '安装器会测试管理连接，创建新的数据库和应用用户并授权；同名对象会被拒绝覆盖。', icon: Database },
+  { number: '03', title: '交接控制台配置', description: '服务启动后打开入口登录。站点、通知、采集策略和受监控设备由你在控制台继续配置。', icon: CheckCircle2 },
 ]
 
 async function copy(value: string, key: string) {
@@ -53,8 +53,8 @@ async function copy(value: string, key: string) {
         <span class="setup-intro-icon"><FileKey2 :size="22" /></span>
         <p class="eyebrow">CONTROLLER INSTALLATION</p>
         <h1>把首次部署<br>变成一条清晰路径</h1>
-        <p class="setup-intro-copy">不依赖隐藏的环境默认值。安装器会在本机询问必要信息，生成私有配置并校验 Compose，然后启动总终端服务。</p>
-        <div class="setup-security-note"><LockKeyhole :size="15" /><span>密码和密钥只写入总终端主机的 `.env`，不会发送到本页面。</span></div>
+        <p class="setup-intro-copy">不依赖隐藏的环境默认值。安装器会在本机完成 MySQL 建库与授权，生成私有配置并校验 Compose，然后启动总终端服务。</p>
+        <div class="setup-security-note"><LockKeyhole :size="15" /><span>MySQL 管理密码只用于初始化；`.env` 仅保存应用账号和部署密钥，不会发送到本页面。</span></div>
       </aside>
 
       <section class="setup-workspace" aria-label="安装步骤">
@@ -77,17 +77,17 @@ async function copy(value: string, key: string) {
             <div class="setup-command-row"><code>{{ cloneCommand }}</code><button type="button" title="复制仓库命令" aria-label="复制仓库命令" @click="copy(cloneCommand, 'clone')"><Clipboard :size="16" /><span>{{ copied === 'clone' ? '已复制' : '复制' }}</span></button></div>
             <div class="setup-command-row"><code>{{ installCommand }}</code><button type="button" title="复制安装命令" aria-label="复制安装命令" @click="copy(installCommand, 'install')"><Clipboard :size="16" /><span>{{ copied === 'install' ? '已复制' : '复制' }}</span></button></div>
           </div>
-          <p class="setup-command-hint">安装器会拒绝覆盖现有 `.env`。需要重做配置时先备份，再显式使用 `--overwrite` 或 `-Overwrite`。</p>
+          <p class="setup-command-hint">安装器会拒绝覆盖现有 `.env`、数据库和应用用户。需要重做配置时先备份，再显式使用 `--overwrite` 或 `-Overwrite`，并使用新的数据库名和用户名。</p>
           <p class="setup-insecure-note"><LockKeyhole :size="15" /><span>暂时没有域名时，只有在确认风险后才使用临时 IP/HTTP 命令。登录密码会经过明文网络；宝塔反代和 HTTPS 生效后必须切换回安全配置。</span></p>
           <div class="setup-command-row"><code>{{ temporaryHttpCommand }}</code><button type="button" title="复制临时 HTTP 安装命令" aria-label="复制临时 HTTP 安装命令" @click="copy(temporaryHttpCommand, 'temporary')"><Clipboard :size="16" /><span>{{ copied === 'temporary' ? '已复制' : '临时 HTTP' }}</span></button></div>
         </div>
 
         <div class="setup-checklist">
-          <div class="setup-section-heading"><div><p class="eyebrow">AFTER INSTALL</p><h2>启动后检查</h2></div><ExternalLink :size="17" /></div>
+          <div class="setup-section-heading"><div><p class="eyebrow">HAND OFF</p><h2>启动后交给你</h2></div><ExternalLink :size="17" /></div>
           <ul>
-            <li><CheckCircle2 :size="16" /><span>访问安装器最后提示的 HTTPS 地址，使用刚设置的管理员账号登录。</span></li>
-            <li><CheckCircle2 :size="16" /><span>在系统设置确认站点入口、时区和默认采集周期，不再依赖 localhost 默认值。</span></li>
-            <li><CheckCircle2 :size="16" /><span>在设备管理创建节点，复制一次性 Agent 安装命令到受监控服务器。</span></li>
+            <li><CheckCircle2 :size="16" /><span>访问安装器最后提示的入口，使用刚设置的管理员账号登录。</span></li>
+            <li><CheckCircle2 :size="16" /><span>在系统设置完成站点入口、时区、采集周期和通知渠道配置。</span></li>
+            <li><CheckCircle2 :size="16" /><span>在设备管理创建节点，再到受监控服务器材料完成 Agent 安装。</span></li>
           </ul>
           <div class="setup-update-row"><span><Terminal :size="15" />升级总终端</span><code>{{ updateCommand }}</code><button type="button" title="复制升级命令" aria-label="复制升级命令" @click="copy(updateCommand, 'update')"><Clipboard :size="15" /></button></div>
         </div>
