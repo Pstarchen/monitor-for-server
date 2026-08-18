@@ -1,11 +1,13 @@
 # 部署与运维
 
+材料已按角色拆分：先阅读[总终端服务器搭建材料](controller-server.md)，再阅读[受监控服务器搭建材料](monitored-agent.md)。本页保留完整的运维参考和故障排查。
+
 ## 前置条件
 
 - Docker Engine 24+ 与 Docker Compose v2。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。
 - 每台被监控主机具备 systemd 或 Windows 服务管理权限。
-- 从源码构建 Agent 时需要 Go 1.24+；也可以向安装器传入预编译二进制。
+- 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
 
 ## Docker Compose 部署
 
@@ -64,7 +66,7 @@ sudo --preserve-env=GUANLAN_AGENT_KEY ./deploy/install-agent.sh \
   --service mysql
 ```
 
-低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。不传 `--disk` 时采集全部可用分区。
+低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
 使用预编译二进制时添加 `--binary /path/to/guanlan-agent`。安装结果：
 

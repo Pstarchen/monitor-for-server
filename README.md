@@ -39,3 +39,6 @@ docker compose build server web
 - [系统架构与安全边界](docs/architecture.md)
 - [HTTP 与 WebSocket API](docs/api.md)
 - [部署、Agent 安装与故障排查](docs/deployment.md)
+- [总终端服务器搭建材料](docs/controller-server.md)
+- [受监控服务器搭建材料](docs/monitored-agent.md)
+- [生产审计与使用检查](docs/production-audit.md)

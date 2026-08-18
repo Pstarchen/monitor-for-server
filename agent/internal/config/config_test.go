@@ -59,3 +59,19 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
 		t.Fatalf("unexpected disk allowlist: %#v", cfg.DiskMountpoints)
 	}
 }
+
+func TestLoadAcceptsUtf8BomAndSixtySecondInterval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.json")
+	body := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`{"server_url":"https://monitor.example.com","device_id":"device","agent_key":"secret","interval":"60s"}`)...)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load([]string{"-config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Interval.Seconds() != 60 {
+		t.Fatalf("unexpected interval: %s", cfg.Interval)
+	}
+}

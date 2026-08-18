@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url URL --device-id ID [--binary PATH] [--interval 1s|3s|10s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url URL --device-id ID [--binary PATH] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -39,8 +39,8 @@ if [[ -z "${server_url}" || -z "${device_id}" || -z "${agent_key}" ]]; then
   usage >&2
   exit 2
 fi
-if [[ ! "${interval}" =~ ^(1s|3s|10s)$ ]]; then
-  echo "Interval must be 1s, 3s or 10s." >&2
+if [[ ! "${interval}" =~ ^(1s|3s|10s|30s|60s)$ ]]; then
+  echo "Interval must be 1s, 3s, 10s, 30s or 60s." >&2
   exit 2
 fi
 

@@ -12,6 +12,7 @@ import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
+import java.util.Arrays;
 import java.util.Map;
 
 @Configuration
@@ -25,7 +26,10 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(handler, "/ws/metrics")
                 .addInterceptors(new AuthenticatedHandshakeInterceptor())
-                .setAllowedOrigins(properties.getAllowedOrigins().split(","));
+                .setAllowedOrigins(Arrays.stream(properties.getAllowedOrigins().split(","))
+                        .map(String::trim)
+                        .filter(origin -> !origin.isBlank())
+                        .toArray(String[]::new));
     }
 
     private static class AuthenticatedHandshakeInterceptor implements HandshakeInterceptor {

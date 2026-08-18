@@ -51,14 +51,14 @@ public class MetricService {
         metric.setCpuUsage(clampPercent(report.cpu().usagePercent()));
         metric.setMemoryUsage(clampPercent(report.memory().usagePercent()));
         metric.setSwapUsage(clampPercent(report.memory().swapPercent()));
-        metric.setLoad1(report.cpu().load1());
-        metric.setLoad5(report.cpu().load5());
-        metric.setLoad15(report.cpu().load15());
-        metric.setDiskUsage(disks.stream().mapToDouble(AgentReportRequest.DiskStats::usagePercent).max().orElse(0));
-        metric.setDiskReadBps(disks.stream().mapToDouble(AgentReportRequest.DiskStats::readBytesPerSec).max().orElse(0));
-        metric.setDiskWriteBps(disks.stream().mapToDouble(AgentReportRequest.DiskStats::writeBytesPerSec).max().orElse(0));
-        metric.setNetworkSentBps(Math.max(0, report.network().bytesSentPerSec()));
-        metric.setNetworkRecvBps(Math.max(0, report.network().bytesRecvPerSec()));
+        metric.setLoad1(nonNegativeFinite(report.cpu().load1()));
+        metric.setLoad5(nonNegativeFinite(report.cpu().load5()));
+        metric.setLoad15(nonNegativeFinite(report.cpu().load15()));
+        metric.setDiskUsage(disks.stream().mapToDouble(disk -> clampPercent(disk.usagePercent())).max().orElse(0));
+        metric.setDiskReadBps(disks.stream().mapToDouble(disk -> nonNegativeFinite(disk.readBytesPerSec())).max().orElse(0));
+        metric.setDiskWriteBps(disks.stream().mapToDouble(disk -> nonNegativeFinite(disk.writeBytesPerSec())).max().orElse(0));
+        metric.setNetworkSentBps(nonNegativeFinite(report.network().bytesSentPerSec()));
+        metric.setNetworkRecvBps(nonNegativeFinite(report.network().bytesRecvPerSec()));
         metric.setTcpConnections(Math.max(0, report.network().tcpConnections()));
         metric.setDisksJson(json(disks));
         metric.setProcessesJson(json(report.processes() == null ? List.of() : report.processes()));
@@ -96,5 +96,6 @@ public class MetricService {
     }
 
     private double clampPercent(double value) { return Math.min(100, Math.max(0, value)); }
+    private double nonNegativeFinite(double value) { return Double.isFinite(value) ? Math.max(0, value) : 0; }
     private String join(String first, String second) { return ((first == null ? "" : first) + " " + (second == null ? "" : second)).trim(); }
 }

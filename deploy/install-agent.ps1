@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)] [string] $ServerUrl,
     [Parameter(Mandatory = $true)] [string] $DeviceId,
-    [ValidateSet('1s', '3s', '10s')] [string] $Interval = '3s',
+    [ValidateSet('1s', '3s', '10s', '30s', '60s')] [string] $Interval = '3s',
     [string] $BinaryPath,
     [string[]] $MonitoredService = @(),
     [string[]] $DiskMountpoint = @(),
@@ -72,7 +72,9 @@ try {
         skip_connection_count = $SkipConnections.IsPresent
         disk_mountpoints = $DiskMountpoint
     }
-    $config | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath -Encoding UTF8
+    # Windows PowerShell 5 writes a BOM for -Encoding UTF8; Go's JSON decoder rejects it.
+    $configJson = $config | ConvertTo-Json -Depth 4
+    [IO.File]::WriteAllText($configPath, $configJson, [Text.UTF8Encoding]::new($false))
     & icacls.exe $configPath /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw '无法收紧 Agent 配置文件权限。' }
 
