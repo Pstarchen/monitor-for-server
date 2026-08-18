@@ -11,19 +11,32 @@
 ## 首次部署
 
 ```powershell
-Copy-Item .env.example .env
-# 编辑 .env，填入互不相同的强随机值
-docker compose up --build -d
-docker compose ps
-docker compose logs --tail 100 server
+Set-Location <项目目录>
+powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
 ```
 
-生产环境至少设置：
+Linux 总终端运行：
+
+```bash
+cd /path/to/monitor-for-server
+bash ./deploy/install-controller.sh
+```
+
+安装器会逐项询问公网入口、Web 来源、站点名称、管理员、时区和端口，自动生成数据库密码与设置加密密钥，先执行 `docker compose config --quiet`，通过后才构建启动。它不会读取或覆盖隐式默认配置；已有 `.env` 时会停止，只有显式传入 `--overwrite` / `-Overwrite` 才会备份后重建。
+
+生产环境生成的 `.env` 至少包含：
 
 ```dotenv
 SESSION_COOKIE_SECURE=true
 ALLOWED_ORIGINS=https://monitor.example.com
 PUBLIC_BASE_URL=https://monitor.example.com
+```
+
+未完成安装时，Compose 会因为关键变量缺失而直接失败，不会静默使用 `localhost` 或不安全 Cookie 默认值。安装器完成后检查：
+
+```powershell
+docker compose ps
+docker compose logs --tail 100 server
 ```
 
 首次启动从 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。登录后在“设备管理”创建节点，保存一次性 Agent 密钥。

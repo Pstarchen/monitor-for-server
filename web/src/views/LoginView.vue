@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, Eye, EyeOff, LockKeyhole, Moon, ShieldCheck, Sun, UserRound } from 'lucide-vue-next'
+import { Activity, ArrowRight, Eye, EyeOff, LockKeyhole, Moon, ShieldCheck, Sun, UserRound } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { errorMessage } from '@/lib/api'
 import { safeLocalPath } from '@/lib/format'
@@ -88,6 +88,7 @@ async function submit() {
           <span>{{ loading ? '正在验证' : '登录' }}</span>
         </button>
         <p class="auth-security"><LockKeyhole :size="13" /> 会话凭据仅保存在安全 Cookie 中</p>
+        <RouterLink class="auth-help-link" to="/setup">首次部署总终端？查看安装指引 <ArrowRight :size="14" /></RouterLink>
       </form>
     </section>
   </main>

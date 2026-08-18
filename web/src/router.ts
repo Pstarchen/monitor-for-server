@@ -6,6 +6,7 @@ import AppShell from '@/components/AppShell.vue'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/setup', name: 'setup', component: () => import('@/views/SetupGuideView.vue'), meta: { public: true } },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
     {
       path: '/', component: AppShell, children: [
@@ -33,4 +34,3 @@ router.beforeEach(async (to) => {
 })
 
 export default router
-

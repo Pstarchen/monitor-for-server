@@ -11,13 +11,21 @@
 
 ## Docker Compose 部署
 
-在项目根目录创建部署环境文件：
+在项目根目录运行交互式总终端安装器。它会逐项询问部署信息、生成密钥并在启动前校验 Compose：
 
 ```powershell
-Copy-Item .env.example .env
+powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
 ```
 
-为 `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD` 和 `BOOTSTRAP_ADMIN_PASSWORD` 设置互不相同的强随机值。`SETTINGS_ENCRYPTION_KEY` 必须是 Base64 编码的 32 字节随机值，可使用 `openssl rand -base64 32` 生成。生产环境还应设置：
+Linux 使用：
+
+```bash
+bash ./deploy/install-controller.sh
+```
+
+安装器会明确生成 `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`BOOTSTRAP_ADMIN_PASSWORD` 和 Base64 32 字节 `SETTINGS_ENCRYPTION_KEY`。不要提交 `.env`；已有 `.env` 时安装器默认停止，只有显式 `--overwrite` / `-Overwrite` 才会备份后覆盖。
+
+生产环境生成的配置至少包含：
 
 ```dotenv
 SESSION_COOKIE_SECURE=true
@@ -25,7 +33,7 @@ ALLOWED_ORIGINS=https://monitor.example.com
 PUBLIC_BASE_URL=https://monitor.example.com
 ```
 
-不要提交 `.env`。启动服务：
+启动服务（安装器已执行过时无需重复执行）：
 
 ```powershell
 docker compose up --build -d
@@ -33,7 +41,7 @@ docker compose ps
 docker compose logs --tail 100 server
 ```
 
-默认通过 `http://localhost:8080` 访问。首次启动时，服务端从 `BOOTSTRAP_ADMIN_USERNAME` 与 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有同名账号时不会覆盖密码。
+入口以安装器提示为准。首次启动时，服务端从明确填写的 `BOOTSTRAP_ADMIN_USERNAME` 与 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。关键变量缺失时 Compose 会直接失败，不会使用 localhost 或不安全 Cookie 默认值。
 
 ## TLS 入口
 

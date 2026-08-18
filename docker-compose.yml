@@ -9,7 +9,7 @@ services:
       MYSQL_USER: monitor
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
-      TZ: ${APP_TIMEZONE:-Asia/Shanghai}
+      TZ: ${APP_TIMEZONE:?APP_TIMEZONE is required}
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
@@ -46,16 +46,16 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:?BOOTSTRAP_ADMIN_USERNAME is required}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD is required}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?SETTINGS_ENCRYPTION_KEY is required}
-      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
-      SITE_NAME: ${SITE_NAME:-观澜监控}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
-      METRIC_RETENTION_DAYS: ${METRIC_RETENTION_DAYS:-30}
-      DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:-30}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080}
+      APP_TIMEZONE: ${APP_TIMEZONE:?APP_TIMEZONE is required}
+      SITE_NAME: ${SITE_NAME:?SITE_NAME is required}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
+      METRIC_RETENTION_DAYS: ${METRIC_RETENTION_DAYS:?METRIC_RETENTION_DAYS is required}
+      DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:?DEVICE_OFFLINE_AFTER_SECONDS is required}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:?SESSION_COOKIE_SECURE is required}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -83,7 +83,7 @@ services:
       context: ./web
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "${WEB_PORT:?WEB_PORT is required}:80"
     depends_on:
       server:
         condition: service_healthy
