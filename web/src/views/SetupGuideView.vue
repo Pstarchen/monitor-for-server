@@ -197,7 +197,7 @@ onMounted(async () => {
                 <label class="setup-field"><span>MySQL 用户名</span><input v-model="form.mysqlUsername" autocomplete="username" placeholder="填写已授权的数据库用户" /></label>
                 <label class="setup-field"><span>MySQL 密码</span><div class="setup-secret-field"><input v-model="form.mysqlPassword" :type="reveal.database ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.database ? '隐藏 MySQL 密码' : '显示 MySQL 密码'" :title="reveal.database ? '隐藏密码' : '显示密码'" @click="reveal.database = !reveal.database"><EyeOff v-if="reveal.database" :size="16" /><Eye v-else :size="16" /></button></div></label>
               </div>
-              <p class="setup-inline-note"><KeyRound :size="15" />地址不会被安装器改写。请填写从总终端容器实际可访问的 MySQL 地址；如果 MySQL 在另一台服务器，填写该服务器的内网 IP 或 DNS。若提示错误码 1130，说明 MySQL 账号的来源主机授权不包含总终端。</p>
+              <p class="setup-inline-note"><KeyRound :size="15" />地址不会被安装器改写。MySQL 和总终端在同一台宝塔主机时，不要填写公网 IP 或 localhost；请在宿主机执行 <code>docker network inspect guanlan-monitor_monitor</code>，使用该网络的 Gateway（当前部署为 <code>172.29.0.1</code>）和 MySQL 端口。若提示错误码 1130，请给账号增加实际 Docker 网段来源授权。</p>
               <div v-if="databaseCheck !== 'idle'" class="setup-connection-result" :data-state="databaseCheck" role="status" aria-live="polite">
                 <span class="setup-connection-result-icon"><span v-if="databaseCheck === 'checking'" class="spinner" /><CheckCircle2 v-else-if="databaseCheck === 'ready'" :size="16" /><AlertCircle v-else :size="16" /></span>
                 <span>{{ databaseCheckMessage }}</span>
