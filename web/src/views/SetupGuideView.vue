@@ -18,9 +18,9 @@ const setupStatus = ref<SetupStatus | null>(null)
 
 const initialOrigin = window.location.origin === 'http://localhost:5173' ? 'http://localhost:18080' : window.location.origin
 const form = reactive<SetupRequest>({
-  mysqlHost: 'host.docker.internal',
-  mysqlPort: 3306,
-  databaseName: 'monitor',
+  mysqlHost: '',
+  mysqlPort: null,
+  databaseName: '',
   mysqlUsername: '',
   mysqlPassword: '',
   publicBaseUrl: initialOrigin,
@@ -62,7 +62,7 @@ async function testDatabase() {
   if (!validateStep(0)) return
   testingDatabase.value = true
   databaseCheck.value = 'checking'
-  databaseCheckMessage.value = '正在连接 MySQL、准备目标数据库并检查表结构…'
+  databaseCheckMessage.value = '正在连接填写的 MySQL 数据库并检查表结构…'
   error.value = ''
   authorizationSql.value = ''
   authorizationSqlCopied.value = false
@@ -189,22 +189,22 @@ onMounted(async () => {
 
           <form class="setup-form" novalidate @submit.prevent="nextStep">
             <div v-if="currentStep === 0" class="setup-form-section">
-              <div class="setup-form-copy"><Database :size="18" /><div><h3>连接 MySQL 并准备数据库</h3><p>安装器会先连接 MySQL 服务；目标数据库不存在时尝试创建，已有空库会执行监控表结构，已有完整表结构则直接复用。请使用具备建库、建表和索引权限的账号。</p></div></div>
+              <div class="setup-form-copy"><Database :size="18" /><div><h3>连接 MySQL 并初始化表结构</h3><p>请填写真实可达的 MySQL 地址、端口、数据库名、用户名和密码。数据库由你在 MySQL 管理端准备，向导只负责连接、校验并初始化监控表结构。</p></div></div>
               <div class="setup-form-grid setup-form-grid-two">
-                <label class="setup-field"><span>MySQL 访问地址</span><input v-model="form.mysqlHost" autocomplete="off" placeholder="127.0.0.1 或 host.docker.internal" /></label>
+                <label class="setup-field"><span>MySQL 访问地址</span><input v-model="form.mysqlHost" autocomplete="off" placeholder="填写容器可访问的主机名或 IP" /></label>
                 <label class="setup-field"><span>MySQL 端口</span><input v-model.number="form.mysqlPort" type="number" min="1" max="65535" inputmode="numeric" placeholder="3306" /></label>
-                <label class="setup-field"><span>目标数据库名</span><input v-model="form.databaseName" autocomplete="off" placeholder="monitor" /></label>
-                <label class="setup-field"><span>MySQL 用户名</span><input v-model="form.mysqlUsername" autocomplete="username" placeholder="monitor" /></label>
+                <label class="setup-field"><span>目标数据库名</span><input v-model="form.databaseName" autocomplete="off" placeholder="填写已创建的数据库名" /></label>
+                <label class="setup-field"><span>MySQL 用户名</span><input v-model="form.mysqlUsername" autocomplete="username" placeholder="填写已授权的数据库用户" /></label>
                 <label class="setup-field"><span>MySQL 密码</span><div class="setup-secret-field"><input v-model="form.mysqlPassword" :type="reveal.database ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.database ? '隐藏 MySQL 密码' : '显示 MySQL 密码'" :title="reveal.database ? '隐藏密码' : '显示密码'" @click="reveal.database = !reveal.database"><EyeOff v-if="reveal.database" :size="16" /><Eye v-else :size="16" /></button></div></label>
               </div>
-              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 可填写 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>host.docker.internal</code>；Docker 安装器会将前两者转换为宿主机地址。若提示错误码 1130，说明账号只允许 localhost，需要给该账号授权 Docker 网桥来源。</p>
+              <p class="setup-inline-note"><KeyRound :size="15" />地址不会被安装器改写。请填写从总终端容器实际可访问的 MySQL 地址；如果 MySQL 在另一台服务器，填写该服务器的内网 IP 或 DNS。若提示错误码 1130，说明 MySQL 账号的来源主机授权不包含总终端。</p>
               <div v-if="databaseCheck !== 'idle'" class="setup-connection-result" :data-state="databaseCheck" role="status" aria-live="polite">
                 <span class="setup-connection-result-icon"><span v-if="databaseCheck === 'checking'" class="spinner" /><CheckCircle2 v-else-if="databaseCheck === 'ready'" :size="16" /><AlertCircle v-else :size="16" /></span>
                 <span>{{ databaseCheckMessage }}</span>
               </div>
               <div v-if="authorizationSql" class="setup-authorization-help">
                 <div class="setup-authorization-head"><strong>错误码 1130 的处理 SQL</strong><button type="button" class="setup-copy-command" :aria-label="authorizationSqlCopied ? '已复制授权 SQL' : '复制授权 SQL'" :title="authorizationSqlCopied ? '已复制' : '复制授权 SQL'" @click="copyAuthorizationSql"><Check v-if="authorizationSqlCopied" :size="15" /><Copy v-else :size="15" /></button></div>
-                <p>请在 MySQL 管理端执行，先把占位密码替换为该账号密码。它会新增允许 Docker 网桥来源的同名账号，不会修改 localhost 账号。</p>
+                <p>请在 MySQL 管理端按实际来源执行，替换允许来源主机和密码占位符；安装器不会替你决定账号来源范围。</p>
                 <pre>{{ authorizationSql }}</pre>
               </div>
             </div>

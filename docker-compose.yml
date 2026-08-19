@@ -7,9 +7,6 @@ services:
     restart: unless-stopped
     environment:
       SETUP_WORKSPACE: /workspace
-      SETUP_HOST_GATEWAY: ${SETUP_HOST_GATEWAY:-host.docker.internal}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -34,14 +31,14 @@ services:
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-bootstrap}
-      DB_URL: ${DB_URL:-jdbc:h2:mem:bootstrap;MODE=MySQL;DB_CLOSE_DELAY=-1}
-      DB_USERNAME: ${DB_USERNAME:-sa}
-      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_URL: ${DB_URL-}
+      DB_USERNAME: ${DB_USERNAME-}
+      DB_PASSWORD: ${DB_PASSWORD-}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
-      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-Ym9vdHN0cmFwLXNldHVwLWtleS1wbGFjZWhvbGRlciE=}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY-}
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
       SITE_NAME: ${SITE_NAME:-观澜监控}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:18080}
@@ -60,8 +57,6 @@ services:
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
       WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_healthy

@@ -13,9 +13,9 @@ spring:
   application:
     name: guanlan-monitor
   datasource:
-    url: ${DB_URL:jdbc:h2:file:./data/monitor;MODE=MySQL;AUTO_SERVER=TRUE}
-    username: ${DB_USERNAME:sa}
-    password: ${DB_PASSWORD:}
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -87,6 +87,10 @@ spring:
   config:
     activate:
       on-profile: bootstrap
+  datasource:
+    url: jdbc:h2:mem:bootstrap;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
   jpa:
     hibernate:
       ddl-auto: update

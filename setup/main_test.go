@@ -12,7 +12,7 @@ import (
 
 func validSetupRequest() setupRequest {
 	return setupRequest{
-		MySQLHost: "host.docker.internal", MySQLPort: 3306, DatabaseName: "monitor", MySQLUsername: "monitor", MySQLPassword: "database-password",
+		MySQLHost: "db.example.internal", MySQLPort: 3306, DatabaseName: "monitor", MySQLUsername: "monitor", MySQLPassword: "database-password",
 		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "观澜监控", Timezone: "Asia/Shanghai", WebPort: 18080, WebBindAddress: "127.0.0.1",
 		AdminUsername: "admin", AdminPassword: "administrator-password", AdminPasswordConfirm: "administrator-password",
 	}
@@ -37,35 +37,10 @@ func TestValidateDatabaseTestRequiresTargetDatabase(t *testing.T) {
 	}
 }
 
-func TestNormalizeMySQLHostUsesDockerHostGateway(t *testing.T) {
-	previousGateway := setupHostGateway
-	setupHostGateway = "host.docker.internal"
-	defer func() { setupHostGateway = previousGateway }()
-
-	for _, host := range []string{"127.0.0.1", "localhost", "[::1]"} {
-		if got := normalizeMySQLHost(host); got != "host.docker.internal" {
-			t.Fatalf("normalizeMySQLHost(%q) = %q, want host gateway", host, got)
-		}
-	}
-	if got := normalizeMySQLHost("10.0.0.12"); got != "10.0.0.12" {
-		t.Fatalf("remote MySQL host was rewritten: %q", got)
-	}
-}
-
-func TestNormalizeMySQLHostLeavesLoopbackWhenGatewayIsUnset(t *testing.T) {
-	previousGateway := setupHostGateway
-	setupHostGateway = ""
-	defer func() { setupHostGateway = previousGateway }()
-
-	if got := normalizeMySQLHost("127.0.0.1"); got != "127.0.0.1" {
-		t.Fatalf("native setup unexpectedly rewrote loopback host: %q", got)
-	}
-}
-
 func TestMySQLSetupErrorMessageExplainsAccessDenied(t *testing.T) {
 	err := setupMySQLError{stage: "连接 MySQL 服务", err: &mysqlDriver.MySQLError{Number: 1045}}
 	message := mysqlSetupErrorMessage(err)
-	if !strings.Contains(message, "用户名或密码") || !strings.Contains(message, "Docker 网段") {
+	if !strings.Contains(message, "用户名或密码") {
 		t.Fatalf("unexpected access denied message: %s", message)
 	}
 }
@@ -73,15 +48,15 @@ func TestMySQLSetupErrorMessageExplainsAccessDenied(t *testing.T) {
 func TestMySQLSetupErrorMessageExplainsHostDenied(t *testing.T) {
 	err := setupMySQLError{stage: "连接 MySQL 服务", err: &mysqlDriver.MySQLError{Number: 1130}}
 	message := mysqlSetupErrorMessage(err)
-	if !strings.Contains(message, "来源主机") || !strings.Contains(message, "仅允许 localhost") {
+	if !strings.Contains(message, "来源主机") || !strings.Contains(message, "实际部署网络") {
 		t.Fatalf("unexpected host denied message: %s", message)
 	}
 }
 
-func TestMySQLSetupErrorMessageExplainsMissingDatabasePermission(t *testing.T) {
-	err := setupMySQLError{stage: "创建或检查目标数据库", err: &mysqlDriver.MySQLError{Number: 1049}}
+func TestMySQLSetupErrorMessageExplainsMissingDatabase(t *testing.T) {
+	err := setupMySQLError{stage: "连接 MySQL 数据库", err: &mysqlDriver.MySQLError{Number: 1049}}
 	message := mysqlSetupErrorMessage(err)
-	if !strings.Contains(message, "数据库不存在") || !strings.Contains(message, "CREATE 权限") {
+	if !strings.Contains(message, "数据库不存在") || !strings.Contains(message, "先在 MySQL 管理端创建数据库") {
 		t.Fatalf("unexpected missing database message: %s", message)
 	}
 }
@@ -89,6 +64,15 @@ func TestMySQLSetupErrorMessageExplainsMissingDatabasePermission(t *testing.T) {
 func TestQuoteMySQLIdentifier(t *testing.T) {
 	if got := quoteMySQLIdentifier("monitor"); got != "`monitor`" {
 		t.Fatalf("quoteMySQLIdentifier() = %q", got)
+	}
+}
+
+func TestMySQLJDBCURLPreservesConfiguredEndpoint(t *testing.T) {
+	if got := mysqlJDBCURL("db.example.internal", 3307, "monitor"); got != "jdbc:mysql://db.example.internal:3307/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC" {
+		t.Fatalf("mysqlJDBCURL() = %q", got)
+	}
+	if got := mysqlJDBCURL("[2001:db8::10]", 3306, "monitor"); got != "jdbc:mysql://[2001:db8::10]:3306/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC" {
+		t.Fatalf("mysqlJDBCURL() IPv6 = %q", got)
 	}
 }
 
@@ -104,7 +88,7 @@ func TestMissingSchemaColumnsReportsIncompleteExistingDatabase(t *testing.T) {
 
 func TestMySQLAuthorizationSQLDoesNotContainPassword(t *testing.T) {
 	sql := mysqlAuthorizationSQL("monitor", "monitor")
-	if !strings.Contains(sql, "'monitor'@'%'") || !strings.Contains(sql, "`monitor`.*") {
+	if !strings.Contains(sql, "'monitor'@'REPLACE_WITH_ALLOWED_SOURCE_HOST'") || !strings.Contains(sql, "`monitor`.*") {
 		t.Fatalf("authorization SQL does not grant the expected account and database: %s", sql)
 	}
 	if strings.Contains(sql, "database-password") || !strings.Contains(sql, "REPLACE_WITH_DATABASE_PASSWORD") {

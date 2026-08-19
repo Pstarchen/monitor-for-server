@@ -28,7 +28,6 @@ import (
 
 var workspace = "/workspace"
 var envPath = "/workspace/.env"
-var setupHostGateway string
 
 var identifierPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 var usernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
@@ -77,7 +76,6 @@ func main() {
 		workspace = filepath.Clean(configuredWorkspace)
 		envPath = filepath.Join(workspace, ".env")
 	}
-	setupHostGateway = strings.TrimSpace(os.Getenv("SETUP_HOST_GATEWAY"))
 	service := &setupService{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/setup/status", service.status)
@@ -134,7 +132,7 @@ func (s *setupService) testDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	db, err := connectAndPrepareMySQL(ctx, request.Host, request.Port, request.Username, request.Password, request.DatabaseName)
+	db, err := openSetupMySQL(ctx, request.Host, request.Port, request.Username, request.Password, request.DatabaseName)
 	if err != nil {
 		writeMySQLError(w, http.StatusBadRequest, err, request.Username, request.DatabaseName)
 		return
@@ -174,7 +172,7 @@ func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	db, err := connectAndPrepareMySQL(ctx, request.MySQLHost, request.MySQLPort, request.MySQLUsername, request.MySQLPassword, request.DatabaseName)
+	db, err := openSetupMySQL(ctx, request.MySQLHost, request.MySQLPort, request.MySQLUsername, request.MySQLPassword, request.DatabaseName)
 	if err != nil {
 		s.mu.Lock()
 		s.applying = false
@@ -384,8 +382,15 @@ func openMySQL(ctx context.Context, host string, port int, username, password, d
 	return openMySQLWithDatabase(ctx, host, port, username, password, database)
 }
 
+func openSetupMySQL(ctx context.Context, host string, port int, username, password, database string) (*sql.DB, error) {
+	db, err := openMySQL(ctx, host, port, username, password, database)
+	if err != nil {
+		return nil, setupMySQLError{stage: "连接 MySQL 数据库", err: err}
+	}
+	return db, nil
+}
+
 func openMySQLWithDatabase(ctx context.Context, host string, port int, username, password, database string) (*sql.DB, error) {
-	host = normalizeMySQLHost(host)
 	host = strings.Trim(host, "[]")
 	config := mysqlDriver.NewConfig()
 	config.User = username
@@ -407,34 +412,6 @@ func openMySQLWithDatabase(ctx context.Context, host string, port int, username,
 		return nil, err
 	}
 	return db, nil
-}
-
-func connectAndPrepareMySQL(ctx context.Context, host string, port int, username, password, database string) (*sql.DB, error) {
-	serverDB, err := openMySQLWithDatabase(ctx, host, port, username, password, "")
-	if err != nil {
-		return nil, setupMySQLError{stage: "连接 MySQL 服务", err: err}
-	}
-	defer serverDB.Close()
-	if err := ensureTargetDatabase(ctx, serverDB, database); err != nil {
-		return nil, setupMySQLError{stage: "创建或检查目标数据库", err: err}
-	}
-	db, err := openMySQLWithDatabase(ctx, host, port, username, password, database)
-	if err != nil {
-		return nil, setupMySQLError{stage: "打开目标数据库", err: err}
-	}
-	return db, nil
-}
-
-func ensureTargetDatabase(ctx context.Context, db *sql.DB, database string) error {
-	var exists int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", database).Scan(&exists); err != nil {
-		return err
-	}
-	if exists > 0 {
-		return nil
-	}
-	_, err := db.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", quoteMySQLIdentifier(database)))
-	return err
 }
 
 func quoteMySQLIdentifier(value string) string {
@@ -460,17 +437,17 @@ func mysqlSetupErrorMessage(err error) string {
 	if errors.As(err, &mysqlErr) {
 		switch mysqlErr.Number {
 		case 1045:
-			return stage + "失败：MySQL 拒绝了用户名或密码。若填写 127.0.0.1/localhost，Docker 连接来源通常是宿主机网桥地址，请确认该账号允许从 Docker 网段登录。"
+			return stage + "失败：MySQL 拒绝了用户名或密码，请核对填写的账号信息。"
 		case 1130:
-			return stage + "失败：MySQL 拒绝了当前来源主机（错误码 1130）。请为该账号授权 Docker 网桥来源（通常使用账号@%或账号@宿主机网桥网段），仅允许 localhost 的账号不能从容器登录。"
+			return stage + "失败：MySQL 拒绝了当前来源主机（错误码 1130）。请按实际部署网络为该账号增加允许来源，不能只授权 localhost。"
 		case 1044:
-			return stage + "失败：当前 MySQL 用户没有目标数据库访问权限。请授予该用户目标库权限，或使用具备建库权限的账号。"
+			return stage + "失败：当前 MySQL 用户没有目标数据库访问权限，请授予该用户目标库权限。"
 		case 1049:
-			return stage + "失败：目标数据库不存在，且当前账号没有创建数据库权限。请授予 CREATE 权限或先创建空数据库。"
+			return stage + "失败：目标数据库不存在。请先在 MySQL 管理端创建数据库，并将它授权给当前账号。"
 		case 1142, 1143, 1227:
-			return stage + "失败：当前 MySQL 用户缺少建库、建表或索引权限。"
+			return stage + "失败：当前 MySQL 用户缺少建表或索引权限。"
 		case 1007:
-			return stage + "失败：目标数据库已存在，但 MySQL 返回了重复建库错误；请确认账号对该库有访问权限。"
+			return stage + "失败：MySQL 报告目标数据库已存在，请确认填写的数据库名和账号授权。"
 		}
 		return fmt.Sprintf("%s失败：MySQL 错误码 %d，请检查账号来源、数据库权限和服务器日志。", stage, mysqlErr.Number)
 	}
@@ -498,24 +475,11 @@ func writeMySQLError(w http.ResponseWriter, status int, err error, username, dat
 }
 
 func mysqlAuthorizationSQL(username, database string) string {
-	return fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY 'REPLACE_WITH_DATABASE_PASSWORD';\nGRANT ALL PRIVILEGES ON %s.* TO %s@'%%';\nFLUSH PRIVILEGES;", quoteMySQLString(username), quoteMySQLIdentifier(database), quoteMySQLString(username))
+	return fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'REPLACE_WITH_ALLOWED_SOURCE_HOST' IDENTIFIED BY 'REPLACE_WITH_DATABASE_PASSWORD';\nGRANT ALL PRIVILEGES ON %s.* TO %s@'REPLACE_WITH_ALLOWED_SOURCE_HOST';\nFLUSH PRIVILEGES;", quoteMySQLString(username), quoteMySQLIdentifier(database), quoteMySQLString(username))
 }
 
 func quoteMySQLString(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
-}
-
-func normalizeMySQLHost(host string) string {
-	host = strings.TrimSpace(host)
-	if setupHostGateway != "" && isLoopbackMySQLHost(host) {
-		return setupHostGateway
-	}
-	return host
-}
-
-func isLoopbackMySQLHost(host string) bool {
-	host = strings.Trim(strings.TrimSpace(host), "[]")
-	return strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1"
 }
 
 func writeEnvironment(request setupRequest) error {
@@ -527,7 +491,7 @@ func writeEnvironment(request setupRequest) error {
 	lines := []string{
 		"# Generated by the browser setup wizard. Keep this file private.",
 		"SPRING_PROFILES_ACTIVE=production",
-		"DB_URL=" + dotenvValue(fmt.Sprintf("jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC", normalizeMySQLHost(request.MySQLHost), request.MySQLPort, request.DatabaseName)),
+		"DB_URL=" + dotenvValue(mysqlJDBCURL(request.MySQLHost, request.MySQLPort, request.DatabaseName)),
 		"DB_USERNAME=" + dotenvValue(request.MySQLUsername),
 		"DB_PASSWORD=" + dotenvValue(request.MySQLPassword),
 		"BOOTSTRAP_ADMIN_USERNAME=" + dotenvValue(request.AdminUsername),
@@ -575,6 +539,14 @@ func writeEnvironment(request setupRequest) error {
 		return err
 	}
 	return os.Rename(temporaryName, envPath)
+}
+
+func mysqlJDBCURL(host string, port int, database string) string {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("jdbc:mysql://%s:%d/%s?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC", host, port, database)
 }
 
 func configuredEnv() bool {

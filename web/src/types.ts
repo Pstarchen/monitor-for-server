@@ -180,7 +180,7 @@ export interface SetupStatus {
 
 export interface SetupRequest {
   mysqlHost: string
-  mysqlPort: number
+  mysqlPort: number | null
   databaseName: string
   mysqlUsername: string
   mysqlPassword: string
