@@ -64,6 +64,21 @@ func TestOriginGuardAcceptsForwardedPort(t *testing.T) {
 	}
 }
 
+func TestOriginGuardAcceptsForwardedPublicHost(t *testing.T) {
+	handler := withOriginGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodPost, "http://setup:8090/api/setup/test-database", nil)
+	request.Host = "localhost"
+	request.Header.Set("Origin", "http://monitor.xciy.cn")
+	request.Header.Set("X-Forwarded-Host", "monitor.xciy.cn")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("forwarded public host rejected with status %d", response.Code)
+	}
+}
+
 func TestOriginGuardRejectsDifferentHost(t *testing.T) {
 	handler := withOriginGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
