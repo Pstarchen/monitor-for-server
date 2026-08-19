@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, ArrowLeft, ArrowRight, CheckCircle2, Database, Eye, EyeOff, FileKey2, Globe2, KeyRound, LockKeyhole, ServerCog, ShieldCheck } from 'lucide-vue-next'
+import { Activity, AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, Database, Eye, EyeOff, FileKey2, Globe2, KeyRound, LockKeyhole, ServerCog, ShieldCheck } from 'lucide-vue-next'
 import { api, errorMessage, getSetupStatus, testSetupDatabase } from '@/lib/api'
 import type { SetupRequest, SetupStatus } from '@/types'
 
@@ -9,6 +9,8 @@ const testingDatabase = ref(false)
 const submitting = ref(false)
 const completed = ref(false)
 const error = ref('')
+const databaseCheck = ref<'idle' | 'checking' | 'ready' | 'error'>('idle')
+const databaseCheckMessage = ref('')
 const reveal = reactive({ database: false, admin: false })
 const setupStatus = ref<SetupStatus | null>(null)
 
@@ -55,12 +57,18 @@ function validateStep(step: number) {
 async function testDatabase() {
   if (!validateStep(0)) return
   testingDatabase.value = true
+  databaseCheck.value = 'checking'
+  databaseCheckMessage.value = '正在连接 MySQL、准备目标数据库并检查表结构…'
   error.value = ''
   try {
     await testSetupDatabase(form)
+    databaseCheck.value = 'ready'
+    databaseCheckMessage.value = '连接成功，目标数据库和监控表结构已准备好。'
     currentStep.value = 1
   } catch (cause) {
     messageFor(cause)
+    databaseCheck.value = 'error'
+    databaseCheckMessage.value = error.value
   } finally {
     testingDatabase.value = false
   }
@@ -169,7 +177,7 @@ onMounted(async () => {
 
           <form class="setup-form" novalidate @submit.prevent="nextStep">
             <div v-if="currentStep === 0" class="setup-form-section">
-              <div class="setup-form-copy"><Database :size="18" /><div><h3>连接 MySQL 并初始化表结构</h3><p>请先在 MySQL 中创建一个空数据库和具备建表权限的账号。一次填写访问地址、端口、数据库名、用户名和密码，检测通过后安装器会创建监控系统所需的表结构。</p></div></div>
+              <div class="setup-form-copy"><Database :size="18" /><div><h3>连接 MySQL 并准备数据库</h3><p>安装器会先连接 MySQL 服务；目标数据库不存在时尝试创建，已有空库会执行监控表结构，已有完整表结构则直接复用。请使用具备建库、建表和索引权限的账号。</p></div></div>
               <div class="setup-form-grid setup-form-grid-two">
                 <label class="setup-field"><span>MySQL 访问地址</span><input v-model="form.mysqlHost" autocomplete="off" placeholder="127.0.0.1 或 host.docker.internal" /></label>
                 <label class="setup-field"><span>MySQL 端口</span><input v-model.number="form.mysqlPort" type="number" min="1" max="65535" inputmode="numeric" placeholder="3306" /></label>
@@ -177,7 +185,11 @@ onMounted(async () => {
                 <label class="setup-field"><span>MySQL 用户名</span><input v-model="form.mysqlUsername" autocomplete="username" placeholder="monitor" /></label>
                 <label class="setup-field"><span>MySQL 密码</span><div class="setup-secret-field"><input v-model="form.mysqlPassword" :type="reveal.database ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.database ? '隐藏 MySQL 密码' : '显示 MySQL 密码'" :title="reveal.database ? '隐藏密码' : '显示密码'" @click="reveal.database = !reveal.database"><EyeOff v-if="reveal.database" :size="16" /><Eye v-else :size="16" /></button></div></label>
               </div>
-              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 可填写 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>host.docker.internal</code>；安装器会将前两者转换为宿主机地址。Linux 主机还需允许 Docker 网桥访问 MySQL。目标数据库必须已存在且允许建表。</p>
+              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 可填写 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>host.docker.internal</code>；Docker 安装器会将前两者转换为宿主机地址。目标库不存在时会尝试创建，Linux 主机需允许 Docker 网桥访问 MySQL。</p>
+              <div v-if="databaseCheck !== 'idle'" class="setup-connection-result" :data-state="databaseCheck" role="status" aria-live="polite">
+                <span class="setup-connection-result-icon"><span v-if="databaseCheck === 'checking'" class="spinner" /><CheckCircle2 v-else-if="databaseCheck === 'ready'" :size="16" /><AlertCircle v-else :size="16" /></span>
+                <span>{{ databaseCheckMessage }}</span>
+              </div>
             </div>
 
             <div v-else class="setup-form-section">
@@ -195,13 +207,13 @@ onMounted(async () => {
               </div>
             </div>
 
-            <p v-if="error" class="form-error setup-form-error" role="alert">{{ error }}</p>
+            <p v-if="error && !(currentStep === 0 && databaseCheck === 'error')" class="form-error setup-form-error" role="alert">{{ error }}</p>
             <div class="setup-form-actions">
               <button v-if="currentStep > 0" class="setup-secondary-command" type="button" @click="previousStep"><ArrowLeft :size="16" />上一步</button>
               <span v-else class="setup-form-spacer" />
               <button class="primary-command button-press" type="submit" :disabled="testingDatabase || submitting">
                 <span v-if="testingDatabase || submitting" class="spinner" />
-                <span>{{ testingDatabase ? '正在初始化数据库' : submitting ? '正在保存配置' : currentStep === 1 ? '完成安装并启动' : '检测连接并初始化' }}</span>
+                <span>{{ testingDatabase ? '正在准备数据库' : submitting ? '正在保存配置' : currentStep === 1 ? '完成安装并启动' : '测试连接并初始化' }}</span>
                 <ArrowRight v-if="!testingDatabase && !submitting" :size="16" />
               </button>
             </div>

@@ -133,9 +133,9 @@ func (s *setupService) testDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	db, err := openMySQL(ctx, request.Host, request.Port, request.Username, request.Password, request.DatabaseName)
+	db, err := connectAndPrepareMySQL(ctx, request.Host, request.Port, request.Username, request.Password, request.DatabaseName)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "无法连接 MySQL 或打开目标数据库，请检查地址、端口、数据库名、账号、密码和防火墙；填写 127.0.0.1 或 localhost 时，请确认 MySQL 允许 Docker 网桥访问")
+		writeError(w, http.StatusBadRequest, mysqlSetupErrorMessage(err))
 		return
 	}
 	defer db.Close()
@@ -173,13 +173,13 @@ func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	db, err := openMySQL(ctx, request.MySQLHost, request.MySQLPort, request.MySQLUsername, request.MySQLPassword, request.DatabaseName)
+	db, err := connectAndPrepareMySQL(ctx, request.MySQLHost, request.MySQLPort, request.MySQLUsername, request.MySQLPassword, request.DatabaseName)
 	if err != nil {
 		s.mu.Lock()
 		s.applying = false
-		s.lastErr = "无法连接 MySQL 或打开目标数据库"
+		s.lastErr = mysqlSetupErrorMessage(err)
 		s.mu.Unlock()
-		writeError(w, http.StatusBadRequest, "无法连接 MySQL 或打开目标数据库，请检查安装信息；填写 127.0.0.1 或 localhost 时，请确认 MySQL 允许 Docker 网桥访问")
+		writeError(w, http.StatusBadRequest, mysqlSetupErrorMessage(err))
 		return
 	}
 	if err := initializeMySQLSchema(ctx, db); err != nil {
@@ -323,6 +323,10 @@ func splitSQLStatements(contents string) []string {
 }
 
 func openMySQL(ctx context.Context, host string, port int, username, password, database string) (*sql.DB, error) {
+	return openMySQLWithDatabase(ctx, host, port, username, password, database)
+}
+
+func openMySQLWithDatabase(ctx context.Context, host string, port int, username, password, database string) (*sql.DB, error) {
 	host = normalizeMySQLHost(host)
 	host = strings.Trim(host, "[]")
 	config := mysqlDriver.NewConfig()
@@ -345,6 +349,76 @@ func openMySQL(ctx context.Context, host string, port int, username, password, d
 		return nil, err
 	}
 	return db, nil
+}
+
+func connectAndPrepareMySQL(ctx context.Context, host string, port int, username, password, database string) (*sql.DB, error) {
+	serverDB, err := openMySQLWithDatabase(ctx, host, port, username, password, "")
+	if err != nil {
+		return nil, setupMySQLError{stage: "连接 MySQL 服务", err: err}
+	}
+	defer serverDB.Close()
+	if err := ensureTargetDatabase(ctx, serverDB, database); err != nil {
+		return nil, setupMySQLError{stage: "创建或检查目标数据库", err: err}
+	}
+	db, err := openMySQLWithDatabase(ctx, host, port, username, password, database)
+	if err != nil {
+		return nil, setupMySQLError{stage: "打开目标数据库", err: err}
+	}
+	return db, nil
+}
+
+func ensureTargetDatabase(ctx context.Context, db *sql.DB, database string) error {
+	var exists int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", database).Scan(&exists); err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", quoteMySQLIdentifier(database)))
+	return err
+}
+
+func quoteMySQLIdentifier(value string) string {
+	return "`" + strings.ReplaceAll(value, "`", "``") + "`"
+}
+
+type setupMySQLError struct {
+	stage string
+	err   error
+}
+
+func (e setupMySQLError) Error() string { return e.stage + ": " + e.err.Error() }
+func (e setupMySQLError) Unwrap() error { return e.err }
+
+func mysqlSetupErrorMessage(err error) string {
+	var setupErr setupMySQLError
+	stage := "MySQL 操作"
+	if errors.As(err, &setupErr) {
+		stage = setupErr.stage
+		err = setupErr.err
+	}
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		switch mysqlErr.Number {
+		case 1045:
+			return stage + "失败：MySQL 拒绝了用户名或密码。若填写 127.0.0.1/localhost，Docker 连接来源通常是宿主机网桥地址，请确认该账号允许从 Docker 网段登录。"
+		case 1044:
+			return stage + "失败：当前 MySQL 用户没有目标数据库访问权限。请授予该用户目标库权限，或使用具备建库权限的账号。"
+		case 1049:
+			return stage + "失败：目标数据库不存在，且当前账号没有创建数据库权限。请授予 CREATE 权限或先创建空数据库。"
+		case 1142, 1143, 1227:
+			return stage + "失败：当前 MySQL 用户缺少建库、建表或索引权限。"
+		case 1007:
+			return stage + "失败：目标数据库已存在，但 MySQL 返回了重复建库错误；请确认账号对该库有访问权限。"
+		}
+		return fmt.Sprintf("%s失败：MySQL 错误码 %d，请检查账号来源、数据库权限和服务器日志。", stage, mysqlErr.Number)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return stage + "失败：网络连接超时或被拒绝，请检查 MySQL 监听地址、端口、防火墙和 Docker 网桥访问。"
+	}
+	return stage + "失败：请检查 MySQL 地址、端口、数据库名、用户名、密码和权限。"
 }
 
 func normalizeMySQLHost(host string) string {

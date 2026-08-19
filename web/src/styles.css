@@ -460,7 +460,7 @@ p, h1, h2, h3 { margin: 0; }
 .setup-wizard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px 26px 20px; border-bottom: 1px solid var(--border); }
 .setup-wizard-head h2 { font-size: 19px; font-weight: 700; }
 .setup-wizard-state { padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 10px; white-space: nowrap; }
-.setup-progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--border); background: var(--surface-subtle); }
+.setup-progress { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--border); background: var(--surface-subtle); }
 .setup-progress-item { min-width: 0; display: grid; grid-template-columns: 25px minmax(0, 1fr); align-items: center; gap: 0 8px; padding: 13px 15px; border-right: 1px solid var(--border); color: var(--muted); }
 .setup-progress-item:last-child { border-right: 0; }
 .setup-progress-item > span { width: 25px; height: 25px; display: grid; place-items: center; grid-row: span 2; border: 1px solid var(--border-strong); border-radius: 50%; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
@@ -491,6 +491,10 @@ p, h1, h2, h3 { margin: 0; }
 .setup-inline-note { display: flex; align-items: flex-start; gap: 7px; margin-top: 21px; padding: 10px 11px; border-left: 2px solid var(--border-strong); color: var(--muted); background: var(--surface-subtle); font-size: 10px; line-height: 1.55; }
 .setup-inline-note svg { flex: 0 0 auto; margin-top: 1px; }
 .setup-inline-note code { color: var(--foreground); font-family: "SFMono-Regular", Consolas, monospace; }
+.setup-connection-result { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding: 10px 11px; border: 1px solid var(--border); color: var(--muted); background: var(--surface-subtle); font-size: 11px; line-height: 1.5; }
+.setup-connection-result-icon { display: inline-flex; flex: 0 0 auto; min-width: 16px; min-height: 16px; align-items: center; justify-content: center; }
+.setup-connection-result[data-state="ready"] { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); color: var(--success); background: var(--success-bg); }
+.setup-connection-result[data-state="error"] { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); color: var(--danger); background: var(--danger-bg); }
 .setup-form-error { margin-top: 16px; }
 .setup-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 .setup-form-spacer { min-width: 1px; }

@@ -4,7 +4,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+
+	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
 func validSetupRequest() setupRequest {
@@ -56,6 +59,28 @@ func TestNormalizeMySQLHostLeavesLoopbackWhenGatewayIsUnset(t *testing.T) {
 
 	if got := normalizeMySQLHost("127.0.0.1"); got != "127.0.0.1" {
 		t.Fatalf("native setup unexpectedly rewrote loopback host: %q", got)
+	}
+}
+
+func TestMySQLSetupErrorMessageExplainsAccessDenied(t *testing.T) {
+	err := setupMySQLError{stage: "连接 MySQL 服务", err: &mysqlDriver.MySQLError{Number: 1045}}
+	message := mysqlSetupErrorMessage(err)
+	if !strings.Contains(message, "用户名或密码") || !strings.Contains(message, "Docker 网段") {
+		t.Fatalf("unexpected access denied message: %s", message)
+	}
+}
+
+func TestMySQLSetupErrorMessageExplainsMissingDatabasePermission(t *testing.T) {
+	err := setupMySQLError{stage: "创建或检查目标数据库", err: &mysqlDriver.MySQLError{Number: 1049}}
+	message := mysqlSetupErrorMessage(err)
+	if !strings.Contains(message, "数据库不存在") || !strings.Contains(message, "CREATE 权限") {
+		t.Fatalf("unexpected missing database message: %s", message)
+	}
+}
+
+func TestQuoteMySQLIdentifier(t *testing.T) {
+	if got := quoteMySQLIdentifier("monitor"); got != "`monitor`" {
+		t.Fatalf("quoteMySQLIdentifier() = %q", got)
 	}
 }
 
