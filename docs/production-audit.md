@@ -42,7 +42,7 @@
 - 目标服务器只读环境检查：CentOS Stream 8、Docker 26.1.3、Compose v2.27、宝塔运行状态、监听端口和部署目录
 - 目标服务器安装器 `bash -n` 与代码/文档同步校验
 
-当前限制：本地没有 Maven CLI；目标服务器的 MySQL 已运行但 root socket 认证拒绝，尚未获得外部 `DB_URL/DB_USERNAME/DB_PASSWORD`，因此服务端容器尚未启动。用户按总终端材料准备数据库后，应在目标服务器补跑：
+当前限制：本地没有 Maven CLI；目标服务器目前已启动 `bootstrap`、`setup`、`web` 和 Redis 容器，仍停留在首次安装向导，尚未获得用户填写的外部 `DB_URL/DB_USERNAME/DB_PASSWORD`，因此生产 profile 尚未切换。用户按总终端材料准备数据库后，应在目标服务器补跑：
 
 ```powershell
 mvn -q test

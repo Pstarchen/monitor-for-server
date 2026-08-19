@@ -13,7 +13,7 @@
 
 ## 快速启动
 
-1. 准备 Docker Engine、Compose v2，以及用户自行维护的外部 MySQL 8.0+。项目不携带 MySQL 容器；安装向导会用你填写的账号连接 MySQL，目标数据库不存在时尝试创建，并执行监控表结构。
+1. 准备 Docker Engine、Compose v2，以及用户自行维护的外部 MySQL 8.0+。项目不携带 MySQL 容器；请先在 MySQL 管理端创建目标数据库和应用账号，安装向导只会用你填写的账号连接目标库并初始化监控表结构。
 
 ```powershell
 docker compose up --build -d
@@ -23,7 +23,7 @@ docker compose up --build -d
 
 3. 向导完成后服务会自动切换到生产配置，再使用刚创建的管理员登录。
 
-需要无人值守或无法访问浏览器时，仍可使用对应平台安装器：
+需要先构建并启动总终端、再通过浏览器完成配置时，可使用对应平台安装器：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
@@ -41,7 +41,8 @@ bash ./deploy/install-controller.sh
 ## 本地校验
 
 ```powershell
-go test ./...
+Push-Location agent; go test ./...; Pop-Location
+Push-Location setup; go test ./...; Pop-Location
 pnpm --dir web install
 pnpm --dir web test
 pnpm --dir web build
