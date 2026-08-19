@@ -8,11 +8,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
+@Profile("!bootstrap")
 @RequiredArgsConstructor
 public class BootstrapAdmin implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(BootstrapAdmin.class);
@@ -40,4 +42,3 @@ public class BootstrapAdmin implements ApplicationRunner {
         log.info("Bootstrap administrator created for username {}", username.trim());
     }
 }
-
