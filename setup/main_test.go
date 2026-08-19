@@ -70,6 +70,14 @@ func TestMySQLSetupErrorMessageExplainsAccessDenied(t *testing.T) {
 	}
 }
 
+func TestMySQLSetupErrorMessageExplainsHostDenied(t *testing.T) {
+	err := setupMySQLError{stage: "连接 MySQL 服务", err: &mysqlDriver.MySQLError{Number: 1130}}
+	message := mysqlSetupErrorMessage(err)
+	if !strings.Contains(message, "来源主机") || !strings.Contains(message, "仅允许 localhost") {
+		t.Fatalf("unexpected host denied message: %s", message)
+	}
+}
+
 func TestMySQLSetupErrorMessageExplainsMissingDatabasePermission(t *testing.T) {
 	err := setupMySQLError{stage: "创建或检查目标数据库", err: &mysqlDriver.MySQLError{Number: 1049}}
 	message := mysqlSetupErrorMessage(err)

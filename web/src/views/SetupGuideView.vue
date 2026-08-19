@@ -185,7 +185,7 @@ onMounted(async () => {
                 <label class="setup-field"><span>MySQL 用户名</span><input v-model="form.mysqlUsername" autocomplete="username" placeholder="monitor" /></label>
                 <label class="setup-field"><span>MySQL 密码</span><div class="setup-secret-field"><input v-model="form.mysqlPassword" :type="reveal.database ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.database ? '隐藏 MySQL 密码' : '显示 MySQL 密码'" :title="reveal.database ? '隐藏密码' : '显示密码'" @click="reveal.database = !reveal.database"><EyeOff v-if="reveal.database" :size="16" /><Eye v-else :size="16" /></button></div></label>
               </div>
-              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 可填写 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>host.docker.internal</code>；Docker 安装器会将前两者转换为宿主机地址。目标库不存在时会尝试创建，Linux 主机需允许 Docker 网桥访问 MySQL。</p>
+              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 可填写 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>host.docker.internal</code>；Docker 安装器会将前两者转换为宿主机地址。若提示错误码 1130，说明账号只允许 localhost，需要给该账号授权 Docker 网桥来源。</p>
               <div v-if="databaseCheck !== 'idle'" class="setup-connection-result" :data-state="databaseCheck" role="status" aria-live="polite">
                 <span class="setup-connection-result-icon"><span v-if="databaseCheck === 'checking'" class="spinner" /><CheckCircle2 v-else-if="databaseCheck === 'ready'" :size="16" /><AlertCircle v-else :size="16" /></span>
                 <span>{{ databaseCheckMessage }}</span>

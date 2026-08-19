@@ -403,6 +403,8 @@ func mysqlSetupErrorMessage(err error) string {
 		switch mysqlErr.Number {
 		case 1045:
 			return stage + "失败：MySQL 拒绝了用户名或密码。若填写 127.0.0.1/localhost，Docker 连接来源通常是宿主机网桥地址，请确认该账号允许从 Docker 网段登录。"
+		case 1130:
+			return stage + "失败：MySQL 拒绝了当前来源主机（错误码 1130）。请为该账号授权 Docker 网桥来源（通常使用账号@%或账号@宿主机网桥网段），仅允许 localhost 的账号不能从容器登录。"
 		case 1044:
 			return stage + "失败：当前 MySQL 用户没有目标数据库访问权限。请授予该用户目标库权限，或使用具备建库权限的账号。"
 		case 1049:
