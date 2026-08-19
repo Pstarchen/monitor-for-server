@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -135,7 +136,7 @@ func (s *setupService) testDatabase(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	db, err := connectAndPrepareMySQL(ctx, request.Host, request.Port, request.Username, request.Password, request.DatabaseName)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, mysqlSetupErrorMessage(err))
+		writeMySQLError(w, http.StatusBadRequest, err, request.Username, request.DatabaseName)
 		return
 	}
 	defer db.Close()
@@ -179,7 +180,7 @@ func (s *setupService) complete(w http.ResponseWriter, r *http.Request) {
 		s.applying = false
 		s.lastErr = mysqlSetupErrorMessage(err)
 		s.mu.Unlock()
-		writeError(w, http.StatusBadRequest, mysqlSetupErrorMessage(err))
+		writeMySQLError(w, http.StatusBadRequest, err, request.MySQLUsername, request.DatabaseName)
 		return
 	}
 	if err := initializeMySQLSchema(ctx, db); err != nil {
@@ -230,6 +231,16 @@ func (s *setupService) applyCompose() {
 
 var requiredSchemaTables = []string{"app_users", "devices", "metric_snapshots", "alert_rules", "alert_events", "system_settings", "audit_logs"}
 
+var requiredSchemaColumns = map[string][]string{
+	"app_users":        {"id", "username", "password_hash", "display_name", "role", "enabled", "created_at", "updated_at"},
+	"devices":          {"id", "name", "agent_key_hash", "agent_key_prefix", "status", "created_at", "updated_at"},
+	"metric_snapshots": {"id", "device_id", "collected_at", "cpu_usage", "memory_usage", "disk_usage"},
+	"alert_rules":      {"id", "name", "metric", "threshold", "severity", "enabled", "created_at", "updated_at"},
+	"alert_events":     {"id", "device_id", "rule_id", "status", "observed_value", "message", "started_at"},
+	"system_settings":  {"setting_key", "setting_value"},
+	"audit_logs":       {"id", "actor", "action", "target", "created_at"},
+}
+
 func initializeMySQLSchema(ctx context.Context, db *sql.DB) error {
 	rows, err := db.QueryContext(ctx, "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'")
 	if err != nil {
@@ -265,7 +276,47 @@ func initializeMySQLSchema(ctx context.Context, db *sql.DB) error {
 			return errors.New("目标数据库已有不完整表结构，请使用空数据库或先完成数据库迁移")
 		}
 	}
+	columns, err := readSchemaColumns(ctx, db)
+	if err != nil {
+		return errors.New("MySQL 已连接，但无法读取目标数据库字段结构，请确认账号具有读取 information_schema 的权限")
+	}
+	if missing := missingSchemaColumns(columns); len(missing) > 0 {
+		return fmt.Errorf("目标数据库已有不完整表结构，缺少字段：%s；请使用空数据库或先完成数据库迁移", strings.Join(missing, ", "))
+	}
 	return ensureFlywayBaseline(ctx, db)
+}
+
+func readSchemaColumns(ctx context.Context, db *sql.DB) (map[string]map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = DATABASE()")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns := make(map[string]map[string]bool)
+	for rows.Next() {
+		var tableName, columnName string
+		if err := rows.Scan(&tableName, &columnName); err != nil {
+			return nil, err
+		}
+		if columns[tableName] == nil {
+			columns[tableName] = make(map[string]bool)
+		}
+		columns[tableName][columnName] = true
+	}
+	return columns, rows.Err()
+}
+
+func missingSchemaColumns(columns map[string]map[string]bool) []string {
+	missing := make([]string, 0)
+	for tableName, required := range requiredSchemaColumns {
+		for _, columnName := range required {
+			if !columns[tableName][columnName] {
+				missing = append(missing, tableName+"."+columnName)
+			}
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 func ensureFlywayBaseline(ctx context.Context, db *sql.DB) error {
@@ -294,6 +345,13 @@ func ensureFlywayBaseline(ctx context.Context, db *sql.DB) error {
 	var migrationCount int
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM flyway_schema_history").Scan(&migrationCount); err != nil {
 		return errors.New("无法读取 Flyway 迁移记录")
+	}
+	var failedMigrations int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM flyway_schema_history WHERE success = FALSE").Scan(&failedMigrations); err != nil {
+		return errors.New("无法校验 Flyway 迁移记录")
+	}
+	if failedMigrations > 0 {
+		return errors.New("目标数据库存在失败的 Flyway 迁移记录，请先修复迁移后再继续")
 	}
 	if migrationCount == 0 {
 		if _, err := db.ExecContext(ctx, `INSERT INTO flyway_schema_history
@@ -421,6 +479,30 @@ func mysqlSetupErrorMessage(err error) string {
 		return stage + "失败：网络连接超时或被拒绝，请检查 MySQL 监听地址、端口、防火墙和 Docker 网桥访问。"
 	}
 	return stage + "失败：请检查 MySQL 地址、端口、数据库名、用户名、密码和权限。"
+}
+
+func mysqlSetupErrorCode(err error) (uint16, bool) {
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number, true
+	}
+	return 0, false
+}
+
+func writeMySQLError(w http.ResponseWriter, status int, err error, username, database string) {
+	response := map[string]string{"message": mysqlSetupErrorMessage(err)}
+	if code, ok := mysqlSetupErrorCode(err); ok && code == 1130 {
+		response["authorizationSql"] = mysqlAuthorizationSQL(username, database)
+	}
+	writeJSON(w, status, response)
+}
+
+func mysqlAuthorizationSQL(username, database string) string {
+	return fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY 'REPLACE_WITH_DATABASE_PASSWORD';\nGRANT ALL PRIVILEGES ON %s.* TO %s@'%%';\nFLUSH PRIVILEGES;", quoteMySQLString(username), quoteMySQLIdentifier(database), quoteMySQLString(username))
+}
+
+func quoteMySQLString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func normalizeMySQLHost(host string) string {

@@ -44,6 +44,16 @@ export async function testSetupDatabase(input: Pick<SetupRequest, 'mysqlHost' | 
   })
 }
 
+export type SetupDatabaseError = {
+  message?: string
+  authorizationSql?: string
+}
+
+export function setupDatabaseErrorDetails(error: unknown): SetupDatabaseError {
+  if (axios.isAxiosError(error)) return (error.response?.data as SetupDatabaseError | undefined) ?? {}
+  return {}
+}
+
 export function errorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     return (error.response?.data as { message?: string } | undefined)?.message ?? '请求失败，请稍后重试'

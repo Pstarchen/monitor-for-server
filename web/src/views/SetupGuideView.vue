@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Activity, AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, Database, Eye, EyeOff, FileKey2, Globe2, KeyRound, LockKeyhole, ServerCog, ShieldCheck } from 'lucide-vue-next'
-import { api, errorMessage, getSetupStatus, testSetupDatabase } from '@/lib/api'
+import { Activity, AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle2, Copy, Database, Eye, EyeOff, FileKey2, Globe2, KeyRound, LockKeyhole, ServerCog, ShieldCheck } from 'lucide-vue-next'
+import { api, errorMessage, getSetupStatus, setupDatabaseErrorDetails, testSetupDatabase } from '@/lib/api'
 import type { SetupRequest, SetupStatus } from '@/types'
 
 const currentStep = ref(0)
@@ -11,6 +11,8 @@ const completed = ref(false)
 const error = ref('')
 const databaseCheck = ref<'idle' | 'checking' | 'ready' | 'error'>('idle')
 const databaseCheckMessage = ref('')
+const authorizationSql = ref('')
+const authorizationSqlCopied = ref(false)
 const reveal = reactive({ database: false, admin: false })
 const setupStatus = ref<SetupStatus | null>(null)
 
@@ -40,6 +42,8 @@ const currentTitle = computed(() => steps[currentStep.value]?.title ?? '完成�
 
 function messageFor(cause: unknown) {
   error.value = errorMessage(cause)
+  authorizationSql.value = setupDatabaseErrorDetails(cause).authorizationSql ?? ''
+  authorizationSqlCopied.value = false
 }
 
 function validateStep(step: number) {
@@ -60,6 +64,8 @@ async function testDatabase() {
   databaseCheck.value = 'checking'
   databaseCheckMessage.value = '正在连接 MySQL、准备目标数据库并检查表结构…'
   error.value = ''
+  authorizationSql.value = ''
+  authorizationSqlCopied.value = false
   try {
     await testSetupDatabase(form)
     databaseCheck.value = 'ready'
@@ -72,6 +78,12 @@ async function testDatabase() {
   } finally {
     testingDatabase.value = false
   }
+}
+
+async function copyAuthorizationSql() {
+  if (!authorizationSql.value || !navigator.clipboard) return
+  await navigator.clipboard.writeText(authorizationSql.value)
+  authorizationSqlCopied.value = true
 }
 
 function nextStep() {
@@ -189,6 +201,11 @@ onMounted(async () => {
               <div v-if="databaseCheck !== 'idle'" class="setup-connection-result" :data-state="databaseCheck" role="status" aria-live="polite">
                 <span class="setup-connection-result-icon"><span v-if="databaseCheck === 'checking'" class="spinner" /><CheckCircle2 v-else-if="databaseCheck === 'ready'" :size="16" /><AlertCircle v-else :size="16" /></span>
                 <span>{{ databaseCheckMessage }}</span>
+              </div>
+              <div v-if="authorizationSql" class="setup-authorization-help">
+                <div class="setup-authorization-head"><strong>错误码 1130 的处理 SQL</strong><button type="button" class="setup-copy-command" :aria-label="authorizationSqlCopied ? '已复制授权 SQL' : '复制授权 SQL'" :title="authorizationSqlCopied ? '已复制' : '复制授权 SQL'" @click="copyAuthorizationSql"><Check v-if="authorizationSqlCopied" :size="15" /><Copy v-else :size="15" /></button></div>
+                <p>请在 MySQL 管理端执行，先把占位密码替换为该账号密码。它会新增允许 Docker 网桥来源的同名账号，不会修改 localhost 账号。</p>
+                <pre>{{ authorizationSql }}</pre>
               </div>
             </div>
 

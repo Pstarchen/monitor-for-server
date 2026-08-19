@@ -495,6 +495,12 @@ p, h1, h2, h3 { margin: 0; }
 .setup-connection-result-icon { display: inline-flex; flex: 0 0 auto; min-width: 16px; min-height: 16px; align-items: center; justify-content: center; }
 .setup-connection-result[data-state="ready"] { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); color: var(--success); background: var(--success-bg); }
 .setup-connection-result[data-state="error"] { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); color: var(--danger); background: var(--danger-bg); }
+.setup-authorization-help { margin-top: 12px; padding: 12px; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border)); background: var(--surface-subtle); }
+.setup-authorization-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--foreground); font-size: 11px; }
+.setup-authorization-help p { margin: 7px 0 9px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.setup-authorization-help pre { overflow-x: auto; margin: 0; padding: 9px 10px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: 10px/1.6 "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.setup-copy-command { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border: 1px solid var(--border); color: var(--muted); background: var(--background); cursor: pointer; }
+.setup-copy-command:hover { color: var(--foreground); border-color: var(--border-strong); }
 .setup-form-error { margin-top: 16px; }
 .setup-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); }
 .setup-form-spacer { min-width: 1px; }

@@ -92,6 +92,26 @@ func TestQuoteMySQLIdentifier(t *testing.T) {
 	}
 }
 
+func TestMissingSchemaColumnsReportsIncompleteExistingDatabase(t *testing.T) {
+	columns := map[string]map[string]bool{
+		"app_users": {"id": true},
+	}
+	missing := missingSchemaColumns(columns)
+	if len(missing) == 0 || !strings.Contains(strings.Join(missing, ","), "app_users.created_at") || missing[0] != "alert_events.device_id" {
+		t.Fatalf("missingSchemaColumns() = %#v, want sorted missing columns", missing)
+	}
+}
+
+func TestMySQLAuthorizationSQLDoesNotContainPassword(t *testing.T) {
+	sql := mysqlAuthorizationSQL("monitor", "monitor")
+	if !strings.Contains(sql, "'monitor'@'%'") || !strings.Contains(sql, "`monitor`.*") {
+		t.Fatalf("authorization SQL does not grant the expected account and database: %s", sql)
+	}
+	if strings.Contains(sql, "database-password") || !strings.Contains(sql, "REPLACE_WITH_DATABASE_PASSWORD") {
+		t.Fatalf("authorization SQL should contain only a password placeholder: %s", sql)
+	}
+}
+
 func TestSplitSQLStatementsRemovesComments(t *testing.T) {
 	statements := splitSQLStatements("-- first table\nCREATE TABLE one (id INT);\n\nCREATE TABLE two (id INT);")
 	if len(statements) != 2 || statements[0] != "CREATE TABLE one (id INT)" || statements[1] != "CREATE TABLE two (id INT)" {
