@@ -97,7 +97,7 @@ func TestMissingSchemaColumnsReportsIncompleteExistingDatabase(t *testing.T) {
 		"app_users": {"id": true},
 	}
 	missing := missingSchemaColumns(columns)
-	if len(missing) == 0 || !strings.Contains(strings.Join(missing, ","), "app_users.created_at") || missing[0] != "alert_events.device_id" {
+	if len(missing) == 0 || !strings.Contains(strings.Join(missing, ","), "app_users.created_at") || missing[0] != "alert_events.acknowledged_at" {
 		t.Fatalf("missingSchemaColumns() = %#v, want sorted missing columns", missing)
 	}
 }

@@ -233,12 +233,12 @@ var requiredSchemaTables = []string{"app_users", "devices", "metric_snapshots", 
 
 var requiredSchemaColumns = map[string][]string{
 	"app_users":        {"id", "username", "password_hash", "display_name", "role", "enabled", "created_at", "updated_at"},
-	"devices":          {"id", "name", "agent_key_hash", "agent_key_prefix", "status", "created_at", "updated_at"},
-	"metric_snapshots": {"id", "device_id", "collected_at", "cpu_usage", "memory_usage", "disk_usage"},
+	"devices":          {"id", "name", "hostname", "os", "architecture", "primary_ip", "location", "group_name", "agent_key_hash", "agent_key_prefix", "status", "last_seen_at", "hardware_json", "created_at", "updated_at"},
+	"metric_snapshots": {"id", "device_id", "collected_at", "cpu_usage", "memory_usage", "swap_usage", "load_1", "load_5", "load_15", "disk_usage", "disk_read_bps", "disk_write_bps", "network_sent_bps", "network_recv_bps", "tcp_connections", "disks_json", "processes_json", "services_json"},
 	"alert_rules":      {"id", "name", "metric", "threshold", "severity", "enabled", "created_at", "updated_at"},
-	"alert_events":     {"id", "device_id", "rule_id", "status", "observed_value", "message", "started_at"},
+	"alert_events":     {"id", "device_id", "rule_id", "status", "observed_value", "message", "started_at", "acknowledged_at", "acknowledged_by", "resolved_at"},
 	"system_settings":  {"setting_key", "setting_value"},
-	"audit_logs":       {"id", "actor", "action", "target", "created_at"},
+	"audit_logs":       {"id", "actor", "action", "target", "summary", "created_at"},
 }
 
 func initializeMySQLSchema(ctx context.Context, db *sql.DB) error {
