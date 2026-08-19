@@ -34,6 +34,31 @@ func TestValidateDatabaseTestRequiresTargetDatabase(t *testing.T) {
 	}
 }
 
+func TestNormalizeMySQLHostUsesDockerHostGateway(t *testing.T) {
+	previousGateway := setupHostGateway
+	setupHostGateway = "host.docker.internal"
+	defer func() { setupHostGateway = previousGateway }()
+
+	for _, host := range []string{"127.0.0.1", "localhost", "[::1]"} {
+		if got := normalizeMySQLHost(host); got != "host.docker.internal" {
+			t.Fatalf("normalizeMySQLHost(%q) = %q, want host gateway", host, got)
+		}
+	}
+	if got := normalizeMySQLHost("10.0.0.12"); got != "10.0.0.12" {
+		t.Fatalf("remote MySQL host was rewritten: %q", got)
+	}
+}
+
+func TestNormalizeMySQLHostLeavesLoopbackWhenGatewayIsUnset(t *testing.T) {
+	previousGateway := setupHostGateway
+	setupHostGateway = ""
+	defer func() { setupHostGateway = previousGateway }()
+
+	if got := normalizeMySQLHost("127.0.0.1"); got != "127.0.0.1" {
+		t.Fatalf("native setup unexpectedly rewrote loopback host: %q", got)
+	}
+}
+
 func TestSplitSQLStatementsRemovesComments(t *testing.T) {
 	statements := splitSQLStatements("-- first table\nCREATE TABLE one (id INT);\n\nCREATE TABLE two (id INT);")
 	if len(statements) != 2 || statements[0] != "CREATE TABLE one (id INT)" || statements[1] != "CREATE TABLE two (id INT)" {

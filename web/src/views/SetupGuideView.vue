@@ -171,13 +171,13 @@ onMounted(async () => {
             <div v-if="currentStep === 0" class="setup-form-section">
               <div class="setup-form-copy"><Database :size="18" /><div><h3>连接 MySQL 并初始化表结构</h3><p>请先在 MySQL 中创建一个空数据库和具备建表权限的账号。一次填写访问地址、端口、数据库名、用户名和密码，检测通过后安装器会创建监控系统所需的表结构。</p></div></div>
               <div class="setup-form-grid setup-form-grid-two">
-                <label class="setup-field"><span>MySQL 访问地址</span><input v-model="form.mysqlHost" autocomplete="off" placeholder="host.docker.internal" /></label>
+                <label class="setup-field"><span>MySQL 访问地址</span><input v-model="form.mysqlHost" autocomplete="off" placeholder="127.0.0.1 或 host.docker.internal" /></label>
                 <label class="setup-field"><span>MySQL 端口</span><input v-model.number="form.mysqlPort" type="number" min="1" max="65535" inputmode="numeric" placeholder="3306" /></label>
                 <label class="setup-field"><span>目标数据库名</span><input v-model="form.databaseName" autocomplete="off" placeholder="monitor" /></label>
                 <label class="setup-field"><span>MySQL 用户名</span><input v-model="form.mysqlUsername" autocomplete="username" placeholder="monitor" /></label>
                 <label class="setup-field"><span>MySQL 密码</span><div class="setup-secret-field"><input v-model="form.mysqlPassword" :type="reveal.database ? 'text' : 'password'" autocomplete="current-password" /><button type="button" :aria-label="reveal.database ? '隐藏 MySQL 密码' : '显示 MySQL 密码'" :title="reveal.database ? '隐藏密码' : '显示密码'" @click="reveal.database = !reveal.database"><EyeOff v-if="reveal.database" :size="16" /><Eye v-else :size="16" /></button></div></label>
               </div>
-              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 请使用 <code>host.docker.internal</code>，不要填写容器内的 <code>127.0.0.1</code>。目标数据库必须已存在且允许建表。</p>
+              <p class="setup-inline-note"><KeyRound :size="15" />同机 MySQL 可填写 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>host.docker.internal</code>；安装器会将前两者转换为宿主机地址。Linux 主机还需允许 Docker 网桥访问 MySQL。目标数据库必须已存在且允许建表。</p>
             </div>
 
             <div v-else class="setup-form-section">
