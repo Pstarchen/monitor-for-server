@@ -15,7 +15,7 @@ const initialOrigin = window.location.origin === 'http://localhost:5173' ? 'http
 const form = reactive<SetupRequest>({
   publicBaseUrl: initialOrigin,
   allowedOrigins: initialOrigin,
-  siteName: '观澜监控',
+  siteName: '星辰云巡',
   timezone: 'Asia/Shanghai',
   adminUsername: 'admin',
   adminPassword: '',

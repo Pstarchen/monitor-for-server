@@ -62,7 +62,7 @@ app:
   timezone: ${APP_TIMEZONE:Asia/Shanghai}
   bootstrap-admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
   bootstrap-admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
-  site-name: ${SITE_NAME:观澜监控}
+  site-name: ${SITE_NAME:星辰云巡}
   public-base-url: ${PUBLIC_BASE_URL:}
   allow-insecure-http: ${ALLOW_INSECURE_HTTP:false}
   settings-encryption-key: ${SETTINGS_ENCRYPTION_KEY:}

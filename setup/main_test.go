@@ -13,7 +13,7 @@ import (
 
 func validSetupRequest() setupRequest {
 	return setupRequest{
-		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "观澜监控", Timezone: "Asia/Shanghai",
+		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "星辰云巡", Timezone: "Asia/Shanghai",
 		AdminUsername: "admin", AdminPassword: "administrator-password", AdminPasswordConfirm: "administrator-password",
 	}
 }

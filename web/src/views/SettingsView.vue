@@ -48,7 +48,7 @@ const form = reactive({
   metricRetentionDays: 30,
   deviceOfflineAfterSeconds: 30,
   defaultCollectionSeconds: 3,
-  siteName: '观澜监控',
+  siteName: '星辰云巡',
   publicBaseUrl: '',
   timezone: 'Asia/Shanghai',
   email: {

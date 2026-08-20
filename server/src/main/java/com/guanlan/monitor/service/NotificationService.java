@@ -25,7 +25,7 @@ public class NotificationService {
 
     @Async
     public void send(AlertEvent event) {
-        String text = "[观澜监控] " + event.getMessage();
+        String text = "[" + brandName() + "] " + event.getMessage();
         SettingService.NotificationRuntime config = settings.notificationRuntime();
         runSafely("邮件", () -> sendEmail(config.email(), text));
         runSafely("钉钉", () -> sendWebhook(config.dingtalk(), text));
@@ -35,7 +35,7 @@ public class NotificationService {
     public TestResult test(String channel) {
         SettingService.NotificationRuntime config = settings.notificationRuntime();
         String normalized = channel == null ? "" : channel.toLowerCase();
-        String text = "[观澜监控] 通知通道测试成功";
+        String text = "[" + brandName() + "] 通知通道测试成功";
         try {
             switch (normalized) {
                 case "email" -> {
@@ -82,7 +82,7 @@ public class NotificationService {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(config.from());
         message.setTo(config.recipients().split("\\s*,\\s*"));
-        message.setSubject("观澜监控通知测试与告警");
+        message.setSubject(brandName() + "通知测试与告警");
         message.setText(text);
         sender.send(message);
     }
@@ -105,6 +105,11 @@ public class NotificationService {
 
     private void requireEnabled(boolean enabled) {
         if (!enabled) throw new ApiException(HttpStatus.BAD_REQUEST, "请先启用该通知通道");
+    }
+
+    private String brandName() {
+        String value = settings.publicBrand().siteName();
+        return value == null || value.isBlank() ? "星辰云巡" : value.trim();
     }
 
     private boolean blank(String value) { return value == null || value.isBlank(); }

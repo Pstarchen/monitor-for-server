@@ -54,6 +54,15 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    void publicBrandUsesTheNewDefaultWhenNoSettingHasBeenSaved() throws Exception {
+        settings.deleteById("system.site_name");
+
+        mvc.perform(get("/api/settings/public"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.siteName").value("星辰云巡"));
+    }
+
+    @Test
     void loginCreatesAUsableServerSession() throws Exception {
         var result = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/login")
                         .with(csrf())

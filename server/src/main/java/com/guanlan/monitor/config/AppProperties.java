@@ -13,7 +13,7 @@ public class AppProperties {
     private String timezone = "Asia/Shanghai";
     private String bootstrapAdminUsername;
     private String bootstrapAdminPassword;
-    private String siteName = "观澜监控";
+    private String siteName = "星辰云巡";
     private String publicBaseUrl = "";
     private boolean allowInsecureHttp;
     private String settingsEncryptionKey;
