@@ -23,6 +23,7 @@ public class AppProperties {
     private String allowedOrigins = "http://localhost:5173";
     private Notification notification = new Notification();
     private ControllerAgent controllerAgent = new ControllerAgent();
+    private ControllerUpdate controllerUpdate = new ControllerUpdate();
 
     @Getter
     @Setter
@@ -32,6 +33,13 @@ public class AppProperties {
         private String key;
         private String name = "总控服务器";
         private String groupName = "控制平面";
+    }
+
+    @Getter
+    @Setter
+    public static class ControllerUpdate {
+        private String serviceUrl = "http://setup:8090";
+        private String token;
     }
 
     @Getter

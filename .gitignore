@@ -5,6 +5,7 @@ Thumbs.db
 
 .env
 .setup-complete
+.controller-update-state.json
 *.log
 
 agent/bin/

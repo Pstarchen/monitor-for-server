@@ -92,6 +92,20 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerCannotReadControllerUpdateStatus() throws Exception {
+        mvc.perform(get("/api/admin/controller-update"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void controllerUpdateActionsRequireCsrf() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/admin/controller-update/check"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void agentKeyControlsMetricIngestion() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("integration-node", "lab", "tests", "127.0.0.1"));
         settings.save(new com.guanlan.monitor.domain.SystemSetting("agent.default_collection_seconds", "10"));

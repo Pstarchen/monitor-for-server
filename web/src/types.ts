@@ -192,3 +192,24 @@ export interface SetupRequest {
   adminPassword: string
   adminPasswordConfirm: string
 }
+
+export type ControllerUpdatePhase = 'IDLE' | 'CHECKING' | 'UPDATING' | 'ERROR'
+
+export interface ControllerServiceStatus {
+  name: 'setup' | 'server' | 'web' | string
+  revision?: string
+  health: string
+}
+
+export interface ControllerUpdateStatus {
+  state: ControllerUpdatePhase
+  currentRevision?: string
+  latestRevision?: string
+  updateAvailable: boolean
+  message?: string
+  checkedAt?: string
+  updatedAt?: string
+  autoUpdate: boolean
+  nextAutoUpdateAt?: string
+  services: ControllerServiceStatus[]
+}

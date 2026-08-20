@@ -7,7 +7,7 @@ Usage: update-controller.sh [--check|--apply|--auto] [--build] [--no-mirror]
 
   --check       pull candidate images and report that an update is ready.
   --apply       pull images and restart the controller services.
-  --auto        install a daily systemd timer which runs --apply.
+  --auto        enable the controller's daily 04:00 automatic update.
   --build       build from local source instead of pulling images.
   --no-mirror   skip configured mainland-China mirror registries.
 USAGE
@@ -43,12 +43,16 @@ read_env_value() {
 }
 
 compose_args=()
-if [[ "$(uname -s)" == "Linux" ]]; then
+controller_agent_enabled="${CONTROLLER_AGENT_ENABLED:-}"
+if [[ -z "${controller_agent_enabled}" && -f .env ]]; then
+  controller_agent_enabled="$(read_env_value CONTROLLER_AGENT_ENABLED)"
+fi
+if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   compose_args+=(--profile host-monitoring)
 fi
 compose_args+=(--project-directory "${project_root}" --env-file "${project_root}/.env")
 services=(setup server web)
-if [[ "$(uname -s)" == "Linux" ]]; then
+if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   services+=(controller-agent)
 fi
 
@@ -90,27 +94,39 @@ pull_images() {
   pull_one "$(image_value GUANLAN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:latest)"
   pull_one "$(image_value GUANLAN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:latest)"
   pull_one "$(image_value GUANLAN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:latest)"
-  if [[ "$(uname -s)" == "Linux" ]]; then
+  if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
     pull_one "$(image_value GUANLAN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:latest)"
   fi
 }
 
-install_auto_timer() {
-  if [[ "$(uname -s)" != "Linux" || "${EUID}" -ne 0 ]]; then
-    echo "--auto currently requires a Linux root shell with systemd." >&2
+set_env_value() {
+  local key="$1" value="$2" temporary
+  temporary="$(mktemp "${project_root}/.env.controller-update.XXXXXX")"
+  awk -v key="${key}" -v value="${value}" '
+    BEGIN { found = 0 }
+    index($0, key "=") == 1 { print key "=\"" value "\""; found = 1; next }
+    { print }
+    END { if (!found) print key "=\"" value "\"" }
+  ' "${project_root}/.env" > "${temporary}"
+  chmod 600 "${temporary}"
+  mv "${temporary}" "${project_root}/.env"
+}
+
+configure_auto_update() {
+  if [[ ! -f "${project_root}/.env" ]]; then
+    echo "Controller .env is missing; complete installation first." >&2
     exit 1
   fi
-  local service=/etc/systemd/system/guanlan-controller-update.service
-  local timer=/etc/systemd/system/guanlan-controller-update.timer
-  printf '%s\n' '[Unit]' 'Description=Update Guanlan controller images' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' "WorkingDirectory=${project_root}" "ExecStart=${script_dir}/update-controller.sh --apply" > "${service}"
-  printf '%s\n' '[Unit]' 'Description=Daily Guanlan controller image update' '' '[Timer]' 'OnCalendar=*-*-* 04:00' 'RandomizedDelaySec=45m' 'Persistent=true' 'Unit=guanlan-controller-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
-  systemctl daemon-reload
-  systemctl enable --now guanlan-controller-update.timer >/dev/null
-  echo "总控自动更新已启用：systemctl status guanlan-controller-update.timer"
+  set_env_value CONTROLLER_AUTO_UPDATE true
+  if [[ "$(uname -s)" == "Linux" && "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now guanlan-controller-update.timer >/dev/null 2>&1 || true
+  fi
+  docker compose "${compose_args[@]}" up -d --no-deps setup
+  echo "总控自动更新已启用：每天 04:00 按 APP_TIMEZONE 执行。"
 }
 
 if [[ "${mode}" == auto ]]; then
-  install_auto_timer
+  configure_auto_update
   exit 0
 fi
 

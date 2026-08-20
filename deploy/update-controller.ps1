@@ -13,22 +13,40 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安�
 & docker compose version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
 
-if ($Auto) {
-    $taskName = 'GuanlanControllerUpdate'
-    $scriptPath = Join-Path $PSScriptRoot 'update-controller.ps1'
-    $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File \`"$scriptPath\`" -Apply"
-    $trigger = New-ScheduledTaskTrigger -Daily -At 4:00am
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -RunLevel Highest -Force | Out-Null
-    Write-Host '总控自动更新已启用：GuanlanControllerUpdate'
-    exit 0
-}
-
 if (-not $Check -and -not $Apply) { $Check = $true }
 Push-Location $projectRoot
 try {
     $composeArgs = @()
     $envFile = Join-Path $projectRoot '.env'
     if (Test-Path -LiteralPath $envFile) { $composeArgs += @('--env-file', $envFile) }
+    if ($Auto) {
+        if (-not (Test-Path -LiteralPath $envFile)) { throw '总控 .env 不存在，请先完成安装。' }
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $found = $false
+        foreach ($line in [System.IO.File]::ReadAllLines($envFile)) {
+            if ($line.StartsWith('CONTROLLER_AUTO_UPDATE=')) {
+                if (-not $found) { [void] $lines.Add('CONTROLLER_AUTO_UPDATE="true"') }
+                $found = $true
+            }
+            else { [void] $lines.Add($line) }
+        }
+        if (-not $found) { [void] $lines.Add('CONTROLLER_AUTO_UPDATE="true"') }
+        $temporary = Join-Path $projectRoot ('.env.controller-update.' + [Guid]::NewGuid().ToString('N'))
+        try {
+            [System.IO.File]::WriteAllLines($temporary, $lines, [System.Text.UTF8Encoding]::new($false))
+            Move-Item -LiteralPath $temporary -Destination $envFile -Force
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        }
+        if (Get-ScheduledTask -TaskName 'GuanlanControllerUpdate' -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName 'GuanlanControllerUpdate' -Confirm:$false
+        }
+        & docker compose @composeArgs up -d --no-deps setup
+        if ($LASTEXITCODE -ne 0) { throw '自动更新设置已保存，但 setup 服务启动失败。' }
+        Write-Host '总控自动更新已启用：每天 04:00 按 APP_TIMEZONE 执行。'
+        exit 0
+    }
     $services = @('setup', 'server', 'web')
     $imageNames = @(
         'GUANLAN_SETUP_IMAGE=ghcr.io/pstarchen/monitor-for-server-setup:latest',

@@ -386,6 +386,47 @@ p, h1, h2, h3 { margin: 0; }
 .security-list dd span { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .security-footnote { display: flex; align-items: flex-start; gap: 8px; margin-top: 20px; padding: 11px 12px; border-left: 2px solid var(--border-strong); color: var(--muted); background: var(--surface-subtle); font-size: 10px; line-height: 1.6; }
 .security-footnote svg { flex: 0 0 auto; margin-top: 1px; }
+.update-settings { padding-top: 24px; }
+.update-state { min-height: 78px; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); }
+.update-state > span { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 7px; color: var(--success); background: var(--success-bg); }
+.update-state[data-state="CHECKING"] > span, .update-state[data-state="UPDATING"] > span { color: var(--info); background: var(--info-bg); }
+.update-state[data-state="ERROR"] > span { color: var(--danger); background: var(--danger-bg); }
+.update-state strong, .update-state p { display: block; }
+.update-state strong { font-size: 12px; }
+.update-state p { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.update-state > i { padding: 4px 7px; border-radius: 4px; color: var(--muted); background: var(--surface); font-size: 9px; font-style: normal; font-weight: 700; }
+.update-state .spinning { animation: spin 1s linear infinite; }
+.update-version-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 22px 0 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.update-version-list > div { min-height: 76px; display: grid; align-content: center; gap: 8px; padding: 12px 16px; }
+.update-version-list > div + div { border-left: 1px solid var(--border); }
+.update-version-list dt { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.update-version-list dd { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0; }
+.update-version-list code { overflow: hidden; color: var(--foreground); font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.update-version-list dd span { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.update-auto-row { min-height: 86px; }
+.update-switch { display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--muted); font-size: 10px; }
+.update-switch .el-switch { margin-left: 6px; }
+.update-time-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 18px 0 0; padding: 0; }
+.update-time-list > div { min-width: 0; padding: 2px 14px; border-left: 1px solid var(--border); }
+.update-time-list > div:first-child { padding-left: 0; border-left: 0; }
+.update-time-list dt { color: var(--muted); font-size: 9px; }
+.update-time-list dd { overflow: hidden; margin: 5px 0 0; font-size: 10px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.update-services { margin-top: 22px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.update-services-head { min-height: 45px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); }
+.update-services-head > div { display: flex; align-items: center; gap: 8px; }
+.update-services-head strong { color: var(--foreground); font-size: 11px; }
+.update-services-head > span { font-size: 9px; }
+.update-service-list > div { min-height: 45px; display: grid; grid-template-columns: minmax(150px, 1fr) minmax(100px, 160px) 72px; align-items: center; gap: 12px; border-top: 1px solid var(--border); font-size: 10px; }
+.update-service-list span { display: flex; align-items: center; gap: 8px; }
+.update-service-list span i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+.update-service-list span i[data-health="healthy"], .update-service-list span i[data-health="running"] { background: var(--success); }
+.update-service-list span i[data-health="starting"] { background: var(--warning); }
+.update-service-list span i[data-health="unhealthy"], .update-service-list span i[data-health="exited"], .update-service-list span i[data-health="not_found"] { background: var(--danger); }
+.update-service-list code { overflow: hidden; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.update-service-list small { color: var(--muted); text-align: right; }
+.update-services-empty { padding: 16px 0; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; }
+.update-inline-error { margin-top: 16px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border)); border-radius: 6px; color: var(--danger); background: var(--danger-bg); font-size: 10px; }
+.update-actions > div { display: flex; gap: 8px; }
 .role-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .role-summary article { min-height: 82px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 14px; }
 .role-summary article > span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); background: var(--surface-subtle); }
@@ -595,6 +636,18 @@ p, h1, h2, h3 { margin: 0; }
   .settings-section-actions { align-items: stretch; flex-direction: column; gap: 10px; }
   .settings-section-actions .el-button { width: 100%; }
   .security-settings { padding-top: 18px; }
+  .update-settings { padding-top: 18px; }
+  .update-state { grid-template-columns: 36px minmax(0, 1fr); }
+  .update-state > i { grid-column: 2; width: fit-content; }
+  .update-version-list { grid-template-columns: 1fr; }
+  .update-version-list > div + div { border-top: 1px solid var(--border); border-left: 0; }
+  .update-time-list { grid-template-columns: 1fr; gap: 10px; }
+  .update-time-list > div, .update-time-list > div:first-child { padding: 0; border-left: 0; }
+  .update-service-list > div { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 0; }
+  .update-service-list code { text-align: right; }
+  .update-service-list small { grid-column: 1 / -1; padding-left: 15px; text-align: left; }
+  .update-actions > div { display: grid; grid-template-columns: 1fr 1fr; }
+  .update-actions > div .el-button { width: 100%; margin: 0; }
   .security-list > div { grid-template-columns: 1fr; gap: 8px; padding: 14px 0; }
   .security-list dd { text-align: left; }
   .form-grid.two-fields { grid-template-columns: 1fr; }

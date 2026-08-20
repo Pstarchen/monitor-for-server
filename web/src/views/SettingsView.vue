@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Activity, CheckCircle2, ChevronRight, Database, Globe2, KeyRound, LockKeyhole,
-  Mail, MessageSquareText, RotateCcw, Save, Send, Settings2, ShieldCheck,
+  Clock3, Download, GitCommit, Mail, MessageSquareText, RefreshCw, RotateCcw,
+  Save, Send, ServerCog, Settings2, ShieldCheck,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingState from '@/components/LoadingState.vue'
@@ -12,10 +13,11 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { loadBranding } from '@/lib/branding'
-import type { Settings, WebhookSettings } from '@/types'
+import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controller-update'
+import type { ControllerServiceStatus, ControllerUpdateStatus, Settings, WebhookSettings } from '@/types'
 
 type ChannelKey = 'email' | 'dingtalk' | 'wecom'
-type SectionKey = 'general' | 'monitoring' | ChannelKey | 'security'
+type SectionKey = 'general' | 'monitoring' | ChannelKey | 'security' | 'updates'
 
 const sections = [
   {
@@ -37,6 +39,7 @@ const sections = [
     label: '系统状态',
     items: [
       { key: 'security' as const, label: '安全与存储', description: '凭据和数据边界', icon: ShieldCheck },
+      { key: 'updates' as const, label: '系统更新', description: '版本检查与升级策略', icon: RefreshCw },
     ],
   },
 ]
@@ -62,6 +65,12 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const testing = reactive<Record<ChannelKey, boolean>>({ email: false, dingtalk: false, wecom: false })
+const controllerUpdate = ref<ControllerUpdateStatus | null>(null)
+const updateLoading = ref(false)
+const updateAction = ref<'check' | 'apply' | 'auto' | ''>('')
+const updateError = ref('')
+const waitingForRestart = ref(false)
+let updatePollTimer: ReturnType<typeof setTimeout> | undefined
 const hasChanges = computed(() => baseline.value !== '' && baseline.value !== snapshot())
 
 function snapshot() {
@@ -152,10 +161,103 @@ function sourceText(source: WebhookSettings['source']) {
 }
 
 function navState(key: SectionKey) {
+  if (key === 'updates') {
+    if (!controllerUpdate.value) return ''
+    return controllerUpdate.value.state === 'ERROR' || controllerUpdate.value.updateAvailable ? 'attention' : 'ready'
+  }
   if (!settings.value || !['email', 'dingtalk', 'wecom'].includes(key)) return ''
   const channel = settings.value[key as ChannelKey]
   if (!channel.enabled) return 'disabled'
   return channel.configured ? 'ready' : 'attention'
+}
+
+function scheduleUpdatePoll(delay = 3000) {
+  if (updatePollTimer) clearTimeout(updatePollTimer)
+  updatePollTimer = setTimeout(() => loadControllerUpdate(true), delay)
+}
+
+async function loadControllerUpdate(silent = false) {
+  if (!silent) updateLoading.value = true
+  try {
+    controllerUpdate.value = (await api.get<ControllerUpdateStatus>('/admin/controller-update')).data
+    updateError.value = ''
+    if (!shouldPollUpdate(controllerUpdate.value.state)) {
+      waitingForRestart.value = false
+      updateAction.value = ''
+    }
+    if (shouldPollUpdate(controllerUpdate.value.state)) scheduleUpdatePoll()
+  } catch (cause) {
+    if (waitingForRestart.value) {
+      scheduleUpdatePoll(4000)
+    } else {
+      updateError.value = errorMessage(cause)
+    }
+  } finally {
+    updateLoading.value = false
+  }
+}
+
+async function checkControllerUpdate() {
+  updateAction.value = 'check'
+  updateError.value = ''
+  try {
+    controllerUpdate.value = (await api.post<ControllerUpdateStatus>('/admin/controller-update/check')).data
+    scheduleUpdatePoll()
+  } catch (cause) {
+    updateAction.value = ''
+    ElMessage.error(errorMessage(cause))
+  }
+}
+
+async function applyControllerUpdate() {
+  try {
+    await ElMessageBox.confirm(
+      '更新会拉取最新总控镜像并依次重启服务，控制台可能暂时无法访问，但不会删除监控数据。',
+      '立即更新总控',
+      { confirmButtonText: '开始更新', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  updateAction.value = 'apply'
+  waitingForRestart.value = true
+  updateError.value = ''
+  try {
+    controllerUpdate.value = (await api.post<ControllerUpdateStatus>('/admin/controller-update/apply')).data
+    ElMessage.success('更新任务已启动')
+    scheduleUpdatePoll(2000)
+  } catch (cause) {
+    waitingForRestart.value = false
+    updateAction.value = ''
+    ElMessage.error(errorMessage(cause))
+  }
+}
+
+async function setControllerAutoUpdate(value: string | number | boolean) {
+  updateAction.value = 'auto'
+  try {
+    controllerUpdate.value = (await api.put<ControllerUpdateStatus>('/admin/controller-update/auto', { enabled: Boolean(value) })).data
+    ElMessage.success(Boolean(value) ? '已启用每日自动更新' : '已关闭自动更新')
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    updateAction.value = ''
+  }
+}
+
+function formatUpdateTime(value?: string) {
+  if (!value) return '暂无记录'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(value))
+}
+
+function serviceName(service: ControllerServiceStatus['name']) {
+  return ({ setup: '安装与更新服务', server: '总控 API', web: 'Web 控制台' } as Record<string, string>)[service] ?? service
+}
+
+function healthText(health: string) {
+  return ({ healthy: '运行正常', starting: '正在启动', running: '运行中', unhealthy: '状态异常', exited: '已停止', not_found: '未运行' } as Record<string, string>)[health] ?? health
 }
 
 function canTest(channel: ChannelKey) {
@@ -176,14 +278,24 @@ onBeforeRouteLeave(async () => {
   }
 })
 
-onMounted(load)
+watch(activeSection, (section) => {
+  if (section === 'updates' && !controllerUpdate.value && !updateLoading.value) loadControllerUpdate()
+})
+
+onMounted(() => {
+  load()
+  loadControllerUpdate()
+})
+onBeforeUnmount(() => {
+  if (updatePollTimer) clearTimeout(updatePollTimer)
+})
 </script>
 
 <template>
   <section>
     <PageHeader eyebrow="SETTINGS" title="系统设置" description="管理监控行为、公共入口与通知渠道。">
       <template #actions>
-        <div class="settings-page-actions">
+        <div v-if="activeSection !== 'updates'" class="settings-page-actions">
           <span class="save-state" :data-dirty="hasChanges"><CheckCircle2 :size="14" />{{ hasChanges ? '有未保存修改' : '所有设置已保存' }}</span>
           <el-button :disabled="!hasChanges || saving" @click="reset"><RotateCcw :size="16" />撤销修改</el-button>
           <el-button type="primary" class="button-press" :disabled="!hasChanges" :loading="saving" @click="save"><Save :size="16" />保存设置</el-button>
@@ -299,7 +411,7 @@ onMounted(load)
             </el-form>
           </template>
 
-          <template v-else>
+          <template v-else-if="activeSection === 'security'">
             <header class="settings-editor-head"><span><ShieldCheck :size="18" /></span><div><h2>安全与存储</h2><p>查看敏感配置的保护边界和持久化状态。</p></div></header>
             <div class="settings-editor-body security-settings">
               <div class="security-state" :data-ready="settings.secretStorageReady"><span><LockKeyhole :size="18" /></span><div><strong>{{ settings.secretStorageReady ? '凭据加密存储已启用' : '凭据加密存储未启用' }}</strong><p>{{ settings.secretStorageReady ? '新的 SMTP 密码和 Webhook 将使用 AES-256-GCM 加密。' : '通知环境变量仍可使用，但控制台无法保存新的敏感值。' }}</p></div><StatusBadge :status="settings.secretStorageReady ? 'ONLINE' : 'PENDING'" /></div>
@@ -310,6 +422,71 @@ onMounted(load)
                 <div><dt><MessageSquareText :size="15" />企业微信 Webhook</dt><dd><strong>{{ sourceText(settings.wecom.source) }}</strong><span>{{ settings.wecom.webhookConfigured ? '地址已配置' : '未配置地址' }}</span></dd></div>
               </dl>
               <div class="security-footnote"><ShieldCheck :size="16" /><p>设置接口只返回配置状态。保存和测试操作均写入审计日志。</p></div>
+            </div>
+          </template>
+
+          <template v-else>
+            <header class="settings-editor-head"><span><RefreshCw :size="18" /></span><div><h2>系统更新</h2><p>检查并更新总控镜像，更新源优先使用已配置的国内镜像。</p></div></header>
+            <div class="settings-editor-body update-settings">
+              <LoadingState v-if="updateLoading && !controllerUpdate" />
+              <EmptyState v-else-if="updateError && !controllerUpdate" title="更新状态加载失败" :description="updateError">
+                <el-button @click="loadControllerUpdate()">重新加载</el-button>
+              </EmptyState>
+              <template v-else-if="controllerUpdate">
+                <div class="update-state" :data-state="controllerUpdate.state" role="status" aria-live="polite">
+                  <span><RefreshCw :size="18" :class="{ spinning: shouldPollUpdate(controllerUpdate.state) }" /></span>
+                  <div>
+                    <strong>{{ updateStateText(controllerUpdate.state, controllerUpdate.updateAvailable) }}</strong>
+                    <p>{{ waitingForRestart ? '服务正在重启，控制台恢复后会自动刷新状态。' : controllerUpdate.message }}</p>
+                  </div>
+                  <i>{{ controllerUpdate.state }}</i>
+                </div>
+
+                <dl class="update-version-list">
+                  <div>
+                    <dt><GitCommit :size="15" />当前构建版本</dt>
+                    <dd><code :title="controllerUpdate.currentRevision">{{ shortRevision(controllerUpdate.currentRevision) }}</code><span>正在运行</span></dd>
+                  </div>
+                  <div>
+                    <dt><Download :size="15" />最新构建版本</dt>
+                    <dd><code :title="controllerUpdate.latestRevision">{{ shortRevision(controllerUpdate.latestRevision) }}</code><span>{{ controllerUpdate.checkedAt ? '最近检查结果' : '检查后显示' }}</span></dd>
+                  </div>
+                </dl>
+
+                <div class="setting-list">
+                  <div class="setting-row update-auto-row">
+                    <div class="setting-copy"><label>每日自动更新</label><p>每天 04:00 按服务时区检查并应用新镜像；失败时保留当前数据卷。</p></div>
+                    <div class="setting-control update-switch"><Clock3 :size="16" /><span>{{ controllerUpdate.autoUpdate ? '已启用' : '已关闭' }}</span><el-switch :model-value="controllerUpdate.autoUpdate" :loading="updateAction === 'auto'" aria-label="每日自动更新" @change="setControllerAutoUpdate" /></div>
+                  </div>
+                </div>
+
+                <dl class="update-time-list">
+                  <div><dt>最近检查</dt><dd>{{ formatUpdateTime(controllerUpdate.checkedAt) }}</dd></div>
+                  <div><dt>最近更新</dt><dd>{{ formatUpdateTime(controllerUpdate.updatedAt) }}</dd></div>
+                  <div><dt>下次自动更新</dt><dd>{{ controllerUpdate.autoUpdate ? formatUpdateTime(controllerUpdate.nextAutoUpdateAt) : '自动更新未启用' }}</dd></div>
+                </dl>
+
+                <section class="update-services" aria-labelledby="update-services-title">
+                  <div class="update-services-head"><div><ServerCog :size="16" /><strong id="update-services-title">总控服务</strong></div><span>{{ controllerUpdate.services.length }} 个组件</span></div>
+                  <div v-if="controllerUpdate.services.length" class="update-service-list">
+                    <div v-for="service in controllerUpdate.services" :key="service.name">
+                      <span><i :data-health="service.health" />{{ serviceName(service.name) }}</span>
+                      <code :title="service.revision">{{ shortRevision(service.revision) }}</code>
+                      <small>{{ healthText(service.health) }}</small>
+                    </div>
+                  </div>
+                  <p v-else class="update-services-empty">尚未检测到运行中的总控组件。</p>
+                </section>
+
+                <div v-if="updateError" class="update-inline-error" role="alert">{{ updateError }}</div>
+                <div class="settings-section-actions update-actions">
+                  <p>更新过程不会修改 PostgreSQL 和 Redis 数据卷。</p>
+                  <div>
+                    <el-button :loading="updateAction === 'check'" :disabled="shouldPollUpdate(controllerUpdate.state)" @click="checkControllerUpdate"><RefreshCw :size="15" />检查更新</el-button>
+                    <el-button type="primary" :loading="updateAction === 'apply'" :disabled="!controllerUpdate.updateAvailable || shouldPollUpdate(controllerUpdate.state)" @click="applyControllerUpdate"><Download :size="15" />立即更新</el-button>
+                  </div>
+                </div>
+              </template>
             </div>
           </template>
         </main>

@@ -19,7 +19,7 @@ browser guide at /setup.
 -Cleanup stops this Compose project and removes its local images before build.
          PostgreSQL and Redis volumes are preserved.
 -Build builds controller images locally instead of pulling them from GHCR.
--AutoUpdate installs a daily controller update task after startup.
+-AutoUpdate enables the controller's daily 04:00 automatic update.
 '@
     exit 0
 }

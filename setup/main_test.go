@@ -134,6 +134,9 @@ func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
 	t.Setenv("CONTROLLER_AGENT_ENABLED", "true")
 	t.Setenv("CONTROLLER_AGENT_DEVICE_ID", "controller-device-id")
 	t.Setenv("CONTROLLER_AGENT_KEY", "controller-agent-key")
+	if err := os.WriteFile(envPath, []byte("CONTROLLER_AUTO_UPDATE=\"true\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := writeEnvironment(validSetupRequest()); err != nil {
 		t.Fatal(err)
@@ -147,6 +150,9 @@ func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
 	}
 	if values["CONTROLLER_AGENT_ENABLED"] != "true" || values["CONTROLLER_AGENT_DEVICE_ID"] != "controller-device-id" || values["CONTROLLER_AGENT_KEY"] != "controller-agent-key" {
 		t.Fatal("controller Agent settings were not preserved")
+	}
+	if values["CONTROLLER_AUTO_UPDATE"] != "true" {
+		t.Fatal("controller automatic update setting was not preserved")
 	}
 }
 

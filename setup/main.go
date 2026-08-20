@@ -26,6 +26,7 @@ import (
 var workspace = "/workspace"
 var envPath = "/workspace/.env"
 var completionMarkerPath = "/workspace/.setup-complete"
+var controllerUpdateStatePath = "/workspace/.controller-update-state.json"
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
 
@@ -58,6 +59,14 @@ func main() {
 		workspace = filepath.Clean(configuredWorkspace)
 		envPath = filepath.Join(workspace, ".env")
 		completionMarkerPath = filepath.Join(workspace, ".setup-complete")
+		controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+	}
+	updater := newControllerUpdateService()
+	if len(os.Args) > 1 && os.Args[1] == "update-runner" {
+		if err := updater.runUpdate(); err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
 	service := &setupService{}
 	if configuredEnv() && !setupCompleted() {
@@ -67,6 +76,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/setup/status", service.status)
 	mux.HandleFunc("/api/setup/complete", service.complete)
+	updater.register(mux)
+	go updater.runScheduler()
 
 	server := &http.Server{
 		Addr:              ":8090",
@@ -210,6 +221,10 @@ func writeEnvironment(request setupRequest) error {
 	controllerAgentKey := environmentValue("CONTROLLER_AGENT_KEY", "")
 	controllerAgentName := environmentValue("CONTROLLER_AGENT_NAME", "总控服务器")
 	controllerAgentGroup := environmentValue("CONTROLLER_AGENT_GROUP", "控制平面")
+	controllerAutoUpdate := configuredEnvironmentValue("CONTROLLER_AUTO_UPDATE")
+	if controllerAutoUpdate == "" {
+		controllerAutoUpdate = environmentValue("CONTROLLER_AUTO_UPDATE", "false")
+	}
 	if postgresPassword == "" {
 		return errors.New("内置 PostgreSQL 凭据缺失，请重新运行总终端安装器")
 	}
@@ -237,6 +252,7 @@ func writeEnvironment(request setupRequest) error {
 		"CONTROLLER_AGENT_KEY=" + dotenvValue(controllerAgentKey),
 		"CONTROLLER_AGENT_NAME=" + dotenvValue(controllerAgentName),
 		"CONTROLLER_AGENT_GROUP=" + dotenvValue(controllerAgentGroup),
+		"CONTROLLER_AUTO_UPDATE=" + dotenvValue(controllerAutoUpdate),
 	}
 	content := strings.Join(lines, "\n") + "\n"
 	if existing, err := os.ReadFile(envPath); err == nil {

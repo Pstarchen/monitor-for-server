@@ -107,6 +107,10 @@ Content-Type: application/json
 | GET | `/api/settings` | ADMIN | 非敏感系统设置及通知通道配置状态 |
 | GET | `/api/settings/agent-bootstrap` | ADMIN / OPERATOR | Agent 公网入口与当前上报周期 |
 | PUT | `/api/settings` | ADMIN | 更新系统设置与通知通道；敏感字段仅接受替换值 |
+| GET | `/api/admin/controller-update` | ADMIN | 查看总控构建版本、服务健康状态和更新策略 |
+| POST | `/api/admin/controller-update/check` | ADMIN | 从配置的镜像源检查总控更新 |
+| POST | `/api/admin/controller-update/apply` | ADMIN | 异步更新并重启总控服务 |
+| PUT | `/api/admin/controller-update/auto` | ADMIN | 启用或关闭每日 04:00 自动更新 |
 | POST | `/api/settings/notifications/{channel}/test` | ADMIN | 测试 `email`、`dingtalk` 或 `wecom` 通道 |
 | GET | `/api/admin/users` | ADMIN | 账号列表 |
 | POST | `/api/admin/users` | ADMIN | 创建账号，密码至少 12 位 |

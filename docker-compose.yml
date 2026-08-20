@@ -35,6 +35,8 @@ services:
       CONTROLLER_AGENT_KEY: ${CONTROLLER_AGENT_KEY:-}
       CONTROLLER_AGENT_NAME: ${CONTROLLER_AGENT_NAME:-总控服务器}
       CONTROLLER_AGENT_GROUP: ${CONTROLLER_AGENT_GROUP:-控制平面}
+      CONTROLLER_UPDATE_TOKEN: ${SETTINGS_ENCRYPTION_KEY-}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
     volumes:
       - ./:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
@@ -99,6 +101,8 @@ services:
       CONTROLLER_AGENT_KEY: ${CONTROLLER_AGENT_KEY:-}
       CONTROLLER_AGENT_NAME: ${CONTROLLER_AGENT_NAME:-总控服务器}
       CONTROLLER_AGENT_GROUP: ${CONTROLLER_AGENT_GROUP:-控制平面}
+      CONTROLLER_UPDATE_SERVICE_URL: http://setup:8090
+      CONTROLLER_UPDATE_TOKEN: ${SETTINGS_ENCRYPTION_KEY-}
     depends_on:
       postgres:
         condition: service_healthy

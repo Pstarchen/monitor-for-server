@@ -12,7 +12,7 @@ browser guide at /setup.
   --cleanup  stop this Compose project and remove its old images before build.
              PostgreSQL/Redis volumes are preserved.
   --build    build controller images locally instead of pulling them from GHCR.
-  --auto-update  install a daily controller update timer after startup.
+  --auto-update  enable the controller's daily 04:00 automatic update.
 USAGE
 }
 

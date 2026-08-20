@@ -76,6 +76,9 @@ app:
     key: ${CONTROLLER_AGENT_KEY:}
     name: ${CONTROLLER_AGENT_NAME:总控服务器}
     group-name: ${CONTROLLER_AGENT_GROUP:控制平面}
+  controller-update:
+    service-url: ${CONTROLLER_UPDATE_SERVICE_URL:http://setup:8090}
+    token: ${CONTROLLER_UPDATE_TOKEN:}
   notification:
     smtp-host: ${SMTP_HOST:}
     smtp-port: ${SMTP_PORT:587}

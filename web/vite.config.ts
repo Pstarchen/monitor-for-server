@@ -10,6 +10,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api/setup': { target: 'http://127.0.0.1:8090', changeOrigin: true },
       '/api': { target: 'http://127.0.0.1:8081', changeOrigin: true },
       '/actuator': { target: 'http://127.0.0.1:8081', changeOrigin: true },
       '/ws': { target: 'ws://127.0.0.1:8081', ws: true },
@@ -17,4 +18,3 @@ export default defineConfig({
   },
   test: { environment: 'node', include: ['src/**/*.test.ts'] },
 })
-
