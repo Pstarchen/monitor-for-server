@@ -18,8 +18,8 @@ public class ProductionConfigurationGuard {
         }
 
         String databaseUrl = environment.getProperty("spring.datasource.url", "").trim();
-        if (!databaseUrl.startsWith("jdbc:mysql://")) {
-            throw new IllegalStateException("生产环境必须使用安装向导配置的外部 MySQL，禁止使用 bootstrap H2 数据库");
+        if (!databaseUrl.startsWith("jdbc:postgresql://")) {
+            throw new IllegalStateException("生产环境必须使用内置 PostgreSQL，禁止使用 bootstrap H2 数据库");
         }
 
         String encryptionKey = environment.getProperty("app.settings-encryption-key", "").trim();

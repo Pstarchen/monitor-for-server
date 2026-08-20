@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, ArrowRight, Eye, EyeOff, LockKeyhole, Moon, ShieldCheck, Sun, UserRound } from 'lucide-vue-next'
+import { Activity, Eye, EyeOff, LockKeyhole, Moon, ShieldCheck, Sun, UserRound } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
-import { errorMessage } from '@/lib/api'
+import { errorMessage, getSetupStatus } from '@/lib/api'
 import { safeLocalPath } from '@/lib/format'
+import { setupIsReady } from '@/lib/setup-flow'
+import { loadBranding, siteName } from '@/lib/branding'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,8 +15,13 @@ const form = reactive({ username: '', password: '' })
 const loading = ref(false)
 const error = ref('')
 const revealPassword = ref(false)
+const serviceReady = ref(true)
+const serviceMessage = ref('')
+const serviceFailed = ref(false)
 const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
 const returnTo = computed(() => safeLocalPath(Array.isArray(route.query.redirect) ? route.query.redirect[0] : route.query.redirect))
+let serviceTimer: number | undefined
+let disposed = false
 
 function toggleTheme() {
   dark.value = !dark.value
@@ -23,6 +30,7 @@ function toggleTheme() {
 }
 
 async function submit() {
+  if (!serviceReady.value) return
   if (!form.username.trim() || !form.password) {
     error.value = '请输入用户名和密码'
     return
@@ -38,6 +46,42 @@ async function submit() {
     loading.value = false
   }
 }
+
+async function checkServiceReadiness() {
+  try {
+    const status = await getSetupStatus()
+    if (!status.configured) {
+      await router.replace({ name: 'setup' })
+      return
+    }
+    if (setupIsReady(status)) {
+      serviceReady.value = true
+      serviceMessage.value = ''
+      serviceFailed.value = false
+      await auth.initialize()
+      if (auth.user) await router.replace({ name: 'dashboard' })
+      return
+    }
+    serviceReady.value = false
+    serviceMessage.value = status.message ?? '正在启动生产服务'
+    serviceFailed.value = status.state === 'error'
+  } catch {
+    serviceReady.value = false
+    serviceMessage.value = '正在等待安装服务恢复'
+    serviceFailed.value = false
+    return
+  }
+  if (!disposed) serviceTimer = window.setTimeout(checkServiceReadiness, 1500)
+}
+
+onMounted(() => {
+  loadBranding()
+  checkServiceReadiness()
+})
+onBeforeUnmount(() => {
+  disposed = true
+  if (serviceTimer !== undefined) window.clearTimeout(serviceTimer)
+})
 </script>
 
 <template>
@@ -45,7 +89,7 @@ async function submit() {
     <header class="auth-topbar">
       <div class="brand auth-brand">
         <span class="brand-mark"><Activity :size="19" /></span>
-        <span><strong>观澜监控</strong><small>PRIVATE OPS</small></span>
+        <span><strong>{{ siteName }}</strong><small>PRIVATE OPS</small></span>
       </div>
       <button class="icon-button" type="button" :aria-label="dark ? '切换浅色模式' : '切换深色模式'" :title="dark ? '浅色模式' : '深色模式'" @click="toggleTheme">
         <Sun v-if="dark" :size="18" /><Moon v-else :size="18" />
@@ -63,7 +107,7 @@ async function submit() {
       <form class="auth-card fade-in-up" novalidate @submit.prevent="submit">
         <div class="auth-card-head">
           <p class="eyebrow">运维控制台</p>
-          <h2>登录观澜监控</h2>
+          <h2>登录{{ siteName }}</h2>
           <p>使用管理员分配的账号进入系统</p>
         </div>
 
@@ -82,13 +126,13 @@ async function submit() {
           </button>
         </div>
 
+        <p v-if="!serviceReady" :class="serviceFailed ? 'form-error' : 'auth-startup-status'" :role="serviceFailed ? 'alert' : 'status'"><span v-if="!serviceFailed" class="spinner" />{{ serviceMessage }}</p>
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-        <button class="primary-command button-press" type="submit" :disabled="loading">
+        <button class="primary-command button-press" type="submit" :disabled="loading || !serviceReady">
           <span v-if="loading" class="spinner" />
           <span>{{ loading ? '正在验证' : '登录' }}</span>
         </button>
         <p class="auth-security"><LockKeyhole :size="13" /> 会话凭据仅保存在安全 Cookie 中</p>
-        <RouterLink class="auth-help-link" to="/setup">首次部署总终端？查看安装指引 <ArrowRight :size="14" /></RouterLink>
       </form>
     </section>
   </main>

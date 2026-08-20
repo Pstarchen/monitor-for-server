@@ -40,6 +40,7 @@ type Options struct {
 	SkipProcesses       bool
 	SkipConnectionCount bool
 	DiskMountpoints     []string
+	HostRoot            string
 }
 
 func New(options Options) *Collector {
@@ -62,7 +63,7 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	disks, diskRead, diskWrite := collectDisks(ctx, c.options.DiskMountpoints)
+	disks, diskRead, diskWrite := collectDisks(ctx, c.options.DiskMountpoints, c.options.HostRoot)
 	network, netSent, netRecv := collectNetwork(ctx, c.options.SkipConnectionCount)
 
 	c.mu.Lock()
@@ -158,7 +159,7 @@ func collectMemory(ctx context.Context) (model.MemoryStats, error) {
 	return result, nil
 }
 
-func collectDisks(ctx context.Context, allowlist []string) ([]model.DiskStats, uint64, uint64) {
+func collectDisks(ctx context.Context, allowlist []string, hostRoot string) ([]model.DiskStats, uint64, uint64) {
 	partitions, _ := disk.PartitionsWithContext(ctx, false)
 	result := make([]model.DiskStats, 0, len(partitions))
 	seen := make(map[string]struct{})
@@ -169,7 +170,11 @@ func collectDisks(ctx context.Context, allowlist []string) ([]model.DiskStats, u
 		if _, exists := seen[partition.Mountpoint]; exists {
 			continue
 		}
-		usage, err := disk.UsageWithContext(ctx, partition.Mountpoint)
+		usagePath := hostPath(hostRoot, partition.Mountpoint)
+		if usagePath == "" {
+			continue
+		}
+		usage, err := disk.UsageWithContext(ctx, usagePath)
 		if err != nil || usage.Total == 0 {
 			continue
 		}
@@ -186,6 +191,25 @@ func collectDisks(ctx context.Context, allowlist []string) ([]model.DiskStats, u
 		writeBytes += counter.WriteBytes
 	}
 	return result, readBytes, writeBytes
+}
+
+// hostPath resolves a host mountpoint inside a read-only host-root bind mount.
+// Empty hostRoot retains the normal Agent behavior of reading its own filesystem.
+func hostPath(hostRoot, mountpoint string) string {
+	hostRoot = strings.TrimSpace(hostRoot)
+	if hostRoot == "" {
+		return mountpoint
+	}
+	cleanRoot := filepath.Clean(hostRoot)
+	cleanMount := filepath.Clean(mountpoint)
+	if !filepath.IsAbs(cleanRoot) || !filepath.IsAbs(cleanMount) {
+		return ""
+	}
+	resolved := filepath.Join(cleanRoot, strings.TrimPrefix(cleanMount, string(filepath.Separator)))
+	if resolved != cleanRoot && !strings.HasPrefix(resolved, cleanRoot+string(filepath.Separator)) {
+		return ""
+	}
+	return resolved
 }
 
 func collectNetwork(ctx context.Context, skipConnectionCount bool) (model.NetworkStats, uint64, uint64) {

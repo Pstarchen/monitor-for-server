@@ -4,18 +4,20 @@
 
 ## Linux
 
-推荐把预编译的 `guanlan-agent` 二进制复制到目标主机；没有二进制时，安装器会从仓库源码构建，因此目标机需要 Go 1.24+ 和仓库目录。
+推荐把预编译的 `guanlan-agent` 二进制复制到目标主机；没有二进制时，在线安装器会自动拉取仓库源码并构建，因此目标机需要 Go 1.24+、git 和仓库访问权限。内网环境可传 `--source-url` 指向镜像仓库。
 
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
-sudo --preserve-env=GUANLAN_AGENT_KEY ./deploy/install-agent.sh \
+curl -fsSL https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh | \
+sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
   --server-url https://monitor.example.com \
   --device-id '<设备ID>' \
-  --binary /path/to/guanlan-agent \
   --interval 3s \
   --disk / \
   --service nginx
 ```
+
+已有预编译程序时，可改为在仓库目录运行安装器并添加 `--binary /path/to/guanlan-agent`，无需在目标机安装 Go。
 
 支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`。安装后检查：
 

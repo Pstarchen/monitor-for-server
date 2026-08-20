@@ -70,6 +70,12 @@ app:
   device-offline-after-seconds: ${DEVICE_OFFLINE_AFTER_SECONDS:30}
   redis-enabled: ${REDIS_ENABLED:false}
   allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
+  controller-agent:
+    enabled: ${CONTROLLER_AGENT_ENABLED:false}
+    device-id: ${CONTROLLER_AGENT_DEVICE_ID:}
+    key: ${CONTROLLER_AGENT_KEY:}
+    name: ${CONTROLLER_AGENT_NAME:总控服务器}
+    group-name: ${CONTROLLER_AGENT_GROUP:控制平面}
   notification:
     smtp-host: ${SMTP_HOST:}
     smtp-port: ${SMTP_PORT:587}
@@ -88,7 +94,7 @@ spring:
     activate:
       on-profile: bootstrap
   datasource:
-    url: jdbc:h2:mem:bootstrap;MODE=MySQL;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:mem:bootstrap;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     username: sa
     password:
   jpa:
@@ -105,7 +111,7 @@ spring:
     activate:
       on-profile: production
   datasource:
-    # Production must use the database explicitly entered in the setup guide.
+    # Production always uses the PostgreSQL service created by Compose.
     # Do not fall back to the bootstrap H2 database when a deployment is incomplete.
     url: ${DB_URL}
     username: ${DB_USERNAME}

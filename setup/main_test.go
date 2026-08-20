@@ -1,19 +1,19 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
 func validSetupRequest() setupRequest {
 	return setupRequest{
-		MySQLHost: "db.example.internal", MySQLPort: 3306, DatabaseName: "monitor", MySQLUsername: "monitor", MySQLPassword: "database-password",
-		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "观澜监控", Timezone: "Asia/Shanghai", WebPort: 18080, WebBindAddress: "127.0.0.1",
+		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "观澜监控", Timezone: "Asia/Shanghai",
 		AdminUsername: "admin", AdminPassword: "administrator-password", AdminPasswordConfirm: "administrator-password",
 	}
 }
@@ -24,83 +24,142 @@ func TestValidateSetupRequest(t *testing.T) {
 	}
 
 	request := validSetupRequest()
-	request.DatabaseName = "monitor-prod;drop"
+	request.PublicBaseURL = "https://monitor.example.com/"
+	request.AllowedOrigins = "https://monitor.example.com/"
+	if err := validateSetupRequest(request); err != nil {
+		t.Fatalf("trailing origin slash should be accepted: %v", err)
+	}
+
+	request = validSetupRequest()
+	request.Timezone = "not-a-timezone"
 	if err := validateSetupRequest(request); err == nil {
-		t.Fatal("unsafe database identifier was accepted")
+		t.Fatal("invalid IANA timezone was accepted")
 	}
 }
 
-func TestValidateDatabaseTestRequiresTargetDatabase(t *testing.T) {
-	request := databaseTestRequest{Host: "127.0.0.1", Port: 3306, Username: "root", Password: "secret"}
-	if err := validateDatabaseTest(request); err == nil {
-		t.Fatal("database connection test accepted an empty target database")
+func TestValidateAllowedOriginsRequiresPublicOrigin(t *testing.T) {
+	publicURL, err := url.Parse("https://monitor.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateAllowedOrigins("https://other.example.com", publicURL); err == nil {
+		t.Fatal("allowed origins without the public origin were accepted")
+	}
+	if err := validateAllowedOrigins("https://monitor.example.com, https://127.0.0.1:18080", publicURL); err != nil {
+		t.Fatalf("valid additional origin rejected: %v", err)
 	}
 }
 
-func TestMySQLSetupErrorMessageExplainsAccessDenied(t *testing.T) {
-	err := setupMySQLError{stage: "连接 MySQL 服务", err: &mysqlDriver.MySQLError{Number: 1045}}
-	message := mysqlSetupErrorMessage(err)
-	if !strings.Contains(message, "用户名或密码") {
-		t.Fatalf("unexpected access denied message: %s", message)
+func TestConfiguredEnvRequiresPostgreSQLAndApplicationSecrets(t *testing.T) {
+	originalEnvPath := envPath
+	envPath = filepath.Join(t.TempDir(), ".env")
+	t.Cleanup(func() { envPath = originalEnvPath })
+
+	content := "SPRING_PROFILES_ACTIVE=production\nPOSTGRES_DB=guanlan_monitor\nPOSTGRES_USER=guanlan\nPOSTGRES_PASSWORD=database-password\nBOOTSTRAP_ADMIN_USERNAME=admin\nBOOTSTRAP_ADMIN_PASSWORD=administrator-password\nSETTINGS_ENCRYPTION_KEY=key\n"
+	if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !configuredEnv() {
+		t.Fatal("complete PostgreSQL configuration was not detected")
+	}
+
+	if err := os.WriteFile(envPath, []byte(strings.Replace(content, "POSTGRES_PASSWORD=database-password\n", "", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if configuredEnv() {
+		t.Fatal("configuration without PostgreSQL password was accepted")
 	}
 }
 
-func TestMySQLSetupErrorMessageExplainsHostDenied(t *testing.T) {
-	err := setupMySQLError{stage: "连接 MySQL 服务", err: &mysqlDriver.MySQLError{Number: 1130}}
-	message := mysqlSetupErrorMessage(err)
-	if !strings.Contains(message, "来源主机") || !strings.Contains(message, "实际部署网络") {
-		t.Fatalf("unexpected host denied message: %s", message)
+func TestComposeApplyDoesNotRecreateSetupService(t *testing.T) {
+	t.Setenv("CONTROLLER_AGENT_ENABLED", "false")
+	got := strings.Join(composeApplyArgs(), " ")
+	want := "compose --project-directory " + workspace + " --env-file " + envPath + " up -d --build --no-deps --wait --wait-timeout 300 server"
+	if got != want {
+		t.Fatalf("composeApplyArgs() = %q, want %q", got, want)
 	}
 }
 
-func TestMySQLSetupErrorMessageExplainsMissingDatabase(t *testing.T) {
-	err := setupMySQLError{stage: "连接 MySQL 数据库", err: &mysqlDriver.MySQLError{Number: 1049}}
-	message := mysqlSetupErrorMessage(err)
-	if !strings.Contains(message, "数据库不存在") || !strings.Contains(message, "先在 MySQL 管理端创建数据库") {
-		t.Fatalf("unexpected missing database message: %s", message)
+func TestComposeApplyEnablesControllerHostMonitoring(t *testing.T) {
+	t.Setenv("CONTROLLER_AGENT_ENABLED", "true")
+	got := strings.Join(composeApplyArgs(), " ")
+	if !strings.Contains(got, "--profile host-monitoring up") {
+		t.Fatalf("controller monitoring profile missing: %q", got)
 	}
 }
 
-func TestQuoteMySQLIdentifier(t *testing.T) {
-	if got := quoteMySQLIdentifier("monitor"); got != "`monitor`" {
-		t.Fatalf("quoteMySQLIdentifier() = %q", got)
+func TestSetupStatusWaitsForProductionCompletionMarker(t *testing.T) {
+	originalWorkspace, originalEnvPath, originalMarkerPath := workspace, envPath, completionMarkerPath
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	completionMarkerPath = filepath.Join(workspace, ".setup-complete")
+	t.Cleanup(func() {
+		workspace, envPath, completionMarkerPath = originalWorkspace, originalEnvPath, originalMarkerPath
+	})
+
+	content := "SPRING_PROFILES_ACTIVE=production\nPOSTGRES_DB=guanlan_monitor\nPOSTGRES_USER=guanlan\nPOSTGRES_PASSWORD=database-password\nBOOTSTRAP_ADMIN_USERNAME=admin\nBOOTSTRAP_ADMIN_PASSWORD=administrator-password\nSETTINGS_ENCRYPTION_KEY=key\nPUBLIC_BASE_URL=https://monitor.example.com\n"
+	if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	service := &setupService{applying: true}
+	status := requestSetupStatus(t, service)
+	if !status.Configured || status.State != "applying" {
+		t.Fatalf("active setup status = %+v, want configured applying", status)
+	}
+
+	service.applying = false
+	status = requestSetupStatus(t, service)
+	if !status.Configured || status.State != "applying" {
+		t.Fatalf("unmarked setup status = %+v, want configured applying", status)
+	}
+
+	if err := writeSetupCompletionMarker(); err != nil {
+		t.Fatal(err)
+	}
+	status = requestSetupStatus(t, service)
+	if !status.Configured || status.State != "configured" || status.BaseURL != "https://monitor.example.com" {
+		t.Fatalf("completed setup status = %+v", status)
 	}
 }
 
-func TestMySQLJDBCURLPreservesConfiguredEndpoint(t *testing.T) {
-	if got := mysqlJDBCURL("db.example.internal", 3307, "monitor"); got != "jdbc:mysql://db.example.internal:3307/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC" {
-		t.Fatalf("mysqlJDBCURL() = %q", got)
+func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
+	originalWorkspace, originalEnvPath := workspace, envPath
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	t.Cleanup(func() { workspace, envPath = originalWorkspace, originalEnvPath })
+	t.Setenv("POSTGRES_PASSWORD", "database-password")
+	t.Setenv("WEB_PORT", "19090")
+	t.Setenv("WEB_BIND_ADDRESS", "127.0.0.1")
+	t.Setenv("CONTROLLER_AGENT_ENABLED", "true")
+	t.Setenv("CONTROLLER_AGENT_DEVICE_ID", "controller-device-id")
+	t.Setenv("CONTROLLER_AGENT_KEY", "controller-agent-key")
+
+	if err := writeEnvironment(validSetupRequest()); err != nil {
+		t.Fatal(err)
 	}
-	if got := mysqlJDBCURL("[2001:db8::10]", 3306, "monitor"); got != "jdbc:mysql://[2001:db8::10]:3306/monitor?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC" {
-		t.Fatalf("mysqlJDBCURL() IPv6 = %q", got)
+	values, err := readEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["WEB_PORT"] != "19090" || values["WEB_BIND_ADDRESS"] != "127.0.0.1" {
+		t.Fatalf("listener settings were not preserved: port=%q bind=%q", values["WEB_PORT"], values["WEB_BIND_ADDRESS"])
+	}
+	if values["CONTROLLER_AGENT_ENABLED"] != "true" || values["CONTROLLER_AGENT_DEVICE_ID"] != "controller-device-id" || values["CONTROLLER_AGENT_KEY"] != "controller-agent-key" {
+		t.Fatal("controller Agent settings were not preserved")
 	}
 }
 
-func TestMissingSchemaColumnsReportsIncompleteExistingDatabase(t *testing.T) {
-	columns := map[string]map[string]bool{
-		"app_users": {"id": true},
+func requestSetupStatus(t *testing.T, service *setupService) setupStatus {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/setup/status", nil)
+	response := httptest.NewRecorder()
+	service.status(response, request)
+	var status setupStatus
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		t.Fatal(err)
 	}
-	missing := missingSchemaColumns(columns)
-	if len(missing) == 0 || !strings.Contains(strings.Join(missing, ","), "app_users.created_at") || missing[0] != "alert_events.acknowledged_at" {
-		t.Fatalf("missingSchemaColumns() = %#v, want sorted missing columns", missing)
-	}
-}
-
-func TestMySQLAuthorizationSQLDoesNotContainPassword(t *testing.T) {
-	sql := mysqlAuthorizationSQL("monitor", "monitor")
-	if !strings.Contains(sql, "'monitor'@'REPLACE_WITH_ALLOWED_SOURCE_HOST'") || !strings.Contains(sql, "`monitor`.*") {
-		t.Fatalf("authorization SQL does not grant the expected account and database: %s", sql)
-	}
-	if strings.Contains(sql, "database-password") || !strings.Contains(sql, "REPLACE_WITH_DATABASE_PASSWORD") {
-		t.Fatalf("authorization SQL should contain only a password placeholder: %s", sql)
-	}
-}
-
-func TestSplitSQLStatementsRemovesComments(t *testing.T) {
-	statements := splitSQLStatements("-- first table\nCREATE TABLE one (id INT);\n\nCREATE TABLE two (id INT);")
-	if len(statements) != 2 || statements[0] != "CREATE TABLE one (id INT)" || statements[1] != "CREATE TABLE two (id INT)" {
-		t.Fatalf("splitSQLStatements() = %#v", statements)
-	}
+	return status
 }
 
 func TestDotenvValueEscapesComposeInterpolation(t *testing.T) {
@@ -115,7 +174,7 @@ func TestOriginGuardAcceptsForwardedPort(t *testing.T) {
 	handler := withOriginGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	request := httptest.NewRequest(http.MethodPost, "http://setup:8090/api/setup/test-database", nil)
+	request := httptest.NewRequest(http.MethodPost, "http://setup:8090/api/setup/complete", nil)
 	request.Host = "111.170.155.150"
 	request.Header.Set("Origin", "http://111.170.155.150:18080")
 	request.Header.Set("X-Forwarded-Host", "111.170.155.150:18080")
@@ -130,7 +189,7 @@ func TestOriginGuardAcceptsForwardedPublicHost(t *testing.T) {
 	handler := withOriginGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	request := httptest.NewRequest(http.MethodPost, "http://setup:8090/api/setup/test-database", nil)
+	request := httptest.NewRequest(http.MethodPost, "http://setup:8090/api/setup/complete", nil)
 	request.Host = "localhost"
 	request.Header.Set("Origin", "http://monitor.xciy.cn")
 	request.Header.Set("X-Forwarded-Host", "monitor.xciy.cn")
@@ -145,7 +204,7 @@ func TestOriginGuardRejectsDifferentHost(t *testing.T) {
 	handler := withOriginGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	request := httptest.NewRequest(http.MethodPost, "http://setup:8090/api/setup/test-database", nil)
+	request := httptest.NewRequest(http.MethodPost, "http://setup:8090/api/setup/complete", nil)
 	request.Host = "monitor.example.com"
 	request.Header.Set("Origin", "https://evil.example.com")
 	response := httptest.NewRecorder()

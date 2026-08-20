@@ -27,7 +27,7 @@ public final class DeviceDtos {
     public record View(
             String id, String name, String hostname, String os, String architecture,
             String primaryIp, String location, String groupName, Device.Status status,
-            Instant lastSeenAt, String agentKeyPrefix, Instant createdAt, Map<String, Object> hardware, MetricView latest
+            Instant lastSeenAt, String agentKeyPrefix, boolean controllerManaged, Instant createdAt, Map<String, Object> hardware, MetricView latest
     ) {}
 
     public record Credential(View device, String agentKey) {}

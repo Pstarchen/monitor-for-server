@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)] [string] $DeviceId,
     [ValidateSet('1s', '3s', '10s', '30s', '60s')] [string] $Interval = '3s',
     [string] $BinaryPath,
+    [string] $RepositoryUrl = 'https://github.com/Pstarchen/monitor-for-server.git',
     [string[]] $MonitoredService = @(),
     [string[]] $DiskMountpoint = @(),
     [switch] $SkipProcesses,
@@ -28,13 +29,26 @@ if ([string]::IsNullOrWhiteSpace($agentKey)) {
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $temporaryBinary = $null
+$temporarySource = $null
 try {
     if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
+        $sourceRoot = $projectRoot
+        if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
+            if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+                throw '未找到 Agent 源码。请安装 git，或通过 -BinaryPath 提供预编译 Agent。'
+            }
+            $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
+            & git clone --depth 1 --filter=blob:none --sparse $RepositoryUrl $temporarySource
+            if ($LASTEXITCODE -ne 0) { throw 'Agent 源码下载失败。' }
+            & git -C $temporarySource sparse-checkout set agent
+            if ($LASTEXITCODE -ne 0) { throw 'Agent 源码准备失败。' }
+            $sourceRoot = $temporarySource
+        }
         if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
-            throw '未提供 -BinaryPath 时需要安装 Go。'
+            throw '未提供 -BinaryPath 时需要 Go 1.24+；也可以指定预编译 Agent。'
         }
         $temporaryBinary = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-{0}.exe" -f [Guid]::NewGuid().ToString('N'))
-        Push-Location (Join-Path $projectRoot 'agent')
+        Push-Location (Join-Path $sourceRoot 'agent')
         try {
             $env:CGO_ENABLED = '0'
             & go build -trimpath -ldflags '-s -w' -o $temporaryBinary ./cmd/agent
@@ -93,5 +107,8 @@ finally {
     Remove-Item Env:GUANLAN_AGENT_KEY -ErrorAction SilentlyContinue
     if ($temporaryBinary -and (Test-Path -LiteralPath $temporaryBinary)) {
         Remove-Item -LiteralPath $temporaryBinary -Force
+    }
+    if ($temporarySource -and (Test-Path -LiteralPath $temporarySource)) {
+        Remove-Item -LiteralPath $temporarySource -Recurse -Force
     }
 }

@@ -10,7 +10,8 @@ import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
-import { bytes, dateTime, percent, rate, relativeTime } from '@/lib/format'
+import { copyText } from '@/lib/clipboard'
+import { bytes, dateTime, percent, rate, rateScale, relativeTime } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth'
 import type { Device, DeviceCredential, Metric } from '@/types'
 
@@ -36,11 +37,12 @@ const resourceSeries = computed(() => [
   { name: '内存', data: history.value.map((item) => item.memoryUsage), color: '#17834d' },
   { name: '磁盘', data: history.value.map((item) => item.diskUsage), color: '#986400' },
 ])
+const ioScale = computed(() => rateScale(history.value.reduce((max, item) => Math.max(max, item.networkRecvBps, item.networkSentBps, item.diskReadBps, item.diskWriteBps), 0)))
 const ioSeries = computed(() => [
-  { name: '网络接收', data: history.value.map((item) => item.networkRecvBps / 1024), color: '#2867a6' },
-  { name: '网络发送', data: history.value.map((item) => item.networkSentBps / 1024), color: '#17834d' },
-  { name: '磁盘读取', data: history.value.map((item) => item.diskReadBps / 1024), color: '#986400' },
-  { name: '磁盘写入', data: history.value.map((item) => item.diskWriteBps / 1024), color: '#c73832' },
+  { name: '网络接收', data: history.value.map((item) => item.networkRecvBps / ioScale.value.divisor), color: '#2867a6' },
+  { name: '网络发送', data: history.value.map((item) => item.networkSentBps / ioScale.value.divisor), color: '#17834d' },
+  { name: '磁盘读取', data: history.value.map((item) => item.diskReadBps / ioScale.value.divisor), color: '#986400' },
+  { name: '磁盘写入', data: history.value.map((item) => item.diskWriteBps / ioScale.value.divisor), color: '#c73832' },
 ])
 
 function section(name: string): Record<string, unknown> {
@@ -95,7 +97,7 @@ async function rotateKey() {
 async function copyKey() {
   if (!credential.value) return
   try {
-    await navigator.clipboard.writeText(credential.value.agentKey)
+    await copyText(credential.value.agentKey)
     ElMessage.success('密钥已复制')
   } catch {
     ElMessage.error('复制失败，请手动选择密钥')
@@ -145,7 +147,7 @@ onBeforeUnmount(() => {
           <div class="trend-toolbar"><span>趋势时间范围</span><el-segmented v-model="rangeHours" :options="[{ label: '1 小时', value: 1 }, { label: '6 小时', value: 6 }, { label: '24 小时', value: 24 }]" @change="load(true)" /></div>
           <div v-if="history.length" class="chart-grid">
             <article class="panel"><div class="panel-head"><div><h2>资源使用率</h2><p>CPU、内存与最高磁盘占用</p></div></div><MetricChart :labels="labels" :series="resourceSeries" unit="%" /></article>
-            <article class="panel"><div class="panel-head"><div><h2>磁盘与网络吞吐</h2><p>单位自动换算为 KB/s</p></div></div><MetricChart :labels="labels" :series="ioSeries" unit=" KB/s" /></article>
+            <article class="panel"><div class="panel-head"><div><h2>磁盘与网络吞吐</h2><p>单位按峰值自动换算为 {{ ioScale.unit }}</p></div></div><MetricChart :labels="labels" :series="ioSeries" :unit="ioScale.unit" /></article>
           </div>
           <article v-else class="panel"><EmptyState title="暂无趋势数据" description="Agent 首次上报后即可查看所选时间范围内的指标曲线。" /></article>
 

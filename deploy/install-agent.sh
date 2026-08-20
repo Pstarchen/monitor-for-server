@@ -2,12 +2,13 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url URL --device-id ID [--binary PATH] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url URL --device-id ID [--binary PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
 device_id="${GUANLAN_DEVICE_ID:-}"
 agent_key="${GUANLAN_AGENT_KEY:-}"
+repository_url="${GUANLAN_REPOSITORY_URL:-https://github.com/Pstarchen/monitor-for-server.git}"
 binary_path=""
 interval="3s"
 services=()
@@ -20,6 +21,7 @@ while [[ $# -gt 0 ]]; do
     --server-url) server_url="${2:-}"; shift 2 ;;
     --device-id) device_id="${2:-}"; shift 2 ;;
     --binary) binary_path="${2:-}"; shift 2 ;;
+    --source-url) repository_url="${2:-}"; shift 2 ;;
     --interval) interval="${2:-}"; shift 2 ;;
     --service) services+=("${2:-}"); shift 2 ;;
     --disk) disks+=("${2:-}"); shift 2 ;;
@@ -50,11 +52,22 @@ temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 
 if [[ -z "${binary_path}" ]]; then
+  source_root="${project_root}"
+  if [[ ! -f "${source_root}/agent/go.mod" ]]; then
+    if ! command -v git >/dev/null 2>&1; then
+      echo "未找到 Agent 源码。请安装 git，或通过 --binary 提供预编译 Agent。" >&2
+      exit 1
+    fi
+    echo "正在下载 Agent 源码..."
+    git clone --depth 1 --filter=blob:none --sparse "${repository_url}" "${temp_dir}/source" >/dev/null
+    git -C "${temp_dir}/source" sparse-checkout set agent >/dev/null
+    source_root="${temp_dir}/source"
+  fi
   if ! command -v go >/dev/null 2>&1; then
-    echo "Go is required when --binary is not provided." >&2
+    echo "未提供预编译 Agent 时需要 Go 1.24+。也可以使用 --binary 指定已构建程序。" >&2
     exit 1
   fi
-  (cd "${project_root}/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/guanlan-agent" ./cmd/agent)
+  (cd "${source_root}/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/guanlan-agent" ./cmd/agent)
   binary_path="${temp_dir}/guanlan-agent"
 fi
 if [[ ! -f "${binary_path}" ]]; then

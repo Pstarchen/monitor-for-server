@@ -43,7 +43,8 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
         "agent_key":"secret",
         "skip_process_collection":true,
         "skip_connection_count":true,
-        "disk_mountpoints":["/", " /data ", "/data", ""]
+		"disk_mountpoints":["/", " /data ", "/data", ""],
+		"host_root":" /host "
     }`)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
@@ -57,6 +58,9 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
 	}
 	if len(cfg.DiskMountpoints) != 2 || cfg.DiskMountpoints[1] != "/data" {
 		t.Fatalf("unexpected disk allowlist: %#v", cfg.DiskMountpoints)
+	}
+	if cfg.HostRoot != "/host" {
+		t.Fatalf("unexpected host root: %q", cfg.HostRoot)
 	}
 }
 

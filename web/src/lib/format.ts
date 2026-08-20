@@ -19,6 +19,28 @@ export function rate(value: number | null | undefined): string {
   return `${bytes(value)}/s`
 }
 
+export type RateScale = {
+  divisor: number
+  unit: string
+}
+
+const rateScales: RateScale[] = [
+  { divisor: 1, unit: 'B/s' },
+  { divisor: 1024, unit: 'KB/s' },
+  { divisor: 1024 ** 2, unit: 'MB/s' },
+  { divisor: 1024 ** 3, unit: 'GB/s' },
+  { divisor: 1024 ** 4, unit: 'TB/s' },
+]
+
+export function rateScale(value: number | null | undefined): RateScale {
+  const bytesPerSecond = Math.max(0, Number(value ?? 0))
+  let selected = rateScales[0]
+  for (const scale of rateScales) {
+    if (bytesPerSecond >= scale.divisor) selected = scale
+  }
+  return selected
+}
+
 export function uptime(value: number | null | undefined): string {
   const seconds = Math.max(0, Math.floor(Number(value ?? 0)))
   const days = Math.floor(seconds / 86400)

@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guanlan.monitor.api.dto.DeviceDtos;
 import com.guanlan.monitor.domain.AlertEvent;
 import com.guanlan.monitor.domain.Device;
+import com.guanlan.monitor.domain.SystemSetting;
 import com.guanlan.monitor.repository.AlertEventRepository;
 import com.guanlan.monitor.repository.DeviceRepository;
+import com.guanlan.monitor.repository.SystemSettingRepository;
 import com.guanlan.monitor.service.AlertService;
 import com.guanlan.monitor.service.DeviceService;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -37,6 +40,16 @@ class AuthAndAgentIntegrationTest {
     @Autowired DeviceRepository deviceRepository;
     @Autowired AlertEventRepository alertEvents;
     @Autowired AlertService alertService;
+    @Autowired SystemSettingRepository settings;
+
+    @Test
+    void publicBrandUsesPersistedSiteNameWithoutAuthentication() throws Exception {
+        settings.save(new SystemSetting("system.site_name", "现场监控"));
+
+        mvc.perform(get("/api/settings/public"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.siteName").value("现场监控"));
+    }
 
     @Test
     void loginCreatesAUsableServerSession() throws Exception {
@@ -86,6 +99,19 @@ class AuthAndAgentIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(report))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void agentAcceptsMultiCoreProcessCpuUsage() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("multicore-node", "lab", "tests", "127.0.0.3"));
+        String report = sampleReport().replace("\"processes\":[]", "\"processes\":[{\"pid\":42,\"name\":\"worker\",\"username\":\"root\",\"cpuPercent\":185.5,\"memoryPercent\":2.5,\"status\":\"running\"}]");
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(report))
+                .andExpect(status().isAccepted());
     }
 
     @Test

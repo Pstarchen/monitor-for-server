@@ -54,7 +54,7 @@ public record AgentReportRequest(
                                @PositiveOrZero int tcpConnections) {}
 
     public record ProcessStats(@PositiveOrZero int pid, @Size(max = 255) String name, @Size(max = 255) String username,
-                               @Min(0) @Max(100) double cpuPercent, @Min(0) @Max(100) double memoryPercent,
+                               @PositiveOrZero double cpuPercent, @Min(0) @Max(100) double memoryPercent,
                                @Size(max = 80) String status) {}
 
     public record ServiceStatus(@NotBlank @Size(max = 255) String name, @Size(max = 80) String status) {}

@@ -1,16 +1,51 @@
 name: guanlan-monitor
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-guanlan_monitor}
+      POSTGRES_USER: ${POSTGRES_USER:-guanlan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U '$${POSTGRES_USER}' -d '$${POSTGRES_DB}'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [monitor]
+
   setup:
     build:
       context: ./setup
     restart: unless-stopped
     environment:
       SETUP_WORKSPACE: /workspace
+      POSTGRES_DB: ${POSTGRES_DB:-guanlan_monitor}
+      POSTGRES_USER: ${POSTGRES_USER:-guanlan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      WEB_PORT: ${WEB_PORT:-18080}
+      WEB_BIND_ADDRESS: ${WEB_BIND_ADDRESS:-0.0.0.0}
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-guanlan-monitor}
+      CONTROLLER_AGENT_ENABLED: ${CONTROLLER_AGENT_ENABLED:-false}
+      CONTROLLER_AGENT_DEVICE_ID: ${CONTROLLER_AGENT_DEVICE_ID:-}
+      CONTROLLER_AGENT_KEY: ${CONTROLLER_AGENT_KEY:-}
+      CONTROLLER_AGENT_NAME: ${CONTROLLER_AGENT_NAME:-总控服务器}
+      CONTROLLER_AGENT_GROUP: ${CONTROLLER_AGENT_GROUP:-控制平面}
     volumes:
       - ./:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8090/api/setup/status"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
     networks: [monitor]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   redis:
     image: redis:7.4-alpine
@@ -31,9 +66,9 @@ services:
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-bootstrap}
-      DB_URL: ${DB_URL-}
-      DB_USERNAME: ${DB_USERNAME-}
-      DB_PASSWORD: ${DB_PASSWORD-}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-guanlan_monitor}
+      DB_USERNAME: ${POSTGRES_USER:-guanlan}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
@@ -57,7 +92,14 @@ services:
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
       WECOM_WEBHOOK_URL: ${WECOM_WEBHOOK_URL:-}
+      CONTROLLER_AGENT_ENABLED: ${CONTROLLER_AGENT_ENABLED:-false}
+      CONTROLLER_AGENT_DEVICE_ID: ${CONTROLLER_AGENT_DEVICE_ID:-}
+      CONTROLLER_AGENT_KEY: ${CONTROLLER_AGENT_KEY:-}
+      CONTROLLER_AGENT_NAME: ${CONTROLLER_AGENT_NAME:-总控服务器}
+      CONTROLLER_AGENT_GROUP: ${CONTROLLER_AGENT_GROUP:-控制平面}
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -66,8 +108,40 @@ services:
       timeout: 5s
       retries: 12
     networks: [monitor]
+
+  controller-agent:
+    profiles: [host-monitoring]
+    build:
+      context: ./agent
+    restart: unless-stopped
+    pid: host
+    network_mode: host
+    environment:
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
+      HOST_ETC: /host/etc
+      CONTROLLER_AGENT_DEVICE_ID: ${CONTROLLER_AGENT_DEVICE_ID:-}
+      CONTROLLER_AGENT_KEY: ${CONTROLLER_AGENT_KEY:-}
+      CONTROLLER_AGENT_SERVER_URL: http://127.0.0.1:${WEB_PORT:-18080}
     volumes:
-      - server-bootstrap-data:/data
+      - /:/host:ro
+      - controller-agent-spool:/var/lib/guanlan-agent/spool
+    tmpfs:
+      - /run
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        cat > /run/agent.json <<EOF
+        {"server_url":"$${CONTROLLER_AGENT_SERVER_URL}","device_id":"$${CONTROLLER_AGENT_DEVICE_ID}","agent_key":"$${CONTROLLER_AGENT_KEY}","interval":"3s","request_timeout":"10s","spool_dir":"/var/lib/guanlan-agent/spool","max_buffered_reports":10000,"allow_insecure_http":false,"skip_process_collection":false,"skip_connection_count":false,"disk_mountpoints":[],"host_root":"/host"}
+        EOF
+        exec /guanlan-agent -config /run/agent.json
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /run/agent.json && kill -0 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 4
 
   web:
     build:
@@ -77,7 +151,7 @@ services:
       - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-18080}:80"
     depends_on:
       setup:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthz"]
       interval: 15s
@@ -86,8 +160,9 @@ services:
     networks: [monitor]
 
 volumes:
+  postgres-data:
   redis-data:
-  server-bootstrap-data:
+  controller-agent-spool:
 
 networks:
   monitor:

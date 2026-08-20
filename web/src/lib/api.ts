@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { SetupRequest, SetupStatus } from '@/types'
+import type { SetupStatus } from '@/types'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -32,26 +32,6 @@ export function clearCsrf(): void {
 
 export async function getSetupStatus(): Promise<SetupStatus> {
   return (await api.get<SetupStatus>('/setup/status')).data
-}
-
-export async function testSetupDatabase(input: Pick<SetupRequest, 'mysqlHost' | 'mysqlPort' | 'databaseName' | 'mysqlUsername' | 'mysqlPassword'>): Promise<void> {
-  await api.post('/setup/test-database', {
-    host: input.mysqlHost,
-    port: input.mysqlPort,
-    databaseName: input.databaseName,
-    username: input.mysqlUsername,
-    password: input.mysqlPassword,
-  })
-}
-
-export type SetupDatabaseError = {
-  message?: string
-  authorizationSql?: string
-}
-
-export function setupDatabaseErrorDetails(error: unknown): SetupDatabaseError {
-  if (axios.isAxiosError(error)) return (error.response?.data as SetupDatabaseError | undefined) ?? {}
-  return {}
 }
 
 export function errorMessage(error: unknown): string {

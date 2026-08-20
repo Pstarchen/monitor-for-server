@@ -11,6 +11,7 @@ import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
+import { loadBranding } from '@/lib/branding'
 import type { Settings, WebhookSettings } from '@/types'
 
 type ChannelKey = 'email' | 'dingtalk' | 'wecom'
@@ -118,6 +119,7 @@ async function save() {
   try {
     settings.value = (await api.put<Settings>('/settings', form)).data
     apply(settings.value)
+    await loadBranding()
     ElMessage.success('系统设置已保存')
   } catch (cause) {
     ElMessage.error(errorMessage(cause))

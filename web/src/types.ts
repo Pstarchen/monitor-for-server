@@ -69,6 +69,7 @@ export interface Device {
   status: DeviceStatus
   lastSeenAt: string | null
   agentKeyPrefix: string
+  controllerManaged: boolean
   createdAt: string
   hardware: Record<string, unknown>
   latest: Metric | null
@@ -157,6 +158,10 @@ export interface Settings {
   wecom: WebhookSettings
 }
 
+export interface PublicBrand {
+  siteName: string
+}
+
 export interface AgentBootstrap {
   publicBaseUrl: string
   defaultCollectionSeconds: number
@@ -179,17 +184,10 @@ export interface SetupStatus {
 }
 
 export interface SetupRequest {
-  mysqlHost: string
-  mysqlPort: number | null
-  databaseName: string
-  mysqlUsername: string
-  mysqlPassword: string
   publicBaseUrl: string
   allowedOrigins: string
   siteName: string
   timezone: string
-  webPort: number
-  webBindAddress: '0.0.0.0' | '127.0.0.1'
   adminUsername: string
   adminPassword: string
   adminPasswordConfirm: string

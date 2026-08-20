@@ -6,6 +6,7 @@ import {
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Users, X,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { loadBranding, siteName } from '@/lib/branding'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,7 +32,7 @@ const visibleAdministration = computed(() => auth.user?.role === 'ADMIN' ? admin
 
 const pageTitle = computed(() => {
   if (route.path.startsWith('/devices/')) return '设备详情'
-  return [...navigation, ...administration].find((item) => route.path.startsWith(item.path))?.label ?? '观澜监控'
+  return [...navigation, ...administration].find((item) => route.path.startsWith(item.path))?.label ?? siteName.value
 })
 
 function isActive(path: string) {
@@ -70,6 +71,7 @@ function connectRealtime() {
 }
 
 onMounted(() => {
+  loadBranding()
   applyTheme()
   connectRealtime()
 })
@@ -86,7 +88,7 @@ onBeforeUnmount(() => {
     <aside class="sidebar desktop-sidebar">
       <RouterLink class="brand" to="/dashboard">
         <span class="brand-mark"><Activity :size="19" /></span>
-        <span><strong>观澜监控</strong><small>PRIVATE OPS</small></span>
+        <span><strong>{{ siteName }}</strong><small>PRIVATE OPS</small></span>
       </RouterLink>
       <nav class="side-navigation" aria-label="主导航">
         <p class="nav-caption">监控中心</p>
@@ -109,7 +111,7 @@ onBeforeUnmount(() => {
     <el-drawer v-model="drawer" direction="ltr" size="272px" :with-header="false" class="mobile-drawer">
       <div class="drawer-head">
         <RouterLink class="brand" to="/dashboard" @click="drawer = false">
-          <span class="brand-mark"><Activity :size="19" /></span><strong>观澜监控</strong>
+          <span class="brand-mark"><Activity :size="19" /></span><strong>{{ siteName }}</strong>
         </RouterLink>
         <button class="icon-button" type="button" aria-label="关闭导航" title="关闭导航" @click="drawer = false"><X :size="19" /></button>
       </div>
@@ -159,4 +161,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-

@@ -36,6 +36,7 @@ func main() {
 		SkipProcesses:       cfg.SkipProcesses,
 		SkipConnectionCount: cfg.SkipConnectionCount,
 		DiskMountpoints:     cfg.DiskMountpoints,
+		HostRoot:            cfg.HostRoot,
 	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -5,18 +5,18 @@
 ## 前置条件
 
 - Docker Engine 24+ 与 Docker Compose v2。
-- 外部 MySQL 8.0+；总终端 Compose 不携带 MySQL 容器。请先在 MySQL 管理端创建目标数据库和应用账号，首次运行向导只连接用户填写的目标库并执行表结构初始化。
+- Docker Compose 会自动启动 PostgreSQL 16 和 Redis。数据库、用户和密码由控制端安装器自动生成，数据库端口只在 Compose 内网可见，无需安装数据库客户端或执行 SQL。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
 - 每台被监控主机具备 systemd 或 Windows 服务管理权限。
 - 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
 
 ## Docker Compose 部署
 
-在项目根目录直接启动 Compose。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境应使用总终端安装器启动。它会自动生成数据库与总控 Agent 凭据，并将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
-docker compose up --build -d
-docker compose ps
+bash ./deploy/install-controller.sh
+docker compose --profile host-monitoring ps
 ```
 
 然后打开：
@@ -25,7 +25,21 @@ docker compose ps
 http://<服务器IP>:18080/setup
 ```
 
-向导第一步要求同时填写 MySQL 地址、端口、已创建的数据库名、用户名和密码，并直接检测目标库连接、初始化表结构；安装器不会猜测主机地址、创建数据库或修改 MySQL 用户。空数据库会初始化服务端 V1 表结构和 Flyway 初始记录，已有完整表结构则复用。随后向导写入生产 `.env`，再自动执行 `docker compose up -d --build server web`。管理员账号在生产数据库迁移后由服务端创建。数据库账号密码只写入总终端私有配置，不会进入日志。发现不完整表结构时会停止，避免覆盖数据。
+安装器会生成 PostgreSQL 凭据并启动数据库。首次向导只需配置站点入口、来源、时区和首个管理员；Web 端口、绑定地址和 Compose 项目名在总终端启动前确定。向导写入生产 `.env` 后只重建 `server`，不会重建当前提供页面的 Web 容器，因此提交后会直接进入登录页而不会回到 Setup 或出现 502。Flyway 在服务端启动时创建或升级表结构。数据库凭据只写入总终端私有配置，不会进入日志。
+
+Linux 总终端不需要单独安装 Agent。安装器启动的 `controller-agent` 通过本机网关上报宿主机指标，生产服务就绪后“设备管理”会出现“总控服务器”。它读取宿主机而非容器的 CPU、内存、网络和磁盘信息；不要在控制台轮换或删除这台系统管理设备。
+
+### 站点信息配置
+
+首次向导中的字段直接决定浏览器、反向代理和 Agent 的访问方式：
+
+- `站点名称`：登录页、侧栏和通知中显示的产品名称。
+- `公网入口`：用户和 Agent 实际访问的完整地址，例如 `https://monitor.example.com` 或临时初始化用的 `http://<服务器IP>:18080`；不要填写路径、查询参数或片段。
+- `允许的 Web 来源`：逗号分隔的浏览器来源，必须包含公网入口；有多个域名时逐项填写完整的 `http(s)://host[:port]`。
+- `服务时区`：使用 IANA 名称，例如 `Asia/Shanghai`，用于告警和审计时间展示。
+- Web 端口与绑定地址由总终端安装器在首次启动前写入 `.env`，默认是 `18080` 和 `0.0.0.0`。只通过宝塔/Caddy/Nginx 反代时，在安装器启动前将绑定地址改为 `127.0.0.1`。浏览器向导不会再修改这两项，避免提交时切断当前页面。
+
+正式域名和 TLS 生效后，在“系统设置”同步修改站点入口，确保 `PUBLIC_BASE_URL`、`ALLOWED_ORIGINS` 使用 HTTPS 且来源完全一致，并执行 `docker compose up -d --force-recreate server web`。不要把数据库密码、Agent 密钥或管理员密码写进站点地址。
 
 无法使用浏览器时，命令行安装器仍然可用：
 
@@ -39,6 +53,8 @@ Linux：
 bash ./deploy/install-controller.sh
 ```
 
+升级前只清理本项目旧镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
+
 生产环境生成的配置至少包含：
 
 ```dotenv
@@ -49,9 +65,8 @@ PUBLIC_BASE_URL=https://monitor.example.com
 
 启动服务（安装器已执行过时无需重复执行）：
 
-```powershell
-docker compose up --build -d
-docker compose ps
+```bash
+docker compose --profile host-monitoring ps
 docker compose logs --tail 100 server
 ```
 
@@ -63,7 +78,7 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 - 透传 `Host`、`X-Forwarded-Host`、`X-Forwarded-For` 和 `X-Forwarded-Proto`。
 - 为 `/ws/` 开启 WebSocket Upgrade。
-- 仅允许公网访问 Web 入口，不发布 MySQL、Redis 和 Spring Boot 端口。
+- 仅允许公网访问 Web 入口，不发布 PostgreSQL、Redis 和 Spring Boot 端口。
 - 配合 `SESSION_COOKIE_SECURE=true` 和精确的 HTTPS `ALLOWED_ORIGINS`。
 
 宝塔反向代理可将 `http://127.0.0.1:<WEB_PORT>` 作为目标，并开启 WebSocket。域名证书生效后，将 `.env` 中的 `PUBLIC_BASE_URL`、`ALLOWED_ORIGINS` 改为 `https://monitor.xciy.cn`，把 `SESSION_COOKIE_SECURE=true`、`ALLOW_INSECURE_HTTP=false`，然后重建 `server web`。
@@ -80,19 +95,20 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
-sudo --preserve-env=GUANLAN_AGENT_KEY ./deploy/install-agent.sh \
+curl -fsSL https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh | \
+sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
   --server-url https://monitor.example.com \
   --device-id '<设备ID>' \
   --interval 3s \
   --disk / \
   --disk /data \
   --service nginx \
-  --service mysql
+  --service sshd
 ```
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
-使用预编译二进制时添加 `--binary /path/to/guanlan-agent`。安装结果：
+在线安装器会在没有本地源码时自动拉取仓库并构建 Agent，因此目标机只需安装 Go 1.24+、git 和 systemd；生产环境仍建议使用预编译二进制并添加 `--binary /path/to/guanlan-agent`。也可通过 `--source-url` 指向内部镜像仓库。安装结果：
 
 - 程序：`/usr/local/bin/guanlan-agent`
 - 配置：`/etc/guanlan-agent/agent.json`，权限 `0600`
@@ -143,10 +159,10 @@ docker compose up -d --force-recreate server
 
 ## 备份与升级
 
-备份前创建一致性 MySQL 逻辑备份，并将部署使用的 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，保存在独立秘密管理系统。Redis 仅用于在线状态加速，不是主要备份目标。
+备份前创建一致性 PostgreSQL 逻辑备份，并将部署使用的 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，保存在独立秘密管理系统。Redis 仅用于在线状态加速，不是主要备份目标。
 
 ```powershell
-mysqldump --defaults-extra-file=/secure/monitor-mysqldump.cnf monitor > monitor-backup.sql
+docker compose exec -T postgres pg_dump -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2)" "$(grep '^POSTGRES_DB=' .env | cut -d= -f2)" > monitor-backup.sql
 ```
 
 数据库密码只通过 `.env` 注入服务端，不会展开到宿主机命令输出。升级步骤：

@@ -13,15 +13,25 @@
 
 ## 快速启动
 
-1. 准备 Docker Engine、Compose v2，以及用户自行维护的外部 MySQL 8.0+。项目不携带 MySQL 容器；请先在 MySQL 管理端创建目标数据库和应用账号，安装向导只会用你填写的账号连接目标库并初始化监控表结构。
+总终端只需要 Docker Engine 和 Compose v2，项目会自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis。数据库端口不会暴露到公网。
 
-```powershell
-docker compose up --build -d
+```bash
+git clone https://github.com/Pstarchen/monitor-for-server.git
+cd monitor-for-server
+bash ./deploy/install-controller.sh
 ```
 
-2. 先在外部 MySQL 中创建数据库和应用账号，再打开 `http://<服务器IP>:18080/setup`。首次运行向导第一步要求填写实际可达的 MySQL 地址、端口、数据库名、用户名和密码；向导直接检测目标库并初始化表结构，随后设置站点入口和首个管理员。
+安装器会自动生成 PostgreSQL 数据库凭据并等待 Web 健康检查，然后打开 `http://<服务器IP>:18080/setup`。向导只收集站点名称、公网入口、允许来源、时区和首个管理员；端口与绑定地址在总终端启动时确定。提交后页面立即进入登录页，等生产服务就绪后再允许登录。
 
-3. 向导完成后服务会自动切换到生产配置，再使用刚创建的管理员登录。
+无需填写数据库地址、数据库名或密码，也不需要执行 SQL。端口和绑定地址请在总终端安装器或 `.env` 首次启动前确定，不要在浏览器向导中改它们。生产环境请使用 HTTPS，并让 `PUBLIC_BASE_URL` 与 `ALLOWED_ORIGINS` 使用同一站点来源。
+
+升级或清理本项目旧镜像时可显式运行：
+
+```bash
+bash ./deploy/install-controller.sh --cleanup
+```
+
+该选项不会删除 PostgreSQL/Redis 数据卷或其他 Compose 项目。
 
 需要先构建并启动总终端、再通过浏览器完成配置时，可使用对应平台安装器：
 
@@ -35,8 +45,8 @@ Linux：
 bash ./deploy/install-controller.sh
 ```
 
-4. 在“设备管理”中创建设备并保存一次性显示的 Agent 密钥。
-5. 按 [Agent 安装说明](docs/deployment.md) 在被监控服务器启动 Agent。
+4. Linux 总终端会自动显示为“总控服务器”，并在生产服务就绪后开始上报主机指标。
+5. 其他服务器仍在“设备管理”中创建设备，再按 [Agent 安装说明](docs/deployment.md) 启动 Agent。
 
 ## 本地校验
 
@@ -46,7 +56,7 @@ Push-Location setup; go test ./...; Pop-Location
 pnpm --dir web install
 pnpm --dir web test
 pnpm --dir web build
-docker compose build setup server web
+docker compose build setup server web postgres
 ```
 
 ## 项目文档

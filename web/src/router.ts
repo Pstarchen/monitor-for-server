@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { safeLocalPath } from '@/lib/format'
 import { getSetupStatus } from '@/lib/api'
+import { setupRouteRedirect } from '@/lib/setup-flow'
 import AppShell from '@/components/AppShell.vue'
 
 const router = createRouter({
@@ -34,8 +35,9 @@ router.beforeEach(async (to) => {
     setup = { configured: true, state: 'unavailable', message: '安装服务暂不可用' }
   }
 
-  if (!setup.configured && to.name !== 'setup') return { name: 'setup' }
-  if (setup.configured && setup.state !== 'unavailable' && to.name === 'setup') return { name: 'login' }
+  const setupRedirect = setupRouteRedirect(setup, to.name)
+  if (setupRedirect) return { name: setupRedirect }
+  if (!setup.configured || setup.state !== 'configured') return true
 
   const auth = useAuthStore()
   await auth.initialize()

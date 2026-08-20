@@ -22,6 +22,17 @@ public class AppProperties {
     private boolean redisEnabled;
     private String allowedOrigins = "http://localhost:5173";
     private Notification notification = new Notification();
+    private ControllerAgent controllerAgent = new ControllerAgent();
+
+    @Getter
+    @Setter
+    public static class ControllerAgent {
+        private boolean enabled;
+        private String deviceId;
+        private String key;
+        private String name = "总控服务器";
+        private String groupName = "控制平面";
+    }
 
     @Getter
     @Setter

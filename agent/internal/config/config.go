@@ -26,6 +26,7 @@ type Config struct {
 	SkipProcesses       bool
 	SkipConnectionCount bool
 	DiskMountpoints     []string
+	HostRoot            string
 }
 
 type fileConfig struct {
@@ -41,6 +42,7 @@ type fileConfig struct {
 	SkipProcesses       bool     `json:"skip_process_collection"`
 	SkipConnectionCount bool     `json:"skip_connection_count"`
 	DiskMountpoints     []string `json:"disk_mountpoints"`
+	HostRoot            string   `json:"host_root"`
 }
 
 func Load(args []string) (Config, error) {
@@ -90,6 +92,7 @@ func Load(args []string) (Config, error) {
 		SkipProcesses:       file.SkipProcesses,
 		SkipConnectionCount: file.SkipConnectionCount,
 		DiskMountpoints:     cleanList(file.DiskMountpoints),
+		HostRoot:            strings.TrimSpace(file.HostRoot),
 	}
 	return cfg, cfg.Validate()
 }

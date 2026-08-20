@@ -8,6 +8,7 @@ import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { percent, relativeTime } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth'
 import type { AgentBootstrap, Device, DeviceCredential, DeviceStatus } from '@/types'
@@ -29,6 +30,7 @@ const collectionSeconds = ref(3)
 const lightweight = ref(false)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '' })
+const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent'
 let refreshTimer = 0
 
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
@@ -45,12 +47,12 @@ const installCommand = computed(() => {
     const diskArgs = disks.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
     const lightArgs = lightweight.value ? ' -SkipProcesses -SkipConnections' : ''
     return `$env:GUANLAN_AGENT_KEY = '${powerShellQuote(credential.value.agentKey)}'\n` +
-      `.\\deploy\\install-agent.ps1 -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
+      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; Invoke-WebRequest -UseBasicParsing '${agentInstallerRawUrl}.ps1' -OutFile $installer; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}; Remove-Item $installer -Force`
   }
   const diskArgs = disks.map((value) => ` --disk '${shellQuote(value)}'`).join('')
   const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
   return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
-    `sudo --preserve-env=GUANLAN_AGENT_KEY ./deploy/install-agent.sh --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
+    `curl -fsSL '${agentInstallerRawUrl}.sh' | sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
 })
 
 async function load(background = false) {
@@ -141,7 +143,7 @@ async function remove(device: Device) {
 async function copyKey() {
   if (!credential.value) return
   try {
-    await navigator.clipboard.writeText(credential.value.agentKey)
+    await copyText(credential.value.agentKey)
     ElMessage.success('密钥已复制')
   } catch {
     ElMessage.error('复制失败，请手动选择密钥')
@@ -150,7 +152,7 @@ async function copyKey() {
 
 async function copyInstallCommand() {
   try {
-    await navigator.clipboard.writeText(installCommand.value)
+    await copyText(installCommand.value)
     ElMessage.success('安装命令已复制')
   } catch {
     ElMessage.error('复制失败，请手动选择命令')
@@ -214,8 +216,8 @@ onBeforeUnmount(() => {
               <td>{{ relativeTime(device.lastSeenAt) }}</td>
               <td class="row-actions">
                 <button v-if="canEdit" class="table-icon-button" type="button" title="编辑设备" aria-label="编辑设备" @click="openEdit(device)"><Pencil :size="16" /></button>
-                <button v-if="auth.user?.role === 'ADMIN'" class="table-icon-button" type="button" title="轮换密钥" aria-label="轮换密钥" @click="rotateKey(device)"><KeyRound :size="16" /></button>
-                <button v-if="auth.user?.role === 'ADMIN'" class="table-icon-button danger-command" type="button" title="删除设备" aria-label="删除设备" @click="remove(device)"><Trash2 :size="16" /></button>
+                <button v-if="auth.user?.role === 'ADMIN' && !device.controllerManaged" class="table-icon-button" type="button" title="轮换密钥" aria-label="轮换密钥" @click="rotateKey(device)"><KeyRound :size="16" /></button>
+                <button v-if="auth.user?.role === 'ADMIN' && !device.controllerManaged" class="table-icon-button danger-command" type="button" title="删除设备" aria-label="删除设备" @click="remove(device)"><Trash2 :size="16" /></button>
               </td>
             </tr>
           </tbody>

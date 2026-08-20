@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:monitor-test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:mem:monitor-test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
     username: sa
     password:
   jpa:

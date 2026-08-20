@@ -63,16 +63,12 @@ public class MetricSnapshot {
     @Column(name = "tcp_connections", nullable = false)
     private int tcpConnections;
 
-    @Lob
-    @Column(name = "disks_json", columnDefinition = "LONGTEXT")
+    @Column(name = "disks_json", columnDefinition = "TEXT")
     private String disksJson;
 
-    @Lob
-    @Column(name = "processes_json", columnDefinition = "LONGTEXT")
+    @Column(name = "processes_json", columnDefinition = "TEXT")
     private String processesJson;
 
-    @Lob
-    @Column(name = "services_json", columnDefinition = "LONGTEXT")
+    @Column(name = "services_json", columnDefinition = "TEXT")
     private String servicesJson;
 }
-

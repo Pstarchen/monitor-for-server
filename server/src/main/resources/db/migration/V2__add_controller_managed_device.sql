@@ -1,0 +1,1 @@
+ALTER TABLE devices ADD COLUMN controller_managed BOOLEAN NOT NULL DEFAULT FALSE;

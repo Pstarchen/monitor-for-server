@@ -50,6 +50,9 @@ public class Device {
     @Column(name = "agent_key_prefix", nullable = false, length = 12)
     private String agentKeyPrefix;
 
+    @Column(name = "controller_managed", nullable = false)
+    private boolean controllerManaged;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Status status = Status.PENDING;
@@ -57,8 +60,7 @@ public class Device {
     @Column(name = "last_seen_at")
     private Instant lastSeenAt;
 
-    @Lob
-    @Column(name = "hardware_json", columnDefinition = "LONGTEXT")
+    @Column(name = "hardware_json", columnDefinition = "TEXT")
     private String hardwareJson;
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -78,4 +80,3 @@ public class Device {
         updatedAt = Instant.now();
     }
 }
-

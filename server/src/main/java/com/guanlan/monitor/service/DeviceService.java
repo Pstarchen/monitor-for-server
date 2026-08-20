@@ -65,6 +65,9 @@ public class DeviceService {
     @Transactional
     public DeviceDtos.Credential regenerateKey(String id) {
         Device device = require(id);
+        if (device.isControllerManaged()) {
+            throw new ApiException(HttpStatus.CONFLICT, "总控服务器由系统管理，不能轮换 Agent 密钥");
+        }
         String rawKey = newKey();
         device.setAgentKeyPrefix(rawKey.substring(0, 8));
         device.setAgentKeyHash(passwordEncoder.encode(rawKey));
@@ -75,6 +78,9 @@ public class DeviceService {
     @Transactional
     public void delete(String id) {
         Device device = require(id);
+        if (device.isControllerManaged()) {
+            throw new ApiException(HttpStatus.CONFLICT, "总控服务器由系统管理，不能删除");
+        }
         devices.delete(device);
         audit.record("DEVICE_DELETE", "device:" + id, "删除设备 " + device.getName());
     }
@@ -96,7 +102,7 @@ public class DeviceService {
         MetricView latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).map(metric -> MetricView.from(metric, mapper)).orElse(null);
         return new DeviceDtos.View(device.getId(), device.getName(), device.getHostname(), device.getOs(), device.getArchitecture(),
                 device.getPrimaryIp(), device.getLocation(), device.getGroupName(), device.getStatus(), device.getLastSeenAt(),
-                device.getAgentKeyPrefix(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest);
+                device.getAgentKeyPrefix(), device.isControllerManaged(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest);
     }
 
     @SuppressWarnings("unchecked")

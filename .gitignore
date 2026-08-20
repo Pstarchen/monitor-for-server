@@ -4,6 +4,7 @@
 Thumbs.db
 
 .env
+.setup-complete
 *.log
 
 agent/bin/

@@ -14,13 +14,20 @@ function render() {
   if (!root.value) return
   if (!chart) chart = echarts.init(root.value)
   const dark = document.documentElement.classList.contains('dark')
+  const unit = (props.unit ?? '').trim()
+  const suffix = unit && unit !== '%' ? ` ${unit}` : unit
+  const formatValue = (value: unknown) => {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) return '--'
+    return `${Math.abs(numeric) >= 100 ? numeric.toFixed(0) : numeric.toFixed(1)}${suffix}`
+  }
   chart.setOption({
     animationDuration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 420,
-    grid: { left: 42, right: 14, top: 24, bottom: 30 },
-    tooltip: { trigger: 'axis', valueFormatter: (value: unknown) => `${Number(value).toFixed(1)}${props.unit ?? ''}` },
+    grid: { left: 12, right: 14, top: 34, bottom: 30, containLabel: true },
+    tooltip: { trigger: 'axis', valueFormatter: formatValue },
     legend: { top: 0, right: 8, textStyle: { color: dark ? '#a3a3a3' : '#626262' } },
     xAxis: { type: 'category', data: props.labels, boundaryGap: false, axisLine: { lineStyle: { color: dark ? '#393939' : '#e4e4e4' } }, axisLabel: { color: dark ? '#8d8d8d' : '#767676', hideOverlap: true } },
-    yAxis: { type: 'value', axisLabel: { color: dark ? '#8d8d8d' : '#767676', formatter: `{value}${props.unit ?? ''}` }, splitLine: { lineStyle: { color: dark ? '#2b2b2b' : '#eeeeee' } } },
+    yAxis: { type: 'value', axisLabel: { color: dark ? '#8d8d8d' : '#767676', width: 76, overflow: 'truncate', formatter: formatValue }, splitLine: { lineStyle: { color: dark ? '#2b2b2b' : '#eeeeee' } } },
     series: props.series.map((item) => ({ name: item.name, data: item.data, type: 'line', showSymbol: false, smooth: 0.25, lineStyle: { width: 2, color: item.color }, itemStyle: { color: item.color }, areaStyle: { opacity: 0.04, color: item.color } })),
   }, true)
 }
@@ -32,4 +39,3 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dis
 </script>
 
 <template><div ref="root" class="metric-chart" role="img" aria-label="监控指标趋势图" /></template>
-

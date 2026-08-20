@@ -114,6 +114,11 @@ public class SettingService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public PublicBrandView publicBrand() {
+        return new PublicBrandView(stringValue(SITE_NAME, properties.getSiteName()));
+    }
+
     private void updateEmail(EmailUpdate email) {
         save(EMAIL_ENABLED, email.enabled());
         save(EMAIL_HOST, email.host().trim());
@@ -267,6 +272,7 @@ public class SettingService {
     public record WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook) {}
     public record NotificationRuntime(EmailRuntime email, WebhookRuntime dingtalk, WebhookRuntime wecom) {}
     public record AgentBootstrapView(String publicBaseUrl, int defaultCollectionSeconds) {}
+    public record PublicBrandView(String siteName) {}
     public record EmailRuntime(boolean enabled, String host, int port, String username, String password,
                                String from, String recipients, boolean auth, boolean startTls, String source) {}
     public record WebhookRuntime(boolean enabled, String url, String source) {}

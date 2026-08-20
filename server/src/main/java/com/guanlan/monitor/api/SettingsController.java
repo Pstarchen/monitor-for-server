@@ -13,6 +13,9 @@ public class SettingsController {
     private final SettingService settings;
     private final NotificationService notifications;
 
+    @GetMapping("/public")
+    SettingService.PublicBrandView publicBrand() { return settings.publicBrand(); }
+
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
     SettingService.View get() { return settings.get(); }

@@ -7,8 +7,9 @@
   "spool_dir": "data/spool",
   "max_buffered_reports": 10000,
   "allow_insecure_http": false,
-  "monitored_services": ["nginx", "mysql"],
+  "monitored_services": ["nginx", "sshd"],
   "skip_process_collection": false,
   "skip_connection_count": false,
-  "disk_mountpoints": ["/", "/data"]
+  "disk_mountpoints": ["/", "/data"],
+  "host_root": ""
 }
