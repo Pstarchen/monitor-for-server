@@ -13,12 +13,18 @@
 
 ## 快速启动
 
-总终端只需要 Docker Engine 和 Compose v2，项目会自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis。数据库端口不会暴露到公网。
+总终端只需要 Docker Engine 和 Compose v2。安装器默认从 GHCR 拉取预构建的总控 `setup`、`server` 和 `web` 镜像，并自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis；数据库端口不会暴露到公网。只有需要离线或本地验证时才使用 `--build` 从源码构建。
 
 ```bash
 git clone https://github.com/Pstarchen/monitor-for-server.git
 cd monitor-for-server
 bash ./deploy/install-controller.sh
+```
+
+使用本地源码构建总控镜像：
+
+```bash
+bash ./deploy/install-controller.sh --build
 ```
 
 安装器会自动生成 PostgreSQL 数据库凭据并等待 Web 健康检查，然后打开 `http://<服务器IP>:18080/setup`。向导只收集站点名称、公网入口、允许来源、时区和首个管理员；端口与绑定地址在总终端启动时确定。提交后页面立即进入登录页，等生产服务就绪后再允许登录。

@@ -32,6 +32,7 @@
 - Linux 总终端的 `controller-agent` 仅使用本机 Web 入口、只读宿主机文件系统与独立缓冲卷；Windows Docker Desktop 安装默认不启用它，以免采集到 Linux 虚拟机而非 Windows 宿主机。
 - Agent 安装命令支持从仓库脚本直接执行；Linux Docker 模式使用只读宿主机挂载、host PID/network 与独立缓冲卷。Windows 保持原生服务，避免 Docker Desktop 虚拟机指标替代宿主机指标。
 - GHCR 的 `monitor-for-server-agent` 包必须设为 Public；发布工作流在 main 与 `v*.*.*` 标签上构建 `linux/amd64`、`linux/arm64` 镜像。
+- GHCR 的 `monitor-for-server-{setup,server,web}` 包必须设为 Public；控制端发布工作流在 main 与 `v*.*.*` 标签上构建 `linux/amd64`、`linux/arm64` 镜像。
 
 ## 验证记录
 

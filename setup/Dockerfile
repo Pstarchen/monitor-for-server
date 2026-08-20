@@ -4,7 +4,9 @@ ENV GOPROXY=https://goproxy.cn,direct
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY main.go .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/setup .
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/setup .
 
 FROM docker:27-cli
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \

@@ -18,6 +18,7 @@ services:
     networks: [monitor]
 
   setup:
+    image: ${GUANLAN_SETUP_IMAGE:-ghcr.io/pstarchen/monitor-for-server-setup:latest}
     build:
       context: ./setup
     restart: unless-stopped
@@ -61,6 +62,7 @@ services:
     networks: [monitor]
 
   server:
+    image: ${GUANLAN_SERVER_IMAGE:-ghcr.io/pstarchen/monitor-for-server-server:latest}
     build:
       context: ./server
     restart: unless-stopped
@@ -111,6 +113,7 @@ services:
 
   controller-agent:
     profiles: [host-monitoring]
+    image: ${GUANLAN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:latest}
     build:
       context: ./agent
     restart: unless-stopped
@@ -144,6 +147,7 @@ services:
       retries: 4
 
   web:
+    image: ${GUANLAN_WEB_IMAGE:-ghcr.io/pstarchen/monitor-for-server-web:latest}
     build:
       context: ./web
     restart: unless-stopped

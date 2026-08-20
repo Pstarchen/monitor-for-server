@@ -3,20 +3,24 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-controller.sh [--cleanup]
+Usage: install-controller.sh [--cleanup] [--build]
 
-Builds and starts the controller with an internal PostgreSQL database. Site and
-administrator configuration are completed in the browser guide at /setup.
+Pulls prebuilt controller images and starts the controller with an internal
+PostgreSQL database. Site and administrator configuration are completed in the
+browser guide at /setup.
 
   --cleanup  stop this Compose project and remove its old images before build.
              PostgreSQL/Redis volumes are preserved.
+  --build    build controller images locally instead of pulling them from GHCR.
 USAGE
 }
 
 cleanup=false
+build=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cleanup) cleanup=true; shift ;;
+    --build) build=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -120,7 +124,7 @@ else
 fi
 
 if [[ "${cleanup}" == true ]]; then
-  echo "清理 guanlan-monitor 旧容器和镜像（保留 PostgreSQL/Redis 卷）..."
+  echo "清理 guanlan-monitor 旧容器和本地镜像（保留 PostgreSQL/Redis 卷）..."
   docker compose "${profile_args[@]}" down --remove-orphans --rmi local
   project_images="$(docker image ls --format '{{.Repository}} {{.ID}}' | awk '$1 ~ /^guanlan-monitor(-|$)/ {print $2}' | sort -u)"
   if [[ -n "${project_images}" ]]; then
@@ -133,7 +137,18 @@ if [[ "${cleanup}" == true ]]; then
 fi
 
 docker compose "${profile_args[@]}" config --quiet
-docker compose "${profile_args[@]}" up --build -d --remove-orphans
+controller_services=(setup server web)
+if [[ "$(uname -s)" == "Linux" ]]; then
+  controller_services+=(controller-agent)
+fi
+if [[ "${build}" == true ]]; then
+  echo "使用本地源码构建总控镜像..."
+  docker compose "${profile_args[@]}" build --pull "${controller_services[@]}"
+else
+  echo "正在拉取总控预构建镜像..."
+  docker compose "${profile_args[@]}" pull "${controller_services[@]}"
+fi
+docker compose "${profile_args[@]}" up -d --remove-orphans
 
 web_port="18080"
 if [[ -f .env ]]; then

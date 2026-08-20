@@ -1,20 +1,23 @@
 [CmdletBinding()]
 param(
     [switch] $Help,
-    [switch] $Cleanup
+    [switch] $Cleanup,
+    [switch] $Build
 )
 
 $ErrorActionPreference = 'Stop'
 
 if ($Help) {
     @'
-Usage: install-controller.ps1 [-Cleanup]
+Usage: install-controller.ps1 [-Cleanup] [-Build]
 
-Builds and starts the controller with an internal PostgreSQL database. Site and
-administrator configuration are completed in the browser guide at /setup.
+Pulls prebuilt controller images and starts the controller with an internal
+PostgreSQL database. Site and administrator configuration are completed in the
+browser guide at /setup.
 
--Cleanup stops this Compose project and removes its old images before build.
+-Cleanup stops this Compose project and removes its local images before build.
          PostgreSQL and Redis volumes are preserved.
+-Build builds controller images locally instead of pulling them from GHCR.
 '@
     exit 0
 }
@@ -69,7 +72,17 @@ try {
         }
     }
 
-    & docker compose up --build -d --remove-orphans
+    $controllerServices = @('setup', 'server', 'web')
+    if ($Build) {
+        Write-Host '使用本地源码构建总控镜像...'
+        & docker compose build --pull $controllerServices
+    }
+    else {
+        Write-Host '正在拉取总控预构建镜像...'
+        & docker compose pull $controllerServices
+    }
+    if ($LASTEXITCODE -ne 0) { throw '总控镜像准备失败；如需本地构建请重试 -Build。' }
+    & docker compose up -d --remove-orphans
     if ($LASTEXITCODE -ne 0) { throw '总终端服务器启动失败。' }
 
     $webPort = 18080

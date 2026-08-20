@@ -12,11 +12,17 @@
 
 ## Docker Compose 部署
 
-Linux 生产环境应使用总终端安装器启动。它会自动生成数据库与总控 Agent 凭据，并将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境应使用总终端安装器启动。它默认拉取 GHCR 的总控 `setup`、`server`、`web` 镜像，并自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
 bash ./deploy/install-controller.sh
 docker compose --profile host-monitoring ps
+```
+
+离线或需要从当前源码构建总控镜像时：
+
+```bash
+bash ./deploy/install-controller.sh --build
 ```
 
 然后打开：
@@ -53,7 +59,7 @@ Linux：
 bash ./deploy/install-controller.sh
 ```
 
-升级前只清理本项目旧镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
+升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `GUANLAN_SETUP_IMAGE`、`GUANLAN_SERVER_IMAGE`、`GUANLAN_WEB_IMAGE` 和 `GUANLAN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
 
 生产环境生成的配置至少包含：
 
@@ -180,7 +186,7 @@ docker compose exec -T postgres pg_dump -U "$(grep '^POSTGRES_USER=' .env | cut 
 数据库密码只通过 `.env` 注入服务端，不会展开到宿主机命令输出。升级步骤：
 
 ```powershell
-docker compose build --pull server web
+docker compose pull setup server web controller-agent
 docker compose up -d
 docker compose ps
 ```
@@ -196,4 +202,5 @@ Flyway 会在服务端启动时执行数据库迁移。升级前先在测试环�
 - Agent 日志提示延迟上报：检查 DNS、证书链和防火墙。缓冲文件会保留在 spool 目录并在恢复后补传。
 - Linux 安装器仍提示 Go 1.24+：Docker 命令不存在、守护进程不可达，或显式使用了 `--no-docker`；先运行 `docker info` 检查。要强制使用本机程序，请同时指定 `--no-docker --binary /path/to/guanlan-agent`。
 - Agent 镜像无法拉取：确认 GHCR 包已设为 Public、目标机能访问 `ghcr.io`，或用 `--image` 指向可访问的镜像仓库。
+- 总控镜像无法拉取：确认 GHCR 的 `monitor-for-server-{setup,server,web}` 包已设为 Public；也可使用 `bash ./deploy/install-controller.sh --build` 从源码构建。
 - 设备离线但无告警：检查系统离线判定时间、离线规则阈值和规则是否启用。
