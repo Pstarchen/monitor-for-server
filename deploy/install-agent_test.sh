@@ -174,8 +174,21 @@ grep -F '"server_url": "https://monitor.example.com"' "${config_file}" >/dev/nul
 
 : > "${log_file}"
 server_url=https://monitor.example.com
-env PATH="${fake_bin}:/usr/bin:/bin" TEST_LOG="${log_file}" TEST_CONFIG="${config_file}" TEST_DOCKER_AVAILABLE=1 GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io GUANLAN_AGENT_KEY=test-agent-key bash "${installer}" \
-  --server-url "${server_url}" --device-id test-device
+auto_update_environment=(
+  "PATH=${fake_bin}:/usr/bin:/bin"
+  "TEST_LOG=${log_file}"
+  "TEST_CONFIG=${config_file}"
+  "TEST_DOCKER_AVAILABLE=1"
+  "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
+  "GUANLAN_AGENT_KEY=test-agent-key"
+)
+if [[ "${EUID}" -eq 0 ]]; then
+  env "${auto_update_environment[@]}" bash "${installer}" \
+    --server-url "${server_url}" --device-id test-device
+else
+  sudo env "${auto_update_environment[@]}" bash "${installer}" \
+    --server-url "${server_url}" --device-id test-device
+fi
 grep -F 'systemctl enable --now guanlan-agent-update.timer' "${log_file}" >/dev/null
 
 : > "${log_file}"
