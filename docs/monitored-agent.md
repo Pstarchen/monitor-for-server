@@ -26,6 +26,13 @@ docker logs --tail 100 guanlan-agent
 
 内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定镜像。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；也可用 `--no-docker --binary /path/to/guanlan-agent` 强制本机模式。未提供二进制时会通过 `--source-url` 指定的仓库拉取源码构建。
 
+Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试 `ghcr.nju.edu.cn`、`ghcr.m.daocloud.io` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
+
+```bash
+systemctl status guanlan-agent-update.timer
+sudo systemctl start guanlan-agent-update.service
+```
+
 支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`。本机回退模式安装后检查：
 
 ```bash
@@ -57,6 +64,8 @@ Get-Service GuanlanAgent
 Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Select-Object server_url,device_id,interval
 ```
 
+Windows Agent 默认注册每日自动更新任务；需要关闭时在安装命令中添加 `-NoAutoUpdate`。
+
 ## 更新和改信息
 
 - 修改设备名称、分组、位置和主 IP：在总终端“设备管理”编辑，不需要重装 Agent。
@@ -64,4 +73,4 @@ Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Se
 - 轮换密钥：总终端管理员执行“轮换密钥”，旧密钥立即失效，然后在目标机重新运行安装器。
 - 更新 Agent 版本：重新运行 Linux 安装命令会拉取最新镜像并重建容器；固定版本可传 `--image ghcr.io/pstarchen/monitor-for-server-agent:v1.2.3`。本机模式则替换 `--binary` 指向的新程序并重跑安装器。
 
-Agent 默认强制 HTTPS；安装器传入域名时会优先探测 HTTPS。仅 `localhost` 开发地址可自动使用 HTTP；公网临时 HTTP 必须显式添加 `--allow-insecure-http`（Windows 使用 `-AllowInsecureHttp`）。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。
+Agent 默认强制 HTTPS；安装器传入域名时会优先探测 HTTPS。总控修改“Agent 上报周期”后，已安装 Agent 会在下一次成功上报时自动同步，无需重装。仅 `localhost` 开发地址可自动使用 HTTP；公网临时 HTTP 必须显式添加 `--allow-insecure-http`（Windows 使用 `-AllowInsecureHttp`）。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。

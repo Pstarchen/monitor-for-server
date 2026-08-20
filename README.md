@@ -21,6 +21,8 @@ cd monitor-for-server
 bash ./deploy/install-controller.sh
 ```
 
+需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查镜像、`--apply` 手动更新；更新器先尝试配置的国内镜像源，再回退 GHCR。
+
 使用本地源码构建总控镜像：
 
 ```bash

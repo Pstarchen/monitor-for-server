@@ -59,6 +59,16 @@ Linux：
 bash ./deploy/install-controller.sh
 ```
 
+总控更新可以先检查并拉取候选镜像，再决定是否重启：
+
+```bash
+sudo bash ./deploy/update-controller.sh --check
+sudo bash ./deploy/update-controller.sh --apply
+sudo bash ./deploy/update-controller.sh --auto
+```
+
+更新器默认依次尝试 `ghcr.nju.edu.cn`、`ghcr.m.daocloud.io` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 传入逗号分隔的镜像前缀；需要本地构建时使用 `--build`。`--auto` 会安装每日 systemd 定时任务，失败不会删除数据库卷。
+
 升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `GUANLAN_SETUP_IMAGE`、`GUANLAN_SERVER_IMAGE`、`GUANLAN_WEB_IMAGE` 和 `GUANLAN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
 
 生产环境生成的配置至少包含：

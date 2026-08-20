@@ -81,14 +81,15 @@ run_installer() {
     "TEST_DOCKER_AVAILABLE=${docker_available}"
     "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
     "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
+    "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
     "GUANLAN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
     env "${environment[@]}" bash "${installer}" \
-      --server-url "${server_url}" --device-id test-device "$@"
+      --server-url "${server_url}" --device-id test-device --no-auto-update "$@"
   else
     sudo env "${environment[@]}" bash "${installer}" \
-      --server-url "${server_url}" --device-id test-device "$@"
+      --server-url "${server_url}" --device-id test-device --no-auto-update "$@"
   fi
 }
 
@@ -102,14 +103,15 @@ run_installer_stdin() {
     "TEST_DOCKER_AVAILABLE=${docker_available}"
     "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
     "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
+    "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
     "GUANLAN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
     env "${environment[@]}" bash -s -- \
-      --server-url "${server_url}" --device-id test-device "$@" < "${installer}"
+      --server-url "${server_url}" --device-id test-device --no-auto-update "$@" < "${installer}"
   else
     sudo env "${environment[@]}" bash -s -- \
-      --server-url "${server_url}" --device-id test-device "$@" < "${installer}"
+      --server-url "${server_url}" --device-id test-device --no-auto-update "$@" < "${installer}"
   fi
 }
 
@@ -169,6 +171,12 @@ TEST_HTTP_PROBE=0
 run_installer 1
 grep -F 'curl --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =https' "${log_file}" >/dev/null
 grep -F '"server_url": "https://monitor.example.com"' "${config_file}" >/dev/null
+
+: > "${log_file}"
+server_url=https://monitor.example.com
+env PATH="${fake_bin}:/usr/bin:/bin" TEST_LOG="${log_file}" TEST_CONFIG="${config_file}" TEST_DOCKER_AVAILABLE=1 GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io GUANLAN_AGENT_KEY=test-agent-key bash "${installer}" \
+  --server-url "${server_url}" --device-id test-device
+grep -F 'systemctl enable --now guanlan-agent-update.timer' "${log_file}" >/dev/null
 
 : > "${log_file}"
 server_url=http://monitor.example.com

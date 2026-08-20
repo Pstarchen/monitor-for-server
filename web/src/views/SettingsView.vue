@@ -241,7 +241,7 @@ onMounted(load)
           </template>
 
           <template v-else-if="activeSection === 'monitoring'">
-            <header class="settings-editor-head"><span><Activity :size="18" /></span><div><h2>监控策略</h2><p>控制数据留存、离线判定和默认采集频率。</p></div></header>
+            <header class="settings-editor-head"><span><Activity :size="18" /></span><div><h2>监控策略</h2><p>控制数据留存、离线判定和 Agent 上报频率。</p></div></header>
             <el-form class="settings-editor-body" @submit.prevent="save">
               <div class="setting-list">
                 <div class="setting-row">
@@ -253,8 +253,8 @@ onMounted(load)
                   <div class="setting-control compact"><el-input-number id="offline-seconds" v-model="form.deviceOfflineAfterSeconds" :min="5" :max="3600" /><span>秒</span></div>
                 </div>
                 <div class="setting-row">
-                  <div class="setting-copy"><label>默认采集周期</label><p>新建 Agent 安装指引默认采用此频率。</p></div>
-                  <div class="setting-control"><el-segmented v-model="form.defaultCollectionSeconds" :options="[{ label: '1 秒', value: 1 }, { label: '3 秒', value: 3 }, { label: '10 秒', value: 10 }, { label: '30 秒', value: 30 }]" /></div>
+                  <div class="setting-copy"><label>Agent 上报周期</label><p>已安装 Agent 会在下次成功上报后应用此周期，新安装指引也会使用该值。</p></div>
+                  <div class="setting-control"><el-segmented v-model="form.defaultCollectionSeconds" :options="[{ label: '1 秒', value: 1 }, { label: '3 秒', value: 3 }, { label: '10 秒', value: 10 }, { label: '30 秒', value: 30 }, { label: '60 秒', value: 60 }]" /></div>
                 </div>
               </div>
             </el-form>

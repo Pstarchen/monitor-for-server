@@ -30,6 +30,8 @@ bash ./deploy/install-controller.sh
 2. 设置公网入口、来源、站点名、时区和首个管理员密码。
 3. 提交后页面会自动进入登录页；生产服务就绪前登录按钮会暂时锁定，就绪后即可登录。
 
+升级总控镜像使用 `deploy/update-controller.sh --check` 检查、`--apply` 手动更新，Linux 总控可用 `--auto` 安装每日自动更新定时器。更新器先尝试 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 指定的国内镜像前缀，再回退官方 GHCR。
+
 如果暂时没有域名，可以先用 `http://<服务器IP>:18080`；HTTPS 和宝塔反代配置完成后，再在系统设置中切换为正式域名。
 
 向导只在首次安装期间写入 `.env`，会为已有文件生成 `.env.backup.setup.<时间>`，不会删除或覆盖数据库中的业务数据。完成后 `setup` 服务不再接受安装提交；升级和日常配置仍通过 Compose 与控制台完成。命令行安装器是浏览器不可用时的备用路径。

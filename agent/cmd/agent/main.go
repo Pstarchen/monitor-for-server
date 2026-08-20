@@ -42,41 +42,49 @@ func main() {
 	defer stop()
 
 	logger.Info("agent started", "device_id", cfg.DeviceID, "interval", cfg.Interval.String())
-	collectAndSend(ctx, logger, metrics, queue, client)
-	ticker := time.NewTicker(cfg.Interval)
-	defer ticker.Stop()
+	interval := cfg.Interval
+	if updated := collectAndSend(ctx, logger, metrics, queue, client); updated > 0 {
+		interval = updated
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("agent stopped")
 			return
-		case <-ticker.C:
-			collectAndSend(ctx, logger, metrics, queue, client)
+		case <-timer.C:
+			if updated := collectAndSend(ctx, logger, metrics, queue, client); updated > 0 && updated != interval {
+				logger.Info("report interval updated", "interval", updated.String())
+				interval = updated
+			}
+			timer.Reset(interval)
 		}
 	}
 }
 
-func collectAndSend(ctx context.Context, logger *slog.Logger, metrics *collector.Collector, queue *spool.Queue, client *api.Client) {
+func collectAndSend(ctx context.Context, logger *slog.Logger, metrics *collector.Collector, queue *spool.Queue, client *api.Client) time.Duration {
 	report, err := metrics.Collect(ctx)
 	if err != nil {
 		logger.Error("metric collection failed", "error", err)
-		return
+		return 0
 	}
 	body, err := json.Marshal(report)
 	if err != nil {
 		logger.Error("metric encoding failed", "error", err)
-		return
+		return 0
 	}
 	if err := queue.Enqueue(body); err != nil {
 		logger.Error("report buffering failed", "error", err)
-		return
+		return 0
 	}
+	var updatedInterval time.Duration
 
 	paths, err := queue.List()
 	if err != nil {
 		logger.Error("report buffer listing failed", "error", err)
-		return
+		return updatedInterval
 	}
 	for _, path := range paths {
 		payload, readErr := os.ReadFile(path)
@@ -84,15 +92,20 @@ func collectAndSend(ctx context.Context, logger *slog.Logger, metrics *collector
 			logger.Warn("buffered report is unreadable", "error", readErr)
 			continue
 		}
-		if sendErr := client.Send(ctx, payload); sendErr != nil {
+		newInterval, sendErr := client.SendWithInterval(ctx, payload)
+		if sendErr != nil {
 			if !errors.Is(sendErr, context.Canceled) {
 				logger.Warn("report delivery deferred", "error", sendErr, "buffered", len(paths))
 			}
-			return
+			return updatedInterval
+		}
+		if newInterval > 0 {
+			updatedInterval = newInterval
 		}
 		if removeErr := queue.Remove(path); removeErr != nil {
 			logger.Warn("sent report could not be removed from buffer", "error", removeErr)
-			return
+			return updatedInterval
 		}
 	}
+	return updatedInterval
 }

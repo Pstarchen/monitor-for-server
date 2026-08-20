@@ -71,7 +71,7 @@ X-Agent-Key: <agent-key>
 Content-Type: application/json
 ```
 
-请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`processes` 与 `services`。成功返回 `202 Accepted` 和归一化后的指标快照。
+请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`processes` 与 `services`。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
 
 ## 告警
 
@@ -105,7 +105,7 @@ Content-Type: application/json
 | --- | --- | --- | --- |
 | GET | `/api/dashboard` | 登录 | 设备、告警和资源均值汇总 |
 | GET | `/api/settings` | ADMIN | 非敏感系统设置及通知通道配置状态 |
-| GET | `/api/settings/agent-bootstrap` | ADMIN / OPERATOR | Agent 公网入口与默认采集周期 |
+| GET | `/api/settings/agent-bootstrap` | ADMIN / OPERATOR | Agent 公网入口与当前上报周期 |
 | PUT | `/api/settings` | ADMIN | 更新系统设置与通知通道；敏感字段仅接受替换值 |
 | POST | `/api/settings/notifications/{channel}/test` | ADMIN | 测试 `email`、`dingtalk` 或 `wecom` 通道 |
 | GET | `/api/admin/users` | ADMIN | 账号列表 |

@@ -2,7 +2,8 @@
 param(
     [switch] $Help,
     [switch] $Cleanup,
-    [switch] $Build
+    [switch] $Build,
+    [switch] $AutoUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,7 @@ browser guide at /setup.
 -Cleanup stops this Compose project and removes its local images before build.
          PostgreSQL and Redis volumes are preserved.
 -Build builds controller images locally instead of pulling them from GHCR.
+-AutoUpdate installs a daily controller update task after startup.
 '@
     exit 0
 }
@@ -111,3 +113,6 @@ Write-Host "总终端服务器已启动。请打开 http://<服务器IP>:$webPor
 Write-Host 'PostgreSQL 已内置，数据库凭据由安装器自动生成，无需填写或执行数据库命令。'
 Write-Host '向导只需设置站点入口、来源、时区和首个管理员。端口与绑定地址已在总终端启动前确定。'
 Write-Host 'Windows 总终端默认不自动采集宿主机；请在设备管理中按普通 Windows Agent 流程接入。'
+if ($AutoUpdate) {
+    & (Join-Path $PSScriptRoot 'update-controller.ps1') -Auto
+}

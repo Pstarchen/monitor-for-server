@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -19,12 +19,14 @@ skip_processes=false
 skip_connections=false
 no_docker=false
 allow_insecure_http=false
+auto_update=true
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-url) server_url="${2:-}"; shift 2 ;;
     --device-id) device_id="${2:-}"; shift 2 ;;
     --allow-insecure-http) allow_insecure_http=true; shift ;;
+    --no-auto-update) auto_update=false; shift ;;
     --binary) binary_path="${2:-}"; shift 2 ;;
     --image) agent_image="${2:-}"; shift 2 ;;
     --container) container_name="${2:-}"; shift 2 ;;
@@ -195,7 +197,7 @@ agent_spool_path="/var/lib/guanlan-agent/spool"
 
 install_docker_agent() {
   echo "正在拉取 Agent 镜像 ${agent_image}..."
-  if ! docker pull "${agent_image}"; then
+  if ! pull_agent_image; then
     echo "无法拉取 Agent 镜像 ${agent_image}。请检查镜像权限/网络，或使用 --no-docker --binary PATH 强制本机安装。" >&2
     return 1
   fi
@@ -234,6 +236,106 @@ install_docker_agent() {
   fi
   echo "Guanlan Agent Docker 容器已安装并启动：${container_name}"
   echo "检查状态：docker logs --tail 100 ${container_name}"
+  install_agent_updater
+}
+
+pull_agent_image() {
+  local candidate mirror_prefix image_suffix
+  if [[ "${agent_image}" == ghcr.io/* ]]; then
+    image_suffix="${agent_image#ghcr.io/}"
+    IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.1ms.run}"
+    for mirror_prefix in "${mirror_prefixes[@]}"; do
+      mirror_prefix="${mirror_prefix%/}"
+      [[ -z "${mirror_prefix}" ]] && continue
+      candidate="${mirror_prefix}/${image_suffix}"
+      echo "正在尝试 Agent 镜像源 ${candidate}..."
+      if docker pull "${candidate}" >/dev/null && docker tag "${candidate}" "${agent_image}"; then
+        return 0
+      fi
+    done
+  fi
+  echo "正在尝试 Agent 官方镜像源 ${agent_image}..."
+  docker pull "${agent_image}"
+}
+
+shell_quote() {
+  printf "'%s'" "${1//\'/\'\"\'\"\'}"
+}
+
+install_agent_updater() {
+  [[ "${auto_update}" == true ]] || return 0
+  if [[ "$(uname -s)" != "Linux" || ! -d /run/systemd/system ]] || ! command -v systemctl >/dev/null 2>&1; then
+    echo "未检测到可用的 systemd，Agent 已启动但未安装自动更新任务。" >&2
+    return 0
+  fi
+  local updater="/usr/local/sbin/guanlan-agent-update"
+  local service="/etc/systemd/system/guanlan-agent-update.service"
+  local timer="/etc/systemd/system/guanlan-agent-update.timer"
+  install -d -m 0755 /usr/local/sbin
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf 'image=%s\n' "$(shell_quote "${agent_image}")"
+    printf 'container_name=%s\n' "$(shell_quote "${container_name}")"
+    printf 'config_path=%s\n' "$(shell_quote "${agent_config_path}")"
+    printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
+    printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.1ms.run}")"
+    printf '%s\n' \
+      'pull_image() {' \
+      '  local suffix prefix candidate' \
+      '  if [[ "${image}" == ghcr.io/* ]]; then' \
+      '    suffix="${image#ghcr.io/}"' \
+      '    IFS="," read -r -a prefixes <<< "${mirror_list}"' \
+      '    for prefix in "${prefixes[@]}"; do' \
+      '      prefix="${prefix%/}"; [[ -z "${prefix}" ]] && continue' \
+      '      candidate="${prefix}/${suffix}"' \
+      '      if docker pull "${candidate}" >/dev/null && docker tag "${candidate}" "${image}"; then return 0; fi' \
+      '    done' \
+      '  fi' \
+      '  docker pull "${image}"' \
+      '}' \
+      'before="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
+      'pull_image' \
+      'after="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
+      '[[ -n "${before}" && "${before}" == "${after}" ]] && exit 0' \
+      'docker rm -f "${container_name}" >/dev/null 2>&1 || true' \
+      'docker run -d --name "${container_name}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=/etc/guanlan-agent/agent.json,dst=/etc/guanlan-agent/agent.json,readonly" --mount "type=volume,src=${spool_volume},dst=/var/lib/guanlan-agent/spool" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${image}" -config /etc/guanlan-agent/agent.json >/dev/null'
+  } > "${updater}"
+  chmod 0755 "${updater}"
+  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent image' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' "ExecStart=${updater}" > "${service}"
+  printf '%s\n' '[Unit]' 'Description=Periodic Guanlan Agent image update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
+  systemctl daemon-reload
+  systemctl enable --now guanlan-agent-update.timer >/dev/null
+  echo "Agent 自动更新已启用：systemctl status guanlan-agent-update.timer"
+}
+
+install_local_agent_updater() {
+  [[ "${auto_update}" == true ]] || return 0
+  local updater="/usr/local/sbin/guanlan-agent-update"
+  local service="/etc/systemd/system/guanlan-agent-update.service"
+  local timer="/etc/systemd/system/guanlan-agent-update.timer"
+  install -d -m 0755 /usr/local/sbin
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf 'repository_url=%s\n' "$(shell_quote "${repository_url}")"
+    printf 'binary_path=%s\n' "$(shell_quote "/usr/local/bin/guanlan-agent")"
+    printf 'service_name=%s\n' "$(shell_quote "guanlan-agent.service")"
+    printf '%s\n' \
+      'temp_dir="$(mktemp -d)"' \
+      'trap '\''rm -rf "${temp_dir}"'\'' EXIT' \
+      'command -v git >/dev/null 2>&1 || exit 0' \
+      'command -v go >/dev/null 2>&1 || exit 0' \
+      'git clone --depth 1 --filter=blob:none --sparse "${repository_url}" "${temp_dir}/source" >/dev/null || exit 0' \
+      'git -C "${temp_dir}/source" sparse-checkout set agent >/dev/null || exit 0' \
+      '(cd "${temp_dir}/source/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/guanlan-agent" ./cmd/agent) || exit 0' \
+      'cmp -s "${temp_dir}/guanlan-agent" "${binary_path}" && exit 0' \
+      'install -m 0755 "${temp_dir}/guanlan-agent" "${binary_path}"' \
+      'systemctl restart "${service_name}"'
+  } > "${updater}"
+  chmod 0755 "${updater}"
+  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent binary' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' "ExecStart=${updater}" > "${service}"
+  printf '%s\n' '[Unit]' 'Description=Periodic Guanlan Agent binary update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
+  systemctl daemon-reload
+  systemctl enable --now guanlan-agent-update.timer >/dev/null
 }
 
 install_local_agent() {
@@ -298,6 +400,7 @@ install -m 0644 "${unit_tmp}" /etc/systemd/system/guanlan-agent.service
 
 systemctl daemon-reload
 systemctl enable --now guanlan-agent.service
+install_local_agent_updater
 }
 
 if [[ "${docker_available}" == true ]]; then

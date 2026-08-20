@@ -94,14 +94,16 @@ class AuthAndAgentIntegrationTest {
     @Test
     void agentKeyControlsMetricIngestion() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("integration-node", "lab", "tests", "127.0.0.1"));
+        settings.save(new com.guanlan.monitor.domain.SystemSetting("agent.default_collection_seconds", "10"));
         String report = sampleReport();
 
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
                         .header("X-Device-Id", credential.device().id())
                         .header("X-Agent-Key", credential.agentKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(report))
                 .andExpect(status().isAccepted())
+                .andExpect(header().string("X-Agent-Interval-Seconds", "10"))
                 .andExpect(jsonPath("$.cpuUsage").value(42.5));
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")

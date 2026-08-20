@@ -8,6 +8,7 @@ param(
     [string[]] $MonitoredService = @(),
     [string[]] $DiskMountpoint = @(),
     [switch] $AllowInsecureHttp,
+    [switch] $NoAutoUpdate,
     [switch] $SkipProcesses,
     [switch] $SkipConnections
 )
@@ -73,6 +74,34 @@ function Resolve-ServerUrl {
         return [pscustomobject]@{ Url = $httpCandidate; AllowInsecure = (-not $isLocal -and $AllowInsecureHttp) }
     }
     throw "无法访问 $raw 的 HTTPS 健康检查。请先配置有效证书；临时使用公网 HTTP 时显式指定 -AllowInsecureHttp。"
+}
+
+function Install-AgentUpdater {
+    if ($NoAutoUpdate) { return }
+    $updaterPath = Join-Path $dataDir 'update-agent.ps1'
+    $taskName = 'GuanlanAgentUpdate'
+    $script = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+if (-not (Get-Command git -ErrorAction SilentlyContinue) -or -not (Get-Command go -ErrorAction SilentlyContinue)) { exit 0 }
+`$temp = Join-Path ([IO.Path]::GetTempPath()) ('guanlan-agent-update-' + [Guid]::NewGuid().ToString('N'))
+try {
+    & git clone --depth 1 --filter=blob:none --sparse '$RepositoryUrl' `$temp | Out-Null
+    if (`$LASTEXITCODE -ne 0) { exit 0 }
+    & git -C `$temp sparse-checkout set agent | Out-Null
+    if (`$LASTEXITCODE -ne 0) { exit 0 }
+    `$built = Join-Path `$temp 'guanlan-agent.exe'
+    Push-Location (Join-Path `$temp 'agent')
+    try { `$env:CGO_ENABLED = '0'; & go build -trimpath -ldflags '-s -w' -o `$built ./cmd/agent } finally { Pop-Location; Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue }
+    if (`$LASTEXITCODE -ne 0) { exit 0 }
+    Stop-Service -Name '$serviceName' -Force -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath `$built -Destination '$targetBinary' -Force
+    Start-Service -Name '$serviceName'
+} finally { if (Test-Path -LiteralPath `$temp) { Remove-Item -LiteralPath `$temp -Recurse -Force -ErrorAction SilentlyContinue } }
+"@
+    [IO.File]::WriteAllText($updaterPath, $script, [Text.UTF8Encoding]::new($false))
+    $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updaterPath`""
+    $trigger = New-ScheduledTaskTrigger -Daily -At 4:15am
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -RunLevel Highest -Force | Out-Null
 }
 
 $resolvedServer = Resolve-ServerUrl
@@ -153,6 +182,7 @@ try {
         New-Service -Name $serviceName -DisplayName 'Guanlan Server Monitoring Agent' -BinaryPathName $command -StartupType Automatic -Description 'Collects server metrics for Guanlan Monitor.' | Out-Null
     }
     Start-Service -Name $serviceName
+    Install-AgentUpdater
     Write-Host 'Guanlan Agent 已安装并启动。可运行 Get-Service GuanlanAgent 查看状态。'
 }
 finally {

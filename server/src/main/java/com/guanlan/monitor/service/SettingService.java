@@ -105,12 +105,13 @@ public class SettingService {
 
     public int retentionDays() { return intValue(RETENTION_DAYS, properties.getMetricRetentionDays()); }
     public int offlineSeconds() { return intValue(OFFLINE_SECONDS, properties.getDeviceOfflineAfterSeconds()); }
+    public int agentCollectionSeconds() { return intValue(COLLECTION_SECONDS, 3); }
 
     @Transactional(readOnly = true)
     public AgentBootstrapView agentBootstrap() {
         return new AgentBootstrapView(
                 stringValue(PUBLIC_BASE_URL, properties.getPublicBaseUrl()),
-                intValue(COLLECTION_SECONDS, 3)
+                agentCollectionSeconds()
         );
     }
 

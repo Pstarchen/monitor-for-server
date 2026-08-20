@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-controller.sh [--cleanup] [--build]
+Usage: install-controller.sh [--cleanup] [--build] [--auto-update]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -12,15 +12,18 @@ browser guide at /setup.
   --cleanup  stop this Compose project and remove its old images before build.
              PostgreSQL/Redis volumes are preserved.
   --build    build controller images locally instead of pulling them from GHCR.
+  --auto-update  install a daily controller update timer after startup.
 USAGE
 }
 
 cleanup=false
 build=false
+auto_update=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cleanup) cleanup=true; shift ;;
     --build) build=true; shift ;;
+    --auto-update) auto_update=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -177,3 +180,6 @@ PostgreSQL 已内置，数据库凭据由安装器自动生成，无需填写或
 Linux 总终端会自动作为“总控服务器”显示在设备管理中，无需另装 Agent。
 MESSAGE
 printf '当前 Web 端口：%s\n' "${web_port}"
+if [[ "${auto_update}" == true ]]; then
+  bash "${script_dir}/update-controller.sh" --auto
+fi
