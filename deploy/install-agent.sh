@@ -264,7 +264,7 @@ shell_quote() {
 
 install_agent_updater() {
   [[ "${auto_update}" == true ]] || return 0
-  if [[ "$(uname -s)" != "Linux" || ! -d /run/systemd/system ]] || ! command -v systemctl >/dev/null 2>&1; then
+  if [[ "$(uname -s)" != "Linux" ]] || ! command -v systemctl >/dev/null 2>&1 || ! systemctl show-environment >/dev/null 2>&1; then
     echo "未检测到可用的 systemd，Agent 已启动但未安装自动更新任务。" >&2
     return 0
   fi
