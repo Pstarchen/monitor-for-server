@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -15,6 +16,19 @@ func TestAllowedMountpoint(t *testing.T) {
 	}
 	if allowedMountpoint("/boot", []string{"/", "/data"}) {
 		t.Fatal("unlisted mountpoint should be excluded")
+	}
+}
+
+func TestServiceCommandUsesHostRoot(t *testing.T) {
+	command := serviceCommandForOS(context.Background(), "linux", "nginx", "/host")
+	want := []string{"chroot", "/host", "systemctl", "is-active", "--", "nginx"}
+	if len(command.Args) != len(want) {
+		t.Fatalf("service command args = %q, want %q", command.Args, want)
+	}
+	for index := range want {
+		if filepath.Base(command.Args[index]) != filepath.Base(want[index]) {
+			t.Fatalf("service command args = %q, want %q", command.Args, want)
+		}
 	}
 }
 

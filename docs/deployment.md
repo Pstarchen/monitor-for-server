@@ -7,8 +7,8 @@
 - Docker Engine 24+ 与 Docker Compose v2。
 - Docker Compose 会自动启动 PostgreSQL 16 和 Redis。数据库、用户和密码由控制端安装器自动生成，数据库端口只在 Compose 内网可见，无需安装数据库客户端或执行 SQL。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
-- 每台被监控主机具备 systemd 或 Windows 服务管理权限。
-- 从源码构建 Agent 时需要 Go 1.24+；生产环境建议向安装器传入预编译二进制。
+- Linux 被监控主机推荐安装 Docker Engine；Docker 不可用时需要 systemd，以及预编译 Agent 或 Go 1.24+ 与 git。
+- Windows 被监控主机需要 Windows 服务管理权限；Windows Docker Desktop 不能代表 Windows 宿主机，因此仍使用原生 Agent。
 
 ## Docker Compose 部署
 
@@ -91,7 +91,7 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 ## Linux Agent
 
-安装器默认从当前仓库源码构建 Agent。密钥通过环境变量提供，避免进入命令历史：
+安装器默认检测 Docker 守护进程，成功时直接拉取 GHCR 预构建镜像并启动容器，不要求 Go。密钥通过环境变量提供，避免进入命令历史：
 
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
@@ -108,14 +108,26 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
-在线安装器会在没有本地源码时自动拉取仓库并构建 Agent，因此目标机只需安装 Go 1.24+、git 和 systemd；生产环境仍建议使用预编译二进制并添加 `--binary /path/to/guanlan-agent`。也可通过 `--source-url` 指向内部镜像仓库。安装结果：
+默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。可用 `--image` 或 `GUANLAN_AGENT_IMAGE` 指向固定版本/内部仓库，`--container` 可覆盖容器名。Docker 模式安装结果：
+
+- 容器：`guanlan-agent`，重启策略为 `unless-stopped`
+- 配置：`/etc/guanlan-agent/agent.json`，只读挂载到容器
+- 缓冲：Docker 卷 `guanlan-agent-spool`
+- 宿主机：只读挂载到 `/host`，并使用 host network/PID 采集主机指标
+
+```bash
+docker ps --filter name=guanlan-agent
+docker logs --tail 100 guanlan-agent
+```
+
+Docker 不可用时，`--binary /path/to/guanlan-agent` 会使用本机 systemd 服务；`--no-docker --binary /path/to/guanlan-agent` 可强制跳过 Docker。未提供二进制时，在线安装器会拉取源码，因此需要 Go 1.24+、git 和 systemd；可通过 `--source-url` 指向内部源码镜像。此回退模式安装结果：
 
 - 程序：`/usr/local/bin/guanlan-agent`
 - 配置：`/etc/guanlan-agent/agent.json`，权限 `0600`
 - 缓冲：`/var/lib/guanlan-agent/spool`
 - 服务：`guanlan-agent.service`
 
-检查状态：
+本机回退模式检查状态：
 
 ```bash
 systemctl status guanlan-agent
@@ -138,7 +150,7 @@ $env:GUANLAN_AGENT_KEY = '<一次性密钥>'
 
 轻量采集可添加 `-SkipProcesses -SkipConnections`；不传 `-DiskMountpoint` 时采集全部可用分区。
 
-使用预编译程序时添加 `-BinaryPath 'C:\staging\guanlan-agent.exe'`。脚本注册自动启动的 `GuanlanAgent` Windows 服务，并将配置写入 `%ProgramData%\GuanlanMonitor\agent.json`，ACL 仅允许 SYSTEM 与管理员访问。
+使用预编译程序时添加 `-BinaryPath 'C:\staging\guanlan-agent.exe'`。脚本注册自动启动的 `GuanlanAgent` Windows 服务，并将配置写入 `%ProgramData%\GuanlanMonitor\agent.json`，ACL 仅允许 SYSTEM 与管理员访问。即使已安装 Docker Desktop，Windows 也保持原生服务模式，以免采集到 Docker 的 Linux 虚拟机而不是 Windows 宿主机。
 
 检查状态：
 
@@ -182,4 +194,6 @@ Flyway 会在服务端启动时执行数据库迁移。升级前先在测试环�
 - WebSocket 反复断开：确认外层代理转发 Upgrade 请求头，且会话 Cookie 可发送到 `/ws/metrics`。
 - 设备一直待接入：核对 Agent 配置中的设备 ID、服务端 HTTPS 地址和密钥；密钥轮换后旧值立即失效。
 - Agent 日志提示延迟上报：检查 DNS、证书链和防火墙。缓冲文件会保留在 spool 目录并在恢复后补传。
+- Linux 安装器仍提示 Go 1.24+：Docker 命令不存在、守护进程不可达，或显式使用了 `--no-docker`；先运行 `docker info` 检查。要强制使用本机程序，请同时指定 `--no-docker --binary /path/to/guanlan-agent`。
+- Agent 镜像无法拉取：确认 GHCR 包已设为 Public、目标机能访问 `ghcr.io`，或用 `--image` 指向可访问的镜像仓库。
 - 设备离线但无告警：检查系统离线判定时间、离线规则阈值和规则是否启用。

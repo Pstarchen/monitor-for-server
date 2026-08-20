@@ -97,7 +97,7 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		Disks:       disks,
 		Network:     network,
 		Processes:   processes,
-		Services:    collectServices(ctx, c.options.MonitoredServices),
+		Services:    collectServices(ctx, c.options.MonitoredServices, c.options.HostRoot),
 	}, nil
 }
 

@@ -1,10 +1,10 @@
 # 受监控服务器搭建材料
 
-受监控服务器只安装一个 Go Agent。每台机器在总终端“设备管理”中创建一条设备记录，拿到设备 ID 和一次性 Agent 密钥后，再在目标主机安装。
+受监控服务器只安装一个 Agent。每台机器在总终端“设备管理”中创建一条设备记录，拿到设备 ID 和一次性 Agent 密钥后，再在目标主机安装。
 
 ## Linux
 
-推荐把预编译的 `guanlan-agent` 二进制复制到目标主机；没有二进制时，在线安装器会自动拉取仓库源码并构建，因此目标机需要 Go 1.24+、git 和仓库访问权限。内网环境可传 `--source-url` 指向镜像仓库。
+在线安装器默认优先使用 Docker：Docker 命令和守护进程可用时，直接拉取公开的 `ghcr.io/pstarchen/monitor-for-server-agent:latest` 镜像并启动容器，不需要 Go 或 git。只有 Docker 不可用时，安装器才使用 `--binary` 指定的本机程序，或拉取源码并用 Go 1.24+ 构建。
 
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
@@ -17,9 +17,16 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
   --service nginx
 ```
 
-已有预编译程序时，可改为在仓库目录运行安装器并添加 `--binary /path/to/guanlan-agent`，无需在目标机安装 Go。
+安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
 
-支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`。安装后检查：
+```bash
+docker ps --filter name=guanlan-agent
+docker logs --tail 100 guanlan-agent
+```
+
+内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定镜像。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；也可用 `--no-docker --binary /path/to/guanlan-agent` 强制本机模式。未提供二进制时会通过 `--source-url` 指定的仓库拉取源码构建。
+
+支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`。本机回退模式安装后检查：
 
 ```bash
 systemctl status guanlan-agent
@@ -53,8 +60,8 @@ Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Se
 ## 更新和改信息
 
 - 修改设备名称、分组、位置和主 IP：在总终端“设备管理”编辑，不需要重装 Agent。
-- 修改采集周期、磁盘白名单或服务检查：重新生成安装命令，在目标机重新运行安装器；安装器会更新现有服务。
+- 修改采集周期、磁盘白名单或服务检查：重新生成安装命令，在目标机重新运行安装器；安装器会更新现有容器或本机服务。
 - 轮换密钥：总终端管理员执行“轮换密钥”，旧密钥立即失效，然后在目标机重新运行安装器。
-- 更新 Agent 版本：替换 `--binary` 指向的新二进制并重新运行对应安装器，或先停止服务、替换程序后启动。
+- 更新 Agent 版本：重新运行 Linux 安装命令会拉取最新镜像并重建容器；固定版本可传 `--image ghcr.io/pstarchen/monitor-for-server-agent:v1.2.3`。本机模式则替换 `--binary` 指向的新程序并重跑安装器。
 
 Agent 默认强制 HTTPS；仅 `localhost` 开发地址可使用 HTTP。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。

@@ -11,3 +11,4 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 FROM alpine:3.22 AS artifact
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/guanlan-agent /guanlan-agent
+ENTRYPOINT ["/guanlan-agent"]

@@ -2,6 +2,8 @@
 
 Agent 默认读取当前目录的 `agent.json`，也可通过 `-config` 或 `GUANLAN_AGENT_CONFIG` 指定配置文件。生产环境必须使用 HTTPS；只有本机开发地址会默认允许 HTTP。
 
+Linux 安装器优先拉取 `ghcr.io/pstarchen/monitor-for-server-agent:latest`。镜像以 `/guanlan-agent` 为入口，支持 `linux/amd64` 和 `linux/arm64`；安装器负责挂载配置、缓冲卷及只读宿主机根目录。
+
 ```powershell
 go build -o bin/guanlan-agent.exe ./cmd/agent
 ./bin/guanlan-agent.exe -config ./agent.json
