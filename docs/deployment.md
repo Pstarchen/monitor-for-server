@@ -103,7 +103,7 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 export GUANLAN_AGENT_KEY='<一次性密钥>'
 curl -fsSL https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh | \
 sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
-  --server-url https://monitor.example.com \
+  --server-url monitor.example.com \
   --device-id '<设备ID>' \
   --interval 3s \
   --disk / \
@@ -114,7 +114,7 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
-默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。可用 `--image` 或 `GUANLAN_AGENT_IMAGE` 指向固定版本/内部仓库，`--container` 可覆盖容器名。Docker 模式安装结果：
+`--server-url` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz` 并将解析后的 HTTPS 地址写入 Agent 配置；也可以直接传入完整的 `http(s)://` 地址。只有本地地址，或显式添加 `--allow-insecure-http`，才允许使用公网 HTTP。默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。可用 `--image` 或 `GUANLAN_AGENT_IMAGE` 指向固定版本/内部仓库，`--container` 可覆盖容器名。Docker 模式安装结果：
 
 - 容器：`guanlan-agent`，重启策略为 `unless-stopped`
 - 配置：`/etc/guanlan-agent/agent.json`，只读挂载到容器
@@ -147,7 +147,7 @@ journalctl -u guanlan-agent -n 100 --no-pager
 ```powershell
 $env:GUANLAN_AGENT_KEY = '<一次性密钥>'
 & .\deploy\install-agent.ps1 `
-  -ServerUrl 'https://monitor.example.com' `
+  -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `
   -Interval '3s' `
   -DiskMountpoint 'C:\','D:\' `

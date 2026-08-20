@@ -10,14 +10,14 @@
 export GUANLAN_AGENT_KEY='<一次性密钥>'
 curl -fsSL https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh | \
 sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
-  --server-url https://monitor.example.com \
+  --server-url monitor.example.com \
   --device-id '<设备ID>' \
   --interval 3s \
   --disk / \
   --service nginx
 ```
 
-安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
+`--server-url` 只填写域名或 `域名:端口` 即可。安装器会先访问 HTTPS 健康检查并自动把解析后的地址写入配置；也支持直接传入完整的 `http(s)://` 地址。公网 HTTP 仅在显式添加 `--allow-insecure-http` 时允许。安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
 
 ```bash
 docker ps --filter name=guanlan-agent
@@ -42,7 +42,7 @@ journalctl -u guanlan-agent -n 100 --no-pager
 ```powershell
 $env:GUANLAN_AGENT_KEY = '<一次性密钥>'
 & .\deploy\install-agent.ps1 `
-  -ServerUrl 'https://monitor.example.com' `
+  -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `
   -BinaryPath 'C:\staging\guanlan-agent.exe' `
   -Interval '3s' `
@@ -64,4 +64,4 @@ Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Se
 - 轮换密钥：总终端管理员执行“轮换密钥”，旧密钥立即失效，然后在目标机重新运行安装器。
 - 更新 Agent 版本：重新运行 Linux 安装命令会拉取最新镜像并重建容器；固定版本可传 `--image ghcr.io/pstarchen/monitor-for-server-agent:v1.2.3`。本机模式则替换 `--binary` 指向的新程序并重跑安装器。
 
-Agent 默认强制 HTTPS；仅 `localhost` 开发地址可使用 HTTP。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。
+Agent 默认强制 HTTPS；安装器传入域名时会优先探测 HTTPS。仅 `localhost` 开发地址可自动使用 HTTP；公网临时 HTTP 必须显式添加 `--allow-insecure-http`（Windows 使用 `-AllowInsecureHttp`）。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。

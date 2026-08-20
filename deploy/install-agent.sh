@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url URL --device-id ID [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -18,11 +18,13 @@ disks=()
 skip_processes=false
 skip_connections=false
 no_docker=false
+allow_insecure_http=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --server-url) server_url="${2:-}"; shift 2 ;;
     --device-id) device_id="${2:-}"; shift 2 ;;
+    --allow-insecure-http) allow_insecure_http=true; shift ;;
     --binary) binary_path="${2:-}"; shift 2 ;;
     --image) agent_image="${2:-}"; shift 2 ;;
     --container) container_name="${2:-}"; shift 2 ;;
@@ -59,6 +61,78 @@ if [[ ! "${container_name}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   echo "Container name contains invalid characters: ${container_name}" >&2
   exit 2
 fi
+
+is_local_host() {
+  local host="$1"
+  [[ "${host}" =~ ^(localhost|127\.0\.0\.1|\[::1\]|::1)(:[0-9]+)?$ ]]
+}
+
+probe_server_url() {
+  local scheme="$1"
+  local candidate="$2"
+  curl --fail --silent --show-error --location --max-time 10 --connect-timeout 5 \
+    --proto "=${scheme}" --tlsv1.2 "${candidate%/}/healthz" >/dev/null
+}
+
+resolve_server_url() {
+  local raw="${server_url%/}"
+  local scheme=""
+  local host=""
+  local candidate=""
+  local local_host=false
+  config_allow_insecure_http=false
+
+  if [[ "${raw}" =~ ^(https?):// ]]; then
+    scheme="${BASH_REMATCH[1]}"
+    host="${raw#*://}"
+    if [[ "${raw}" == *[[:space:]?#@]* || "${host}" == */* ]]; then
+      echo "Server URL cannot contain credentials, a path, query or fragment: ${raw}" >&2
+      exit 2
+    fi
+    if is_local_host "${host}"; then
+      local_host=true
+    fi
+    if [[ "${scheme}" == "http" && "${local_host}" != true && "${allow_insecure_http}" != true ]]; then
+      echo "公网 Agent 地址必须使用 HTTPS；仅本地地址或显式 --allow-insecure-http 可使用 HTTP。" >&2
+      exit 2
+    fi
+    if [[ "${scheme}" == "http" && "${local_host}" != true ]]; then
+      config_allow_insecure_http=true
+    fi
+    server_url="${raw}"
+    return
+  fi
+
+  if [[ -z "${raw}" || "${raw}" == *[[:space:]/?#@]* || "${raw}" == *://* ]]; then
+    echo "Server URL must be a hostname, hostname:port, or complete HTTP(S) URL: ${server_url}" >&2
+    exit 2
+  fi
+  host="${raw}"
+  if is_local_host "${host}"; then
+    local_host=true
+  fi
+  candidate="https://${host}"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "自动识别协议需要 curl；请安装 curl，或直接传入完整 HTTPS URL。" >&2
+    exit 1
+  fi
+  if probe_server_url https "${candidate}"; then
+    server_url="${candidate}"
+    return
+  fi
+  candidate="http://${host}"
+  if [[ "${local_host}" == true || "${allow_insecure_http}" == true ]] && probe_server_url http "${candidate}"; then
+    server_url="${candidate}"
+    if [[ "${local_host}" != true ]]; then
+      config_allow_insecure_http=true
+    fi
+    return
+  fi
+  echo "无法访问 ${host} 的 HTTPS 健康检查。请先配置有效证书；临时使用公网 HTTP 时显式添加 --allow-insecure-http。" >&2
+  exit 1
+}
+
+resolve_server_url
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
@@ -97,6 +171,10 @@ done
 config_tmp="${temp_dir}/agent.json"
 printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s"\n}\n' \
   "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" > "${config_tmp}"
+
+if [[ "${config_allow_insecure_http}" == true ]]; then
+  sed -i 's/"allow_insecure_http": false/"allow_insecure_http": true/' "${config_tmp}"
+fi
 
 agent_config_dir="/etc/guanlan-agent"
 agent_config_path="${agent_config_dir}/agent.json"

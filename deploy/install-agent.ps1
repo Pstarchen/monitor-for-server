@@ -7,6 +7,7 @@ param(
     [string] $RepositoryUrl = 'https://github.com/Pstarchen/monitor-for-server.git',
     [string[]] $MonitoredService = @(),
     [string[]] $DiskMountpoint = @(),
+    [switch] $AllowInsecureHttp,
     [switch] $SkipProcesses,
     [switch] $SkipConnections
 )
@@ -26,6 +27,57 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 if ([string]::IsNullOrWhiteSpace($agentKey)) {
     throw '请通过 GUANLAN_AGENT_KEY 环境变量提供一次性 Agent 密钥。'
 }
+
+function Test-LocalHost([string] $HostName) {
+    return $HostName -match '^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?$'
+}
+
+function Test-ServerEndpoint([string] $Candidate) {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri ($Candidate.TrimEnd('/') + '/healthz') -Method Get -TimeoutSec 10 -MaximumRedirection 0
+        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
+    }
+    catch {
+        return $false
+    }
+}
+
+function Resolve-ServerUrl {
+    $raw = $ServerUrl.Trim().TrimEnd('/')
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        throw '请提供监控平台域名或完整 HTTP(S) 地址。'
+    }
+
+    $parsed = $null
+    if ([Uri]::TryCreate($raw, [UriKind]::Absolute, [ref] $parsed) -and ($parsed.Scheme -eq 'http' -or $parsed.Scheme -eq 'https')) {
+        if ($parsed.UserInfo -or $parsed.AbsolutePath -ne '/' -or $parsed.Query -or $parsed.Fragment) {
+            throw '监控平台地址不能包含用户信息、路径、查询参数或片段。'
+        }
+        $isLocal = Test-LocalHost $parsed.Authority
+        if ($parsed.Scheme -eq 'http' -and -not $isLocal -and -not $AllowInsecureHttp) {
+            throw '公网 Agent 地址必须使用 HTTPS；仅本地地址或显式指定 -AllowInsecureHttp 可使用 HTTP。'
+        }
+        return [pscustomobject]@{ Url = $raw; AllowInsecure = ($parsed.Scheme -eq 'http' -and -not $isLocal -and $AllowInsecureHttp) }
+    }
+
+    if ($raw -match '[\s/?#@]' -or $raw -match '://') {
+        throw '监控平台地址必须是域名、域名:端口或完整 HTTP(S) 地址。'
+    }
+    $isLocal = Test-LocalHost $raw
+    $httpsCandidate = "https://$raw"
+    if (Test-ServerEndpoint $httpsCandidate) {
+        return [pscustomobject]@{ Url = $httpsCandidate; AllowInsecure = $false }
+    }
+    $httpCandidate = "http://$raw"
+    if (($isLocal -or $AllowInsecureHttp) -and (Test-ServerEndpoint $httpCandidate)) {
+        return [pscustomobject]@{ Url = $httpCandidate; AllowInsecure = (-not $isLocal -and $AllowInsecureHttp) }
+    }
+    throw "无法访问 $raw 的 HTTPS 健康检查。请先配置有效证书；临时使用公网 HTTP 时显式指定 -AllowInsecureHttp。"
+}
+
+$resolvedServer = Resolve-ServerUrl
+$ServerUrl = $resolvedServer.Url
+$configAllowInsecureHttp = $resolvedServer.AllowInsecure
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $temporaryBinary = $null
@@ -80,7 +132,7 @@ try {
         request_timeout = '10s'
         spool_dir = (Join-Path $dataDir 'spool')
         max_buffered_reports = 10000
-        allow_insecure_http = $false
+        allow_insecure_http = $configAllowInsecureHttp
         monitored_services = $MonitoredService
         skip_process_collection = $SkipProcesses.IsPresent
         skip_connection_count = $SkipConnections.IsPresent

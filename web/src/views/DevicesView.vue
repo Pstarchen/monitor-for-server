@@ -31,7 +31,7 @@ const lightweight = ref(false)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '' })
 const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent'
-const agentInstallerCacheKey = 'v3'
+const agentInstallerCacheKey = 'v4'
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
@@ -44,7 +44,7 @@ const filtered = computed(() => {
 })
 const installCommand = computed(() => {
   if (!credential.value) return ''
-  const url = agentServerUrl.value.trim().replace(/\/$/, '')
+  const url = agentServerHost(agentServerUrl.value)
   const disks = diskMountpoints.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean)
   if (credentialPlatform.value === 'windows') {
     const diskArgs = disks.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
@@ -182,6 +182,17 @@ function powerShellQuote(value: string) {
   return value.split("'").join("''")
 }
 
+function agentServerHost(value: string) {
+  const raw = value.trim().replace(/\/+$/, '')
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw.includes('://') ? raw : `https://${raw}`)
+    return parsed.host
+  } catch {
+    return raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+  }
+}
+
 function scheduleRefresh() {
   window.clearTimeout(refreshTimer)
   refreshTimer = window.setTimeout(() => load(true), 400)
@@ -261,7 +272,7 @@ onBeforeUnmount(() => {
         <dl><div><dt>设备 ID</dt><dd>{{ credential.device.id }}</dd></div><div><dt>Agent 密钥</dt><dd ref="agentKeyElement">{{ credential.agentKey }}</dd></div></dl>
         <div class="agent-install-options">
           <el-form label-position="top">
-            <el-form-item label="监控平台地址"><el-input v-model="agentServerUrl" /></el-form-item>
+            <el-form-item label="监控平台域名或地址"><el-input v-model="agentServerUrl" /></el-form-item>
             <div class="form-grid two-fields">
               <el-form-item label="采集周期"><el-select v-model="collectionSeconds"><el-option v-for="value in [1, 3, 10, 30, 60]" :key="value" :label="`${value} 秒`" :value="value" /></el-select></el-form-item>
               <el-form-item label="磁盘白名单"><el-input v-model="diskMountpoints" placeholder="例如：/, /data" /></el-form-item>

@@ -28,6 +28,9 @@ jobs:
         working-directory: setup
         run: go test ./...
 
+      - name: Test Linux Agent installer
+        run: bash deploy/install-agent_test.sh
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:

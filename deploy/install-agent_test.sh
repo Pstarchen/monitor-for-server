@@ -26,6 +26,16 @@ elif [[ "${1:-}" == "inspect" && "${2:-}" == "--format" ]]; then
 fi
 SCRIPT
 
+cat > "${fake_bin}/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >> "${TEST_LOG}"
+case "$*" in
+  *https://*) [[ "${TEST_HTTPS_PROBE:-1}" == "1" ]] ;;
+  *http://*) [[ "${TEST_HTTP_PROBE:-0}" == "1" ]] ;;
+  *) exit 2 ;;
+esac
+SCRIPT
+
 cat > "${fake_bin}/install" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'install %s\n' "$*" >> "${TEST_LOG}"
@@ -69,18 +79,21 @@ run_installer() {
     "TEST_LOG=${log_file}"
     "TEST_CONFIG=${config_file}"
     "TEST_DOCKER_AVAILABLE=${docker_available}"
+    "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
+    "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
     "GUANLAN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
     env "${environment[@]}" bash "${installer}" \
-      --server-url https://monitor.example.com --device-id test-device "$@"
+      --server-url "${server_url}" --device-id test-device "$@"
   else
     sudo env "${environment[@]}" bash "${installer}" \
-      --server-url https://monitor.example.com --device-id test-device "$@"
+      --server-url "${server_url}" --device-id test-device "$@"
   fi
 }
 
 : > "${log_file}"
+server_url=https://monitor.example.com
 run_installer 1
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
 grep -F 'docker run -d --name guanlan-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
@@ -92,6 +105,7 @@ if grep -q '^go ' "${log_file}"; then
 fi
 
 : > "${log_file}"
+server_url=https://monitor.example.com
 run_installer 0
 grep -F 'go build -trimpath' "${log_file}" >/dev/null
 grep -F 'systemctl enable --now guanlan-agent.service' "${log_file}" >/dev/null
@@ -104,6 +118,7 @@ fi
 : > "${log_file}"
 binary_path="${temp_dir}/prebuilt-agent"
 touch "${binary_path}"
+server_url=https://monitor.example.com
 run_installer 1 --no-docker --binary "${binary_path}"
 grep -F 'systemctl enable --now guanlan-agent.service' "${log_file}" >/dev/null
 if grep -Eq '^(docker pull|go )' "${log_file}"; then
@@ -112,11 +127,32 @@ if grep -Eq '^(docker pull|go )' "${log_file}"; then
 fi
 
 : > "${log_file}"
+server_url=https://monitor.example.com
 run_installer 1 --binary "${binary_path}"
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
 fi
+
+: > "${log_file}"
+server_url=monitor.example.com
+TEST_HTTPS_PROBE=1
+TEST_HTTP_PROBE=0
+run_installer 1
+grep -F 'curl --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =https' "${log_file}" >/dev/null
+grep -F '"server_url": "https://monitor.example.com"' "${config_file}" >/dev/null
+
+: > "${log_file}"
+server_url=http://monitor.example.com
+if run_installer 1; then
+  echo 'Remote HTTP URL was accepted without explicit opt-in.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+server_url=http://monitor.example.com
+run_installer 1 --allow-insecure-http
+grep -F '"allow_insecure_http": true' "${config_file}" >/dev/null
 
 echo 'install-agent.sh behavior tests passed.'
