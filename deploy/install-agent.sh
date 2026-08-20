@@ -134,8 +134,13 @@ resolve_server_url() {
 
 resolve_server_url
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-project_root="$(cd -- "${script_dir}/.." && pwd)"
+script_source="${BASH_SOURCE[0]-}"
+script_dir=""
+project_root=""
+if [[ -n "${script_source}" && -f "${script_source}" ]]; then
+  script_dir="$(cd -- "$(dirname -- "${script_source}")" && pwd)"
+  project_root="$(cd -- "${script_dir}/.." && pwd)"
+fi
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 
@@ -157,16 +162,24 @@ json_escape() {
 }
 
 service_json=""
-for service in "${services[@]}"; do
-  [[ -n "${service_json}" ]] && service_json+=","
-  service_json+="\"$(json_escape "${service}")\""
-done
+if ((${#services[@]} > 0)); then
+  for service in "${services[@]}"; do
+    if [[ -n "${service_json}" ]]; then
+      service_json+=","
+    fi
+    service_json+="\"$(json_escape "${service}")\""
+  done
+fi
 
 disk_json=""
-for mountpoint in "${disks[@]}"; do
-  [[ -n "${disk_json}" ]] && disk_json+=","
-  disk_json+="\"$(json_escape "${mountpoint}")\""
-done
+if ((${#disks[@]} > 0)); then
+  for mountpoint in "${disks[@]}"; do
+    if [[ -n "${disk_json}" ]]; then
+      disk_json+=","
+    fi
+    disk_json+="\"$(json_escape "${mountpoint}")\""
+  done
+fi
 
 config_tmp="${temp_dir}/agent.json"
 printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s"\n}\n' \
@@ -226,7 +239,7 @@ install_docker_agent() {
 install_local_agent() {
   if [[ -z "${binary_path}" ]]; then
   source_root="${project_root}"
-  if [[ ! -f "${source_root}/agent/go.mod" ]]; then
+  if [[ -z "${source_root}" || ! -f "${source_root}/agent/go.mod" ]]; then
     if ! command -v git >/dev/null 2>&1; then
       echo "未找到 Agent 源码。请安装 git，或通过 --binary 提供预编译 Agent。" >&2
       exit 1

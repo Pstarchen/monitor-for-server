@@ -92,6 +92,27 @@ run_installer() {
   fi
 }
 
+run_installer_stdin() {
+  local docker_available="$1"
+  shift
+  local environment=(
+    "PATH=${fake_bin}:/usr/bin:/bin"
+    "TEST_LOG=${log_file}"
+    "TEST_CONFIG=${config_file}"
+    "TEST_DOCKER_AVAILABLE=${docker_available}"
+    "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
+    "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
+    "GUANLAN_AGENT_KEY=test-agent-key"
+  )
+  if [[ "${EUID}" -eq 0 ]]; then
+    env "${environment[@]}" bash -s -- \
+      --server-url "${server_url}" --device-id test-device "$@" < "${installer}"
+  else
+    sudo env "${environment[@]}" bash -s -- \
+      --server-url "${server_url}" --device-id test-device "$@" < "${installer}"
+  fi
+}
+
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1
@@ -134,6 +155,12 @@ if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
 fi
+
+: > "${log_file}"
+server_url=https://monitor.example.com
+run_installer_stdin 1
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
+grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 
 : > "${log_file}"
 server_url=monitor.example.com
