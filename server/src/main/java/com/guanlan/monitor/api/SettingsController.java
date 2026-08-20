@@ -3,6 +3,8 @@ package com.guanlan.monitor.api;
 import com.guanlan.monitor.service.SettingService;
 import com.guanlan.monitor.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,7 +16,11 @@ public class SettingsController {
     private final NotificationService notifications;
 
     @GetMapping("/public")
-    SettingService.PublicBrandView publicBrand() { return settings.publicBrand(); }
+    ResponseEntity<SettingService.PublicBrandView> publicBrand() {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(settings.publicBrand());
+    }
 
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")

@@ -119,7 +119,7 @@ async function save() {
   try {
     settings.value = (await api.put<Settings>('/settings', form)).data
     apply(settings.value)
-    await loadBranding()
+    await loadBranding(true)
     ElMessage.success('系统设置已保存')
   } catch (cause) {
     ElMessage.error(errorMessage(cause))

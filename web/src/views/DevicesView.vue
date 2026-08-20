@@ -31,6 +31,9 @@ const lightweight = ref(false)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '' })
 const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent'
+const agentInstallerCacheKey = 'v2'
+const agentKeyElement = ref<HTMLElement | null>(null)
+const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
 
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
@@ -47,12 +50,12 @@ const installCommand = computed(() => {
     const diskArgs = disks.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
     const lightArgs = lightweight.value ? ' -SkipProcesses -SkipConnections' : ''
     return `$env:GUANLAN_AGENT_KEY = '${powerShellQuote(credential.value.agentKey)}'\n` +
-      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; Invoke-WebRequest -UseBasicParsing '${agentInstallerRawUrl}.ps1' -OutFile $installer; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}; Remove-Item $installer -Force`
+      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; Invoke-WebRequest -UseBasicParsing '${agentInstallerRawUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}; Remove-Item $installer -Force`
   }
   const diskArgs = disks.map((value) => ` --disk '${shellQuote(value)}'`).join('')
   const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
   return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
-    `curl -fsSL '${agentInstallerRawUrl}.sh' | sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
+    `curl -fsSL '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' | sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
 })
 
 async function load(background = false) {
@@ -69,7 +72,7 @@ async function load(background = false) {
 
 async function loadAgentBootstrap() {
   try {
-    const data = (await api.get<AgentBootstrap>('/settings/agent-bootstrap')).data
+    const data = (await api.get<AgentBootstrap>('/settings/agent-bootstrap', { params: { _agentBootstrap: Date.now() } })).data
     if (data.publicBaseUrl) agentServerUrl.value = data.publicBaseUrl
     if ([1, 3, 10, 30, 60].includes(data.defaultCollectionSeconds)) collectionSeconds.value = data.defaultCollectionSeconds
   } catch {
@@ -146,7 +149,8 @@ async function copyKey() {
     await copyText(credential.value.agentKey)
     ElMessage.success('密钥已复制')
   } catch {
-    ElMessage.error('复制失败，请手动选择密钥')
+    selectText(agentKeyElement.value)
+    ElMessage.warning('浏览器禁止自动复制，密钥已选中，请按 Ctrl+C')
   }
 }
 
@@ -155,8 +159,19 @@ async function copyInstallCommand() {
     await copyText(installCommand.value)
     ElMessage.success('安装命令已复制')
   } catch {
-    ElMessage.error('复制失败，请手动选择命令')
+    selectText(installCommandElement.value)
+    ElMessage.warning('浏览器禁止自动复制，命令已选中，请按 Ctrl+C')
   }
+}
+
+function selectText(element: HTMLElement | null) {
+  if (!element) return
+  const selection = window.getSelection()
+  if (!selection) return
+  const range = document.createRange()
+  range.selectNodeContents(element)
+  selection.removeAllRanges()
+  selection.addRange(range)
 }
 
 function shellQuote(value: string) {
@@ -243,7 +258,7 @@ onBeforeUnmount(() => {
     <el-dialog :model-value="Boolean(credential)" title="Agent 接入" width="min(720px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) credential = null }">
       <div v-if="credential" class="credential-panel">
         <div class="credential-warning"><KeyRound :size="18" /><p><strong>密钥仅显示这一次</strong><span>关闭窗口后无法再次查看。请立即写入目标服务器的 Agent 配置。</span></p></div>
-        <dl><div><dt>设备 ID</dt><dd>{{ credential.device.id }}</dd></div><div><dt>Agent 密钥</dt><dd>{{ credential.agentKey }}</dd></div></dl>
+        <dl><div><dt>设备 ID</dt><dd>{{ credential.device.id }}</dd></div><div><dt>Agent 密钥</dt><dd ref="agentKeyElement">{{ credential.agentKey }}</dd></div></dl>
         <div class="agent-install-options">
           <el-form label-position="top">
             <el-form-item label="监控平台地址"><el-input v-model="agentServerUrl" /></el-form-item>
@@ -257,7 +272,7 @@ onBeforeUnmount(() => {
         <el-tabs v-model="credentialPlatform" class="install-tabs">
           <el-tab-pane label="Linux" name="linux" /><el-tab-pane label="Windows" name="windows" />
         </el-tabs>
-        <div class="install-command"><Terminal :size="16" /><code>{{ installCommand }}</code><button type="button" title="复制安装命令" aria-label="复制安装命令" @click="copyInstallCommand"><Copy :size="15" /></button></div>
+        <div class="install-command"><Terminal :size="16" /><code ref="installCommandElement">{{ installCommand }}</code><button type="button" title="复制安装命令" aria-label="复制安装命令" @click="copyInstallCommand"><Copy :size="15" /></button></div>
       </div>
       <template #footer><el-button @click="credential = null">完成</el-button><el-button @click="copyKey"><KeyRound :size="16" />复制密钥</el-button><el-button type="primary" @click="copyInstallCommand"><Copy :size="16" />复制安装命令</el-button></template>
     </el-dialog>

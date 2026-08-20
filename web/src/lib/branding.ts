@@ -13,17 +13,25 @@ function syncDocumentTitle(): void {
 
 syncDocumentTitle()
 
-export function loadBranding(): Promise<void> {
-  if (pending) return pending
-  pending = api.get<PublicBrand>('/settings/public')
-    .then(({ data }) => {
+export function loadBranding(force = false): Promise<void> {
+  if (pending && !force) return pending
+  const previous = pending
+  const request = (async () => {
+    if (previous) await previous
+    try {
+      const { data } = await api.get<PublicBrand>('/settings/public', { params: { _branding: Date.now() } })
       const value = data.siteName?.trim()
       if (value) {
         siteName.value = value
         syncDocumentTitle()
       }
-    })
-    .catch(() => undefined)
-    .finally(() => { pending = undefined })
-  return pending
+    } catch {
+      // Keep the last known brand when the public endpoint is temporarily unavailable.
+    }
+  })()
+  const tracked = request.finally(() => {
+    if (pending === tracked) pending = undefined
+  })
+  pending = tracked
+  return tracked
 }
