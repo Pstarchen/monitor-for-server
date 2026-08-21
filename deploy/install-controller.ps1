@@ -3,7 +3,8 @@ param(
     [switch] $Help,
     [switch] $Cleanup,
     [switch] $Build,
-    [switch] $AutoUpdate
+    [switch] $AutoUpdate,
+    [switch] $NoMirror
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,7 @@ browser guide at /setup.
          PostgreSQL and Redis volumes are preserved.
 -Build builds controller images locally instead of pulling them from GHCR.
 -AutoUpdate enables the controller's daily 04:00 automatic update.
+-NoMirror skips mainland-China mirror registries and uses official GHCR.
 '@
     exit 0
 }
@@ -80,8 +82,11 @@ try {
         & docker compose build --pull $controllerServices
     }
     else {
-        Write-Host '正在拉取总控预构建镜像...'
-        & docker compose pull $controllerServices
+        Write-Host '正在拉取总控预构建镜像（优先使用国内镜像源）...'
+        $updateScript = Join-Path $PSScriptRoot 'update-controller.ps1'
+        $updateArgs = @('-Check')
+        if ($NoMirror) { $updateArgs += '-NoMirror' }
+        & $updateScript @updateArgs
     }
     if ($LASTEXITCODE -ne 0) { throw '总控镜像准备失败；如需本地构建请重试 -Build。' }
     & docker compose up -d --remove-orphans

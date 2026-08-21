@@ -12,7 +12,7 @@
 
 ## Docker Compose 部署
 
-Linux 生产环境应使用总终端安装器启动。它默认拉取 GHCR 的总控 `setup`、`server`、`web` 镜像，并自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境应使用总终端安装器启动。它默认先从国内镜像源拉取总控 `setup`、`server`、`web` 镜像，失败后回退 GHCR，并自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
 bash ./deploy/install-controller.sh
@@ -67,7 +67,7 @@ sudo bash ./deploy/update-controller.sh --apply
 sudo bash ./deploy/update-controller.sh --auto
 ```
 
-更新器默认依次尝试 `ghcr.nju.edu.cn`、`ghcr.m.daocloud.io` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 传入逗号分隔的镜像前缀；需要本地构建时使用 `--build`。`--auto` 会启用由 setup 服务执行的每日 04:00 自动更新，失败不会删除数据库卷。
+更新器默认依次尝试 `ghcr.nju.edu.cn`、`ghcr.m.daocloud.io` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR。首次安装和系统设置中的更新都使用这条顺序。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 传入逗号分隔的镜像前缀，或使用 `--no-mirror` 跳过镜像源；需要本地构建时使用 `--build`。`--auto` 会启用由 setup 服务执行的每日 04:00 自动更新，失败不会删除数据库卷。
 
 升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `GUANLAN_SETUP_IMAGE`、`GUANLAN_SERVER_IMAGE`、`GUANLAN_WEB_IMAGE` 和 `GUANLAN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
 

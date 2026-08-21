@@ -51,6 +51,14 @@ fi
 TEST_CONTROLLER_AGENT_ENABLED=true run_update --apply --no-mirror
 grep -q 'docker compose --profile host-monitoring .* up -d --remove-orphans setup server web controller-agent' "${log_file}"
 
+: > "${log_file}"
+CONTROLLER_UPDATE_RUNNER=true run_update --apply --no-mirror
+grep -q 'docker compose .* up -d setup server web' "${log_file}"
+if grep -q 'remove-orphans' "${log_file}"; then
+  echo 'Update runner unexpectedly removed orphan containers.' >&2
+  exit 1
+fi
+
 auto_root="${temp_dir}/auto-project"
 mkdir -p "${auto_root}/deploy"
 cp "${updater}" "${auto_root}/deploy/update-controller.sh"

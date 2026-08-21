@@ -42,6 +42,14 @@ func TestUpdateControllerCommandUsesBash(t *testing.T) {
 	}
 }
 
+func TestControllerUpdateRunnerPassesRunnerEnvironment(t *testing.T) {
+	args := controllerUpdateRunnerArgs()
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-e CONTROLLER_UPDATE_RUNNER=true") {
+		t.Fatalf("controllerUpdateRunnerArgs() = %q, missing runner environment", joined)
+	}
+}
+
 func TestUpdateEnvironmentSettingAddsAndReplacesValue(t *testing.T) {
 	originalEnvPath := envPath
 	envPath = filepath.Join(t.TempDir(), ".env")

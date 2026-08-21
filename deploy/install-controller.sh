@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-controller.sh [--cleanup] [--build] [--auto-update]
+Usage: install-controller.sh [--cleanup] [--build] [--auto-update] [--no-mirror]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -13,17 +13,20 @@ browser guide at /setup.
              PostgreSQL/Redis volumes are preserved.
   --build    build controller images locally instead of pulling them from GHCR.
   --auto-update  enable the controller's daily 04:00 automatic update.
+  --no-mirror  skip mainland-China mirror registries and use official GHCR.
 USAGE
 }
 
 cleanup=false
 build=false
 auto_update=false
+no_mirror=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cleanup) cleanup=true; shift ;;
     --build) build=true; shift ;;
     --auto-update) auto_update=true; shift ;;
+    --no-mirror) no_mirror=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -148,8 +151,12 @@ if [[ "${build}" == true ]]; then
   echo "使用本地源码构建总控镜像..."
   docker compose "${profile_args[@]}" build --pull "${controller_services[@]}"
 else
-  echo "正在拉取总控预构建镜像..."
-  docker compose "${profile_args[@]}" pull "${controller_services[@]}"
+  echo "正在拉取总控预构建镜像（优先使用国内镜像源）..."
+  update_args=(--check)
+  if [[ "${no_mirror}" == true ]]; then
+    update_args+=(--no-mirror)
+  fi
+  bash "${script_dir}/update-controller.sh" "${update_args[@]}"
 fi
 docker compose "${profile_args[@]}" up -d --remove-orphans
 

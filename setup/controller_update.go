@@ -221,7 +221,7 @@ func (s *controllerUpdateService) startUpdate(automatic bool) error {
 		}
 	}
 	args := composeBaseArgs()
-	args = append(args, "run", "-d", "--rm", "--no-deps", "--name", controllerUpdateRunnerName, "setup", "update-runner")
+	args = append(args, controllerUpdateRunnerArgs()...)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "docker", args...)
@@ -388,6 +388,10 @@ func commandOutput(name string, args ...string) string {
 func updateControllerCommand(ctx context.Context, mode string) *exec.Cmd {
 	// The script is bind-mounted from the host and may not retain its executable bit.
 	return exec.CommandContext(ctx, "bash", filepath.Join(workspace, "deploy", "update-controller.sh"), mode)
+}
+
+func controllerUpdateRunnerArgs() []string {
+	return []string{"run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "--name", controllerUpdateRunnerName, "setup", "update-runner"}
 }
 
 func composeBaseArgs() []string {

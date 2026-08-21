@@ -142,5 +142,9 @@ if [[ "${mode}" == check ]]; then
   exit 0
 fi
 
-docker compose "${compose_args[@]}" up -d --remove-orphans "${services[@]}"
+compose_up_args=(up -d)
+if [[ "${CONTROLLER_UPDATE_RUNNER:-false}" != true ]]; then
+  compose_up_args+=(--remove-orphans)
+fi
+docker compose "${compose_args[@]}" "${compose_up_args[@]}" "${services[@]}"
 echo "总控服务已更新并重启。"
