@@ -181,7 +181,12 @@ p, h1, h2, h3 { margin: 0; }
 .site-icon-control { display: flex; align-items: center; gap: 10px; }
 .site-icon-preview { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); overflow: hidden; }
 .site-icon-preview img { width: 30px; height: 30px; object-fit: contain; }
-.site-icon-control .el-input { min-width: 0; flex: 1; }
+.site-icon-fields { min-width: 0; flex: 1; }
+.site-icon-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.site-icon-actions .el-button { margin: 0; }
+.site-icon-hint { color: var(--muted); font-size: 11px; }
+.site-icon-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
+.site-icon-fields .el-progress { margin-top: 8px; }
 .form-error { margin-top: 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border)); border-radius: 6px; color: var(--danger); background: var(--danger-bg); font-size: 12px; }
 .auth-startup-status { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); background: var(--surface-subtle); font-size: 12px; }
 .auth-startup-status .spinner { width: 14px; height: 14px; flex: 0 0 14px; }

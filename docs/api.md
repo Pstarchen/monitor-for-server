@@ -67,6 +67,8 @@
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/api/settings/public` | 公开 | 返回站点名称和网站图标地址 |
+| GET | `/api/settings/site-icon` | 公开 | 返回已上传的网站图标文件 |
+| POST | `/api/settings/site-icon` | ADMIN | 上传图片网站图标，文件大小不超过 50MB |
 
 Agent 上报：
 

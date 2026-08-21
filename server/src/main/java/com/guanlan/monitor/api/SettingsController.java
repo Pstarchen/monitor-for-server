@@ -1,12 +1,23 @@
 package com.guanlan.monitor.api;
 
-import com.guanlan.monitor.service.SettingService;
 import com.guanlan.monitor.service.NotificationService;
+import com.guanlan.monitor.service.SettingService;
+import com.guanlan.monitor.service.SiteIconStorageService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
 import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/settings")
@@ -14,12 +25,23 @@ import org.springframework.web.bind.annotation.*;
 public class SettingsController {
     private final SettingService settings;
     private final NotificationService notifications;
+    private final SiteIconStorageService siteIcons;
 
     @GetMapping("/public")
     ResponseEntity<SettingService.PublicBrandView> publicBrand() {
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
                 .body(settings.publicBrand());
+    }
+
+    @GetMapping("/site-icon")
+    ResponseEntity<Resource> siteIcon() {
+        return siteIcons.read()
+                .map(icon -> ResponseEntity.ok()
+                        .cacheControl(CacheControl.noCache())
+                        .contentType(MediaType.parseMediaType(icon.contentType()))
+                        .body(icon.resource()))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping
@@ -33,6 +55,12 @@ public class SettingsController {
     @PutMapping
     @PreAuthorize("hasRole('ADMIN')")
     SettingService.View update(@RequestBody SettingService.Update request) { return settings.update(request); }
+
+    @PostMapping(value = "/site-icon", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('ADMIN')")
+    SettingService.View uploadSiteIcon(@RequestPart("file") MultipartFile file) {
+        return settings.uploadSiteIcon(file);
+    }
 
     @PostMapping("/notifications/{channel}/test")
     @PreAuthorize("hasRole('ADMIN')")

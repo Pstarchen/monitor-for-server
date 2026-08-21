@@ -103,6 +103,9 @@ services:
       CONTROLLER_AGENT_GROUP: ${CONTROLLER_AGENT_GROUP:-控制平面}
       CONTROLLER_UPDATE_SERVICE_URL: http://setup:8090
       CONTROLLER_UPDATE_TOKEN: ${SETTINGS_ENCRYPTION_KEY-}
+      SITE_ICON_STORAGE_PATH: /var/lib/guanlan-monitor/site-icon
+    volumes:
+      - site-icon-data:/var/lib/guanlan-monitor/site-icon
     depends_on:
       postgres:
         condition: service_healthy
@@ -170,6 +173,7 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  site-icon-data:
   controller-agent-spool:
 
 networks:

@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
 import java.time.DateTimeException;
@@ -23,6 +24,7 @@ public class SettingService {
     private static final String SITE_NAME = "system.site_name";
     private static final String SITE_ICON_URL = "system.site_icon_url";
     private static final String DEFAULT_SITE_ICON_URL = "/favicon.svg";
+    private static final String UPLOADED_SITE_ICON_URL = "/api/settings/site-icon";
     private static final String PUBLIC_BASE_URL = "system.public_base_url";
     private static final String TIMEZONE = "system.timezone";
     private static final String EMAIL_ENABLED = "notification.email.enabled";
@@ -43,6 +45,7 @@ public class SettingService {
     private final AppProperties properties;
     private final AuditService audit;
     private final SecretValueCodec secretCodec;
+    private final SiteIconStorageService siteIconStorage;
 
     @Transactional(readOnly = true)
     public View get() {
@@ -69,13 +72,23 @@ public class SettingService {
         save(OFFLINE_SECONDS, request.deviceOfflineAfterSeconds());
         save(COLLECTION_SECONDS, request.defaultCollectionSeconds());
         save(SITE_NAME, request.siteName().trim());
-        save(SITE_ICON_URL, normalizeSiteIconUrl(request.siteIconUrl()));
+        String siteIconUrl = normalizeSiteIconUrl(request.siteIconUrl());
+        if (!UPLOADED_SITE_ICON_URL.equals(siteIconUrl)) siteIconStorage.clear();
+        save(SITE_ICON_URL, siteIconUrl);
         save(PUBLIC_BASE_URL, normalizeBaseUrl(request.publicBaseUrl()));
         save(TIMEZONE, request.timezone().trim());
         updateEmail(request.email());
         updateWebhook(DINGTALK_ENABLED, DINGTALK_WEBHOOK, request.dingtalk());
         updateWebhook(WECOM_ENABLED, WECOM_WEBHOOK, request.wecom());
         audit.record("SETTINGS_UPDATE", "system", "更新系统策略与通知通道配置");
+        return get();
+    }
+
+    @Transactional
+    public View uploadSiteIcon(MultipartFile file) {
+        siteIconStorage.store(file);
+        save(SITE_ICON_URL, UPLOADED_SITE_ICON_URL);
+        audit.record("SITE_ICON_UPLOAD", "system", "上传网站图标");
         return get();
     }
 

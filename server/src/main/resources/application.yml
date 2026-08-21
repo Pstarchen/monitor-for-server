@@ -12,6 +12,10 @@ server:
 spring:
   application:
     name: guanlan-monitor
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 52MB
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
@@ -63,6 +67,7 @@ app:
   bootstrap-admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
   bootstrap-admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
   site-name: ${SITE_NAME:星辰云巡}
+  site-icon-storage-path: ${SITE_ICON_STORAGE_PATH:/var/lib/guanlan-monitor/site-icon}
   public-base-url: ${PUBLIC_BASE_URL:}
   allow-insecure-http: ${ALLOW_INSECURE_HTTP:false}
   settings-encryption-key: ${SETTINGS_ENCRYPTION_KEY:}

@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Activity, CheckCircle2, ChevronRight, Database, Globe2, KeyRound, LockKeyhole,
   Clock3, Download, GitCommit, Mail, MessageSquareText, RefreshCw, RotateCcw,
-  Save, Send, ServerCog, Settings2, ShieldCheck,
+  Save, Send, ServerCog, Settings2, ShieldCheck, Upload,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingState from '@/components/LoadingState.vue'
@@ -64,6 +64,9 @@ const form = reactive({
 })
 const loading = ref(true)
 const saving = ref(false)
+const uploadingIcon = ref(false)
+const iconUploadProgress = ref(0)
+const siteIconInput = ref<HTMLInputElement | null>(null)
 const error = ref('')
 const testing = reactive<Record<ChannelKey, boolean>>({ email: false, dingtalk: false, wecom: false })
 const controllerUpdate = ref<ControllerUpdateStatus | null>(null)
@@ -137,6 +140,52 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+function chooseSiteIcon() {
+  if (hasChanges.value) {
+    ElMessage.warning('请先保存或撤销当前修改，再上传网站图标')
+    return
+  }
+  siteIconInput.value?.click()
+}
+
+async function uploadSiteIcon(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    ElMessage.error('请选择图片文件')
+    return
+  }
+  if (file.size > 50 * 1024 * 1024) {
+    ElMessage.error('网站图标不能超过 50MB')
+    return
+  }
+  uploadingIcon.value = true
+  iconUploadProgress.value = 0
+  try {
+    const body = new FormData()
+    body.append('file', file, file.name)
+    const response = await api.post<Settings>('/settings/site-icon', body, {
+      onUploadProgress: (progress) => {
+        if (progress.total) iconUploadProgress.value = Math.round(progress.loaded * 100 / progress.total)
+      },
+    })
+    settings.value = response.data
+    apply(response.data)
+    await loadBranding(true)
+    ElMessage.success('网站图标上传成功')
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    uploadingIcon.value = false
+  }
+}
+
+function restoreDefaultSiteIcon() {
+  form.siteIconUrl = '/favicon.svg'
 }
 
 async function testChannel(channel: ChannelKey) {
@@ -346,7 +395,16 @@ onBeforeUnmount(() => {
                   <div class="setting-copy"><label for="site-icon-url">网站图标</label><p>浏览器标签页使用的图标。可填写站内路径或 HTTPS 图片地址，留空恢复默认图标。</p></div>
                   <div class="setting-control site-icon-control">
                     <div class="site-icon-preview"><img :src="form.siteIconUrl || '/favicon.svg'" alt="" /></div>
-                    <el-input id="site-icon-url" v-model="form.siteIconUrl" placeholder="/favicon.svg 或 https://example.com/icon.svg" />
+                    <div class="site-icon-fields">
+                      <el-input id="site-icon-url" v-model="form.siteIconUrl" placeholder="/favicon.svg 或 https://example.com/icon.svg" />
+                      <div class="site-icon-actions">
+                        <input ref="siteIconInput" class="site-icon-file-input" type="file" accept="image/*" @change="uploadSiteIcon" />
+                        <el-button :loading="uploadingIcon" :disabled="uploadingIcon" @click="chooseSiteIcon"><Upload :size="15" />上传图标</el-button>
+                        <el-button v-if="form.siteIconUrl !== '/favicon.svg'" :disabled="uploadingIcon" @click="restoreDefaultSiteIcon"><RotateCcw :size="15" />恢复默认</el-button>
+                        <span class="site-icon-hint">图片文件，最大 50MB</span>
+                      </div>
+                      <el-progress v-if="uploadingIcon" :percentage="iconUploadProgress" :show-text="false" :stroke-width="4" />
+                    </div>
                   </div>
                 </div>
                 <div class="setting-row">

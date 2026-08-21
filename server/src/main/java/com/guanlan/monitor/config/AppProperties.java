@@ -14,6 +14,7 @@ public class AppProperties {
     private String bootstrapAdminUsername;
     private String bootstrapAdminPassword;
     private String siteName = "星辰云巡";
+    private String siteIconStoragePath = "/var/lib/guanlan-monitor/site-icon";
     private String publicBaseUrl = "";
     private boolean allowInsecureHttp;
     private String settingsEncryptionKey;
