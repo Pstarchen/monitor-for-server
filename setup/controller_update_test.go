@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +32,13 @@ func TestControllerUpdateInternalAuthentication(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("valid token returned %d, want 204", response.Code)
+	}
+}
+
+func TestUpdateControllerCommandUsesBash(t *testing.T) {
+	command := updateControllerCommand(context.Background(), "--check")
+	if got, want := command.Args, []string{"bash", filepath.Join(workspace, "deploy", "update-controller.sh"), "--check"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("updateControllerCommand args = %v, want %v", got, want)
 	}
 }
 

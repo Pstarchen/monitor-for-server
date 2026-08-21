@@ -189,7 +189,7 @@ func (s *controllerUpdateService) runCheck() {
 	defer s.finish()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, filepath.Join(workspace, "deploy", "update-controller.sh"), "--check")
+	command := updateControllerCommand(ctx, "--check")
 	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
 	output, err := command.CombinedOutput()
 	state := s.readState()
@@ -248,7 +248,7 @@ func (s *controllerUpdateService) runUpdate() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, filepath.Join(workspace, "deploy", "update-controller.sh"), "--apply")
+	command := updateControllerCommand(ctx, "--apply")
 	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
 	output, err := command.CombinedOutput()
 	state = s.readState()
@@ -383,6 +383,11 @@ func commandOutput(name string, args ...string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func updateControllerCommand(ctx context.Context, mode string) *exec.Cmd {
+	// The script is bind-mounted from the host and may not retain its executable bit.
+	return exec.CommandContext(ctx, "bash", filepath.Join(workspace, "deploy", "update-controller.sh"), mode)
 }
 
 func composeBaseArgs() []string {

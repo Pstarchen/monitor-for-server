@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 
 FROM docker:27-cli
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
-    && apk add --no-cache docker-cli-compose
+    && apk add --no-cache bash docker-cli-compose
 COPY --from=build /out/setup /usr/local/bin/guanlan-setup
 EXPOSE 8090
 ENTRYPOINT ["/usr/local/bin/guanlan-setup"]
