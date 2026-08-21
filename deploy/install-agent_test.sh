@@ -192,15 +192,18 @@ fi
 grep -F 'systemctl enable --now guanlan-agent-update.timer' "${log_file}" >/dev/null
 
 : > "${log_file}"
-server_url=http://monitor.example.com
-if run_installer 1; then
-  echo 'Remote HTTP URL was accepted without explicit opt-in.' >&2
-  exit 1
-fi
+server_url=monitor.example.com
+TEST_HTTPS_PROBE=0
+TEST_HTTP_PROBE=1
+run_installer 1
+grep -F 'curl --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =http' "${log_file}" >/dev/null
+grep -F '"server_url": "http://monitor.example.com"' "${config_file}" >/dev/null
+grep -F '"allow_insecure_http": true' "${config_file}" >/dev/null
 
 : > "${log_file}"
 server_url=http://monitor.example.com
-run_installer 1 --allow-insecure-http
+run_installer 1
+grep -F '"server_url": "http://monitor.example.com"' "${config_file}" >/dev/null
 grep -F '"allow_insecure_http": true' "${config_file}" >/dev/null
 
 echo 'install-agent.sh behavior tests passed.'

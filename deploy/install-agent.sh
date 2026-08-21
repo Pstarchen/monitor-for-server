@@ -94,12 +94,9 @@ resolve_server_url() {
     if is_local_host "${host}"; then
       local_host=true
     fi
-    if [[ "${scheme}" == "http" && "${local_host}" != true && "${allow_insecure_http}" != true ]]; then
-      echo "公网 Agent 地址必须使用 HTTPS；仅本地地址或显式 --allow-insecure-http 可使用 HTTP。" >&2
-      exit 2
-    fi
     if [[ "${scheme}" == "http" && "${local_host}" != true ]]; then
       config_allow_insecure_http=true
+      echo "警告：Agent 将通过未加密的 HTTP 连接 ${raw}。生产环境建议配置 HTTPS。" >&2
     fi
     server_url="${raw}"
     return
@@ -123,14 +120,15 @@ resolve_server_url() {
     return
   fi
   candidate="http://${host}"
-  if [[ "${local_host}" == true || "${allow_insecure_http}" == true ]] && probe_server_url http "${candidate}"; then
+  if probe_server_url http "${candidate}"; then
     server_url="${candidate}"
     if [[ "${local_host}" != true ]]; then
       config_allow_insecure_http=true
+      echo "未检测到可用 HTTPS，已回退到未加密 HTTP：${candidate}" >&2
     fi
     return
   fi
-  echo "无法访问 ${host} 的 HTTPS 健康检查。请先配置有效证书；临时使用公网 HTTP 时显式添加 --allow-insecure-http。" >&2
+  echo "无法访问 ${host} 的 HTTPS 或 HTTP 健康检查。请检查 DNS、端口和服务状态。" >&2
   exit 1
 }
 

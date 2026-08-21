@@ -187,9 +187,9 @@ function agentServerHost(value: string) {
   if (!raw) return ''
   try {
     const parsed = new URL(raw.includes('://') ? raw : `https://${raw}`)
-    return parsed.host
+    return parsed.origin
   } catch {
-    return raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+    return raw
   }
 }
 

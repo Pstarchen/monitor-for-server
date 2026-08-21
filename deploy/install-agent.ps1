@@ -55,10 +55,10 @@ function Resolve-ServerUrl {
             throw '监控平台地址不能包含用户信息、路径、查询参数或片段。'
         }
         $isLocal = Test-LocalHost $parsed.Authority
-        if ($parsed.Scheme -eq 'http' -and -not $isLocal -and -not $AllowInsecureHttp) {
-            throw '公网 Agent 地址必须使用 HTTPS；仅本地地址或显式指定 -AllowInsecureHttp 可使用 HTTP。'
+        if ($parsed.Scheme -eq 'http' -and -not $isLocal) {
+            Write-Warning "Agent 将通过未加密的 HTTP 连接 $raw。生产环境建议配置 HTTPS。"
         }
-        return [pscustomobject]@{ Url = $raw; AllowInsecure = ($parsed.Scheme -eq 'http' -and -not $isLocal -and $AllowInsecureHttp) }
+        return [pscustomobject]@{ Url = $raw; AllowInsecure = ($parsed.Scheme -eq 'http' -and -not $isLocal) }
     }
 
     if ($raw -match '[\s/?#@]' -or $raw -match '://') {
@@ -70,10 +70,13 @@ function Resolve-ServerUrl {
         return [pscustomobject]@{ Url = $httpsCandidate; AllowInsecure = $false }
     }
     $httpCandidate = "http://$raw"
-    if (($isLocal -or $AllowInsecureHttp) -and (Test-ServerEndpoint $httpCandidate)) {
-        return [pscustomobject]@{ Url = $httpCandidate; AllowInsecure = (-not $isLocal -and $AllowInsecureHttp) }
+    if (Test-ServerEndpoint $httpCandidate) {
+        if (-not $isLocal) {
+            Write-Warning "未检测到可用 HTTPS，已回退到未加密 HTTP：$httpCandidate"
+        }
+        return [pscustomobject]@{ Url = $httpCandidate; AllowInsecure = (-not $isLocal) }
     }
-    throw "无法访问 $raw 的 HTTPS 健康检查。请先配置有效证书；临时使用公网 HTTP 时显式指定 -AllowInsecureHttp。"
+    throw "无法访问 $raw 的 HTTPS 或 HTTP 健康检查。请检查 DNS、端口和服务状态。"
 }
 
 function Install-AgentUpdater {
