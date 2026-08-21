@@ -46,11 +46,13 @@ class AuthAndAgentIntegrationTest {
     @Test
     void publicBrandUsesPersistedSiteNameWithoutAuthentication() throws Exception {
         settings.save(new SystemSetting("system.site_name", "现场监控"));
+        settings.save(new SystemSetting("system.site_icon_url", "https://example.com/icon.svg"));
 
         mvc.perform(get("/api/settings/public"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Cache-Control", "no-store"))
-                .andExpect(jsonPath("$.siteName").value("现场监控"));
+                .andExpect(jsonPath("$.siteName").value("现场监控"))
+                .andExpect(jsonPath("$.siteIconUrl").value("https://example.com/icon.svg"));
     }
 
     @Test
@@ -59,7 +61,8 @@ class AuthAndAgentIntegrationTest {
 
         mvc.perform(get("/api/settings/public"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.siteName").value("星辰云巡"));
+                .andExpect(jsonPath("$.siteName").value("星辰云巡"))
+                .andExpect(jsonPath("$.siteIconUrl").value("/favicon.svg"));
     }
 
     @Test

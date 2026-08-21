@@ -52,6 +52,7 @@ const form = reactive({
   deviceOfflineAfterSeconds: 30,
   defaultCollectionSeconds: 3,
   siteName: '星辰云巡',
+  siteIconUrl: '/favicon.svg',
   publicBaseUrl: '',
   timezone: 'Asia/Shanghai',
   email: {
@@ -83,6 +84,7 @@ function apply(value: Settings) {
     deviceOfflineAfterSeconds: value.deviceOfflineAfterSeconds,
     defaultCollectionSeconds: value.defaultCollectionSeconds,
     siteName: value.siteName,
+    siteIconUrl: value.siteIconUrl,
     publicBaseUrl: value.publicBaseUrl,
     timezone: value.timezone,
   })
@@ -339,6 +341,13 @@ onBeforeUnmount(() => {
                 <div class="setting-row">
                   <div class="setting-copy"><label for="site-name">站点名称</label><p>显示在侧栏和登录页的产品名称。</p></div>
                   <div class="setting-control"><el-input id="site-name" v-model="form.siteName" maxlength="60" show-word-limit /></div>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-copy"><label for="site-icon-url">网站图标</label><p>浏览器标签页使用的图标。可填写站内路径或 HTTPS 图片地址，留空恢复默认图标。</p></div>
+                  <div class="setting-control site-icon-control">
+                    <div class="site-icon-preview"><img :src="form.siteIconUrl || '/favicon.svg'" alt="" /></div>
+                    <el-input id="site-icon-url" v-model="form.siteIconUrl" placeholder="/favicon.svg 或 https://example.com/icon.svg" />
+                  </div>
                 </div>
                 <div class="setting-row">
                   <div class="setting-copy"><label for="public-url">公网入口</label><p>用于生成 Agent 安装命令，生产环境应使用 HTTPS。</p></div>

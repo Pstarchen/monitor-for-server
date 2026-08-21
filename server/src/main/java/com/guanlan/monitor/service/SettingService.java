@@ -21,6 +21,8 @@ public class SettingService {
     private static final String OFFLINE_SECONDS = "device.offline_after_seconds";
     private static final String COLLECTION_SECONDS = "agent.default_collection_seconds";
     private static final String SITE_NAME = "system.site_name";
+    private static final String SITE_ICON_URL = "system.site_icon_url";
+    private static final String DEFAULT_SITE_ICON_URL = "/favicon.svg";
     private static final String PUBLIC_BASE_URL = "system.public_base_url";
     private static final String TIMEZONE = "system.timezone";
     private static final String EMAIL_ENABLED = "notification.email.enabled";
@@ -50,6 +52,7 @@ public class SettingService {
                 intValue(OFFLINE_SECONDS, properties.getDeviceOfflineAfterSeconds()),
                 intValue(COLLECTION_SECONDS, 3),
                 stringValue(SITE_NAME, properties.getSiteName()),
+                stringValue(SITE_ICON_URL, DEFAULT_SITE_ICON_URL),
                 stringValue(PUBLIC_BASE_URL, properties.getPublicBaseUrl()),
                 stringValue(TIMEZONE, properties.getTimezone()),
                 secretCodec.available(),
@@ -66,6 +69,7 @@ public class SettingService {
         save(OFFLINE_SECONDS, request.deviceOfflineAfterSeconds());
         save(COLLECTION_SECONDS, request.defaultCollectionSeconds());
         save(SITE_NAME, request.siteName().trim());
+        save(SITE_ICON_URL, normalizeSiteIconUrl(request.siteIconUrl()));
         save(PUBLIC_BASE_URL, normalizeBaseUrl(request.publicBaseUrl()));
         save(TIMEZONE, request.timezone().trim());
         updateEmail(request.email());
@@ -117,7 +121,8 @@ public class SettingService {
 
     @Transactional(readOnly = true)
     public PublicBrandView publicBrand() {
-        return new PublicBrandView(stringValue(SITE_NAME, properties.getSiteName()));
+        return new PublicBrandView(stringValue(SITE_NAME, properties.getSiteName()),
+                stringValue(SITE_ICON_URL, DEFAULT_SITE_ICON_URL));
     }
 
     private void updateEmail(EmailUpdate email) {
@@ -164,6 +169,7 @@ public class SettingService {
         if (request.siteName() == null || request.siteName().isBlank() || request.siteName().trim().length() > 60) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "站点名称长度应为 1-60 个字符");
         }
+        validateSiteIconUrl(request.siteIconUrl());
         validateBaseUrl(request.publicBaseUrl());
         try {
             ZoneId.of(request.timezone().trim());
@@ -195,6 +201,34 @@ public class SettingService {
         } catch (IllegalArgumentException exception) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "公网入口必须是 HTTPS 地址，本地开发可使用 localhost HTTP");
         }
+    }
+
+    private void validateSiteIconUrl(String value) {
+        if (blank(value)) return;
+        String candidate = value.trim();
+        if (candidate.length() > 500) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "网站图标地址不能超过 500 个字符");
+        }
+        if (candidate.startsWith("/")) {
+            if (candidate.startsWith("//") || candidate.contains("\\") || candidate.chars().anyMatch(Character::isWhitespace)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "网站图标必须是站内路径或 HTTPS 图片地址");
+            }
+            return;
+        }
+        try {
+            URI uri = URI.create(candidate);
+            boolean secure = "https".equalsIgnoreCase(uri.getScheme());
+            boolean insecure = "http".equalsIgnoreCase(uri.getScheme()) && properties.isAllowInsecureHttp();
+            if (uri.getHost() == null || (!secure && !insecure) || uri.getUserInfo() != null || uri.getFragment() != null) {
+                throw new IllegalArgumentException();
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "网站图标必须是站内路径或 HTTPS 图片地址");
+        }
+    }
+
+    private String normalizeSiteIconUrl(String value) {
+        return blank(value) ? DEFAULT_SITE_ICON_URL : value.trim();
     }
 
     private void validateWebhook(String key, String value) {
@@ -259,21 +293,21 @@ public class SettingService {
     private boolean blank(String value) { return value == null || value.isBlank(); }
 
     public record View(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
-                       String siteName, String publicBaseUrl, String timezone, boolean secretStorageReady,
+                       String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean secretStorageReady,
                        EmailView email, WebhookView dingtalk, WebhookView wecom) {}
     public record EmailView(boolean enabled, boolean configured, String source, String host, int port,
                             String username, String from, String recipients, boolean auth, boolean startTls,
                             boolean passwordConfigured) {}
     public record WebhookView(boolean enabled, boolean configured, String source, boolean webhookConfigured) {}
     public record Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
-                         String siteName, String publicBaseUrl, String timezone, EmailUpdate email,
+                         String siteName, String siteIconUrl, String publicBaseUrl, String timezone, EmailUpdate email,
                          WebhookUpdate dingtalk, WebhookUpdate wecom) {}
     public record EmailUpdate(boolean enabled, String host, int port, String username, String password,
                               boolean clearPassword, String from, String recipients, boolean auth, boolean startTls) {}
     public record WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook) {}
     public record NotificationRuntime(EmailRuntime email, WebhookRuntime dingtalk, WebhookRuntime wecom) {}
     public record AgentBootstrapView(String publicBaseUrl, int defaultCollectionSeconds) {}
-    public record PublicBrandView(String siteName) {}
+    public record PublicBrandView(String siteName, String siteIconUrl) {}
     public record EmailRuntime(boolean enabled, String host, int port, String username, String password,
                                String from, String recipients, boolean auth, boolean startTls, String source) {}
     public record WebhookRuntime(boolean enabled, String url, String source) {}

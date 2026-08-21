@@ -150,6 +150,7 @@ export interface Settings {
   deviceOfflineAfterSeconds: number
   defaultCollectionSeconds: number
   siteName: string
+  siteIconUrl: string
   publicBaseUrl: string
   timezone: string
   secretStorageReady: boolean
@@ -160,6 +161,7 @@ export interface Settings {
 
 export interface PublicBrand {
   siteName: string
+  siteIconUrl: string
 }
 
 export interface AgentBootstrap {

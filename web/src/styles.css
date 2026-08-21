@@ -178,6 +178,10 @@ p, h1, h2, h3 { margin: 0; }
 .input-with-icon > svg { flex: 0 0 auto; color: var(--muted); }
 .input-with-icon input { min-width: 0; flex: 1; padding: 0; border: 0; outline: 0; color: var(--foreground); background: transparent; }
 .input-with-icon button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.site-icon-control { display: flex; align-items: center; gap: 10px; }
+.site-icon-preview { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); overflow: hidden; }
+.site-icon-preview img { width: 30px; height: 30px; object-fit: contain; }
+.site-icon-control .el-input { min-width: 0; flex: 1; }
 .form-error { margin-top: 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border)); border-radius: 6px; color: var(--danger); background: var(--danger-bg); font-size: 12px; }
 .auth-startup-status { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); background: var(--surface-subtle); font-size: 12px; }
 .auth-startup-status .spinner { width: 14px; height: 14px; flex: 0 0 14px; }

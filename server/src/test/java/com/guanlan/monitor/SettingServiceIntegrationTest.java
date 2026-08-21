@@ -36,7 +36,17 @@ class SettingServiceIntegrationTest {
         assertThat(stored).startsWith("v1:").doesNotContain("database-only-password");
         assertThat(view.email().passwordConfigured()).isTrue();
         assertThat(view.email().source()).isEqualTo("DATABASE");
+        assertThat(view.siteIconUrl()).isEqualTo("/custom-icon.svg");
         assertThat(view.toString()).doesNotContain("database-only-password");
+    }
+
+    @Test
+    void unsafeSiteIconUrlIsRejected() {
+        assertThatThrownBy(() -> settings.update(new SettingService.Update(
+                30, 30, 3, "观澜监控", "javascript:alert(1)", "http://localhost:8080", "Asia/Shanghai",
+                disabledEmail(), new SettingService.WebhookUpdate(false, null, false),
+                new SettingService.WebhookUpdate(false, null, false)
+        ))).isInstanceOf(ApiException.class).hasMessageContaining("网站图标");
     }
 
     @Test
@@ -58,7 +68,7 @@ class SettingServiceIntegrationTest {
 
     private SettingService.Update update(SettingService.EmailUpdate email,
                                          SettingService.WebhookUpdate dingtalk) {
-        return new SettingService.Update(30, 30, 3, "观澜监控", "http://localhost:8080", "Asia/Shanghai",
+        return new SettingService.Update(30, 30, 3, "观澜监控", "/custom-icon.svg", "http://localhost:8080", "Asia/Shanghai",
                 email, dingtalk, new SettingService.WebhookUpdate(false, null, false));
     }
 
