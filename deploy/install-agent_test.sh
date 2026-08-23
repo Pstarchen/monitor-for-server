@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 installer="${script_dir}/install-agent.sh"
+grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run' "${installer}" >/dev/null
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 fake_bin="${temp_dir}/bin"

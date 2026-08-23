@@ -12,7 +12,7 @@ mkdir -p "${fake_bin}"
 cat > "${fake_bin}/docker" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >> "${TEST_LOG}"
-if [[ "${1:-}" == "pull" && ( "${2:-}" == ghcr.nju.edu.cn/* || "${2:-}" == ghcr.m.daocloud.io/* || "${2:-}" == ghcr.1ms.run/* ) ]]; then
+if [[ "${1:-}" == "pull" && ( "${2:-}" == ghcr.nju.edu.cn/* || "${2:-}" == ghcr.1ms.run/* ) ]]; then
   exit 1
 fi
 exit 0
@@ -32,7 +32,12 @@ run_update() {
 : > "${log_file}"
 run_update --check
 grep -F 'docker pull ghcr.nju.edu.cn/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.1ms.run/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+if grep -q 'ghcr.m.daocloud.io' "${log_file}"; then
+  echo 'Default mirror list still uses the unavailable DaoCloud public mirror.' >&2
+  exit 1
+fi
 if grep -q ' compose .* up ' "${log_file}"; then
   echo 'Check mode unexpectedly restarted controller services.' >&2
   exit 1

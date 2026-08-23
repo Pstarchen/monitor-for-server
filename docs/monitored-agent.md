@@ -26,7 +26,7 @@ docker logs --tail 100 guanlan-agent
 
 内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定镜像。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；也可用 `--no-docker --binary /path/to/guanlan-agent` 强制本机模式。未提供二进制时会通过 `--source-url` 指定的仓库拉取源码构建。
 
-Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试 `ghcr.nju.edu.cn`、`ghcr.m.daocloud.io` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
+Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试可用的 `ghcr.nju.edu.cn` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
 
 ```bash
 systemctl status guanlan-agent-update.timer

@@ -107,7 +107,7 @@ pull_one() {
     if [[ -z "${mirror_list}" && -f .env ]]; then
       mirror_list="$(read_env_value GUANLAN_CONTROLLER_IMAGE_MIRRORS)"
     fi
-    IFS=',' read -r -a prefixes <<< "${mirror_list:-ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.1ms.run}"
+    IFS=',' read -r -a prefixes <<< "${mirror_list:-ghcr.nju.edu.cn,ghcr.1ms.run}"
     for prefix in "${prefixes[@]}"; do
       prefix="${prefix%/}"
       [[ -z "${prefix}" ]] && continue

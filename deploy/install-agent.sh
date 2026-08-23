@@ -245,7 +245,7 @@ pull_agent_image() {
   local candidate mirror_prefix image_suffix
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
-    IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.1ms.run}"
+    IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run}"
     for mirror_prefix in "${mirror_prefixes[@]}"; do
       mirror_prefix="${mirror_prefix%/}"
       [[ -z "${mirror_prefix}" ]] && continue
@@ -280,7 +280,7 @@ install_agent_updater() {
     printf 'container_name=%s\n' "$(shell_quote "${container_name}")"
     printf 'config_path=%s\n' "$(shell_quote "${agent_config_path}")"
     printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
-    printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.1ms.run}")"
+    printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run}")"
     printf '%s\n' \
       'if command -v flock >/dev/null 2>&1; then lock_path="/run/lock/guanlan-agent-update.lock"; mkdir -p "$(dirname "${lock_path}")"; exec 9>"${lock_path}"; flock -n 9 || { echo "Agent 更新任务正在执行。" >&2; exit 75; }; fi' \
       'run_with_timeout() {' \

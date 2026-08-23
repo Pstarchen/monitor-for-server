@@ -74,7 +74,7 @@ try {
                 $mirrorLine = Select-String -LiteralPath $envFile -Pattern '^GUANLAN_CONTROLLER_IMAGE_MIRRORS=(.*)$' | Select-Object -First 1
                 if ($mirrorLine) { $mirrorValue = $mirrorLine.Matches[0].Groups[1].Value.Trim('"') }
             }
-            $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @('ghcr.nju.edu.cn', 'ghcr.m.daocloud.io', 'ghcr.1ms.run') }
+            $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @('ghcr.nju.edu.cn', 'ghcr.1ms.run') }
             foreach ($mirror in $mirrors) {
                 $candidate = $mirror.TrimEnd('/') + '/' + $suffix
                 Write-Host "尝试国内镜像源：$candidate"
