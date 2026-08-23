@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="app-shell">
     <aside class="sidebar desktop-sidebar">
-      <RouterLink class="brand" to="/dashboard">
+      <RouterLink class="brand" to="/" aria-label="返回公开监控大屏">
         <span class="brand-mark"><Activity :size="19" /></span>
         <span><strong>{{ siteName }}</strong><small>PRIVATE OPS</small></span>
       </RouterLink>
@@ -150,7 +150,7 @@ onBeforeUnmount(() => {
 
     <el-drawer v-model="drawer" direction="ltr" size="272px" :with-header="false" class="mobile-drawer">
       <div class="drawer-head">
-        <RouterLink class="brand" to="/dashboard" @click="drawer = false">
+        <RouterLink class="brand" to="/" aria-label="返回公开监控大屏" @click="drawer = false">
           <span class="brand-mark"><Activity :size="19" /></span><strong>{{ siteName }}</strong>
         </RouterLink>
         <button class="icon-button" type="button" aria-label="关闭导航" title="关闭导航" @click="drawer = false"><X :size="19" /></button>

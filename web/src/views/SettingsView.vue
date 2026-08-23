@@ -15,7 +15,8 @@ import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { dateTime } from '@/lib/format'
 import { loadBranding } from '@/lib/branding'
-import { visibleApiTokenScopes } from '@/lib/api-token-scopes'
+import { apiTokenScopeLabel, visibleApiTokenScopeGroups } from '@/lib/api-token-scopes'
+import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
 import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controller-update'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, Settings, WebhookSettings } from '@/types'
@@ -85,10 +86,12 @@ const tokenLoading = ref(false)
 const tokenDialog = ref(false)
 const tokenSaving = ref(false)
 const createdToken = ref<CreatedApiToken | null>(null)
-const tokenForm = reactive({ name: '', scopes: ['nezha:inventory:read'], serverIds: '', expiresInDays: 90 })
+const tokenCopied = ref(false)
+const tokenForm = reactive(createDefaultApiTokenForm())
 const auth = useAuthStore()
 const canAdmin = computed(() => auth.user?.role === 'ADMIN')
-const scopes = computed(() => visibleApiTokenScopes(canAdmin.value))
+const tokenScopeGroups = computed(() => visibleApiTokenScopeGroups(canAdmin.value))
+const tokenSelectedScopeCount = computed(() => tokenForm.scopes.length)
 let updatePollTimer: ReturnType<typeof setTimeout> | undefined
 const hasChanges = computed(() => baseline.value !== '' && baseline.value !== snapshot())
 
@@ -149,8 +152,13 @@ async function loadApiTokens() {
 }
 
 function openTokenDialog() {
-  Object.assign(tokenForm, { name: '', scopes: ['nezha:inventory:read'], serverIds: '', expiresInDays: 90 })
+  Object.assign(tokenForm, createDefaultApiTokenForm())
   tokenDialog.value = true
+}
+
+function closeCreatedToken() {
+  createdToken.value = null
+  tokenCopied.value = false
 }
 
 async function createApiToken() {
@@ -162,10 +170,11 @@ async function createApiToken() {
   try {
     createdToken.value = (await api.post<CreatedApiToken>('/api-tokens', {
       name: tokenForm.name.trim(),
-      scopes: tokenForm.scopes,
-      serverIds: tokenForm.serverIds.split(',').map((value) => value.trim()).filter(Boolean),
+      scopes: [...tokenForm.scopes],
+      serverIds: parseServerIds(tokenForm.serverIds),
       expiresInDays: Number(tokenForm.expiresInDays) || 0,
     })).data
+    tokenCopied.value = false
     tokenDialog.value = false
     await loadApiTokens()
     ElMessage.success('API Token 已创建，请立即复制明文')
@@ -180,6 +189,7 @@ async function copyApiToken() {
   if (!createdToken.value) return
   try {
     await copyText(createdToken.value.secret)
+    tokenCopied.value = true
     ElMessage.success('Token 已复制')
   } catch {
     ElMessage.error('复制失败，请手动选择 Token')
@@ -561,14 +571,21 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else-if="activeSection === 'tokens'">
-            <header class="settings-editor-head token-editor-head"><span><KeyRound :size="18" /></span><div><h2>API Token</h2><p>为移动端、脚本或自动化工具签发受限访问凭据。</p></div><el-button type="primary" class="button-press" @click="openTokenDialog"><Plus :size="15" />创建 Token</el-button></header>
+            <header class="settings-editor-head token-editor-head"><span><KeyRound :size="18" /></span><div><h2>API Token</h2><p>按最小权限签发访问凭据，并把访问范围限制到指定服务器。</p></div><el-button type="primary" class="button-press" @click="openTokenDialog"><Plus :size="15" />创建 Token</el-button></header>
             <div class="settings-editor-body token-settings">
-              <div class="settings-notice token-notice" role="note"><ShieldCheck :size="17" /><p>明文 Token 只会在创建成功后显示一次。请按最小权限选择 scope，并在需要时填写服务器 ID 白名单。</p></div>
+              <div class="token-security-grid" role="list" aria-label="Token 安全策略">
+                <div class="token-security-item" role="listitem"><span><KeyRound :size="16" /></span><div><strong>明文只出现一次</strong><p>创建成功后立即复制，关闭窗口后无法恢复。</p></div></div>
+                <div class="token-security-item" role="listitem"><span><CheckCircle2 :size="16" /></span><div><strong>默认只读</strong><p>新 Token 仅预选设备清单读取权限。</p></div></div>
+                <div class="token-security-item" role="listitem"><span><ShieldCheck :size="16" /></span><div><strong>可限制服务器</strong><p>填写白名单后，Token 只能访问这些服务器。</p></div></div>
+              </div>
               <LoadingState v-if="tokenLoading" />
               <div v-else-if="apiTokens.length" class="token-list">
                 <article v-for="token in apiTokens" :key="token.id" class="token-row" :data-revoked="Boolean(token.revokedAt)">
-                  <div class="token-row-main"><div><strong>{{ token.name }}</strong><small class="mono-value">{{ token.tokenPrefix }}…</small></div><StatusBadge :status="token.revokedAt ? 'OFFLINE' : 'ONLINE'" /></div>
-                  <div class="token-row-meta"><span>{{ token.scopes.join('、') }}</span><span>{{ token.serverIds.length ? `${token.serverIds.length} 台服务器白名单` : '不限制服务器白名单' }}</span><span>{{ token.expiresAt ? `到期 ${dateTime(token.expiresAt)}` : '永不过期' }}</span><span>{{ token.lastUsedAt ? `最后使用 ${dateTime(token.lastUsedAt)}` : '尚未使用' }}</span></div>
+                  <div class="token-row-main"><div class="token-identity"><strong>{{ token.name }}</strong><small class="mono-value">{{ token.tokenPrefix }}…</small></div><StatusBadge :status="token.revokedAt ? 'OFFLINE' : 'ONLINE'" /></div>
+                  <div class="token-row-meta">
+                    <div class="token-meta-block"><span class="token-meta-label">权限范围</span><div class="token-scope-tags"><span v-for="scope in token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></div></div>
+                    <span>{{ token.serverIds.length ? `${token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</span><span>{{ token.expiresAt ? `到期 ${dateTime(token.expiresAt)}` : '永不过期' }}</span><span>{{ token.lastUsedAt ? `最后使用 ${dateTime(token.lastUsedAt)}` : '尚未使用' }}</span>
+                  </div>
                   <button v-if="!token.revokedAt" class="table-icon-button danger-command" type="button" title="吊销 Token" aria-label="吊销 Token" @click="revokeApiToken(token)"><Trash2 :size="16" /></button>
                 </article>
               </div>
@@ -657,21 +674,28 @@ onBeforeUnmount(() => {
         </main>
       </div>
 
-      <el-dialog v-model="tokenDialog" title="创建 API Token" width="min(620px, calc(100vw - 28px))" destroy-on-close>
-        <el-form label-position="top">
+      <el-dialog v-model="tokenDialog" title="创建 API Token" width="min(680px, calc(100vw - 28px))" destroy-on-close>
+        <div class="token-dialog-intro" role="note"><ShieldCheck :size="17" /><div><strong>先从只读权限开始</strong><p>只选择客户端实际需要的 scope。涉及写入、删除或远程执行的权限会扩大 Token 影响范围。</p></div></div>
+        <el-form class="token-create-form" label-position="top">
           <el-form-item label="Token 名称" required><el-input v-model="tokenForm.name" maxlength="128" placeholder="例如：鸿蒙移动端只读" /></el-form-item>
-          <el-form-item label="权限范围" required><el-checkbox-group v-model="tokenForm.scopes" class="token-scope-grid">
-            <el-checkbox v-for="[value, label] in scopes" :key="value" :value="value">{{ label }}</el-checkbox>
-          </el-checkbox-group></el-form-item>
-          <el-form-item label="服务器 ID 白名单"><el-input v-model="tokenForm.serverIds" placeholder="多个 ID 使用英文逗号分隔，留空表示不额外限制" /></el-form-item>
-          <el-form-item label="有效期"><el-input-number v-model="tokenForm.expiresInDays" :min="0" :max="3650" /><span class="field-suffix">天，0 表示永不过期</span></el-form-item>
+          <el-form-item label="权限范围" required>
+            <div class="token-scope-summary"><span>已选 {{ tokenSelectedScopeCount }} 项</span><small>建议仅保留客户端需要的读取权限</small></div>
+            <el-checkbox-group v-model="tokenForm.scopes" class="token-scope-groups">
+              <section v-for="group in tokenScopeGroups" :key="group.key" class="token-scope-group">
+                <div class="token-scope-group-head"><div><strong>{{ group.label }}</strong><p>{{ group.description }}</p></div><span>{{ group.options.length }} 项</span></div>
+                <div class="token-scope-options"><el-checkbox v-for="[value, label] in group.options" :key="value" :value="value" :title="value">{{ label }}</el-checkbox></div>
+              </section>
+            </el-checkbox-group>
+          </el-form-item>
+          <el-form-item label="服务器 ID 白名单"><el-input v-model="tokenForm.serverIds" type="textarea" :rows="3" resize="vertical" placeholder="每行或使用英文逗号分隔，例如：node-a, node-b" /><p class="token-field-help">留空表示不限制服务器；填写后，Token 只能访问列出的设备 ID。</p></el-form-item>
+          <el-form-item label="有效期"><div class="token-expiry-control"><el-input-number v-model="tokenForm.expiresInDays" :min="0" :max="3650" /><span class="field-suffix">天，0 表示永不过期</span></div></el-form-item>
         </el-form>
-        <template #footer><el-button @click="tokenDialog = false">取消</el-button><el-button type="primary" :loading="tokenSaving" @click="createApiToken">创建并显示 Token</el-button></template>
+        <template #footer><el-button @click="tokenDialog = false">取消</el-button><el-button type="primary" :loading="tokenSaving" @click="createApiToken">创建并显示一次性 Token</el-button></template>
       </el-dialog>
 
-      <el-dialog :model-value="Boolean(createdToken)" title="保存 API Token 明文" width="min(620px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) createdToken = null }">
-        <div v-if="createdToken" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>关闭窗口后无法再次查看，请立即复制并保存到安全的密钥管理器。</span></p></div><dl><div><dt>Token</dt><dd class="mono-value">{{ createdToken.secret }}</dd></div><div><dt>权限</dt><dd>{{ createdToken.token.scopes.join('、') }}</dd></div></dl></div>
-        <template #footer><el-button @click="createdToken = null">我已保存</el-button><el-button type="primary" @click="copyApiToken"><Copy :size="16" />复制 Token</el-button></template>
+      <el-dialog :model-value="Boolean(createdToken)" title="立即保存 API Token" width="min(620px, calc(100vw - 28px))" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
+        <div v-if="createdToken" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>请复制并保存到安全的密钥管理器。点击“我已保存”后，页面不会再次提供明文。</span></p></div><div class="credential-secret"><span>Token 明文</span><code>{{ createdToken.secret }}</code></div><dl><div><dt>Token 名称</dt><dd>{{ createdToken.token.name }}</dd></div><div><dt>权限范围</dt><dd><span v-for="scope in createdToken.token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></dd></div><div><dt>服务器范围</dt><dd>{{ createdToken.token.serverIds.length ? `${createdToken.token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</dd></div></dl></div>
+        <template #footer><el-button @click="closeCreatedToken">我已保存</el-button><el-button type="primary" @click="copyApiToken"><CheckCircle2 v-if="tokenCopied" :size="16" /><Copy v-else :size="16" />{{ tokenCopied ? '已复制 Token' : '复制 Token' }}</el-button></template>
       </el-dialog>
     </template>
   </section>

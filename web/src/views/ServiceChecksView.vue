@@ -125,7 +125,7 @@ useVisibilityPolling(() => load(true))
 
 <template>
   <section>
-    <PageHeader eyebrow="SERVICE MONITORING" title="服务监控" description="探测网站、端口与网络目标，并把最近一次可用性结果公开到状态页。">
+    <PageHeader eyebrow="SERVICE MONITORING" title="服务监控" description="探测网站、端口与网络目标；达到失败、延迟或证书阈值时，会通过已启用的通知通道发送告警。">
       <template #actions><el-button @click="load"><RefreshCw :size="16" />刷新</el-button><el-button v-if="canEdit" type="primary" class="button-press" @click="openCreate"><Plus :size="16" />新建监控</el-button></template>
     </PageHeader>
 
@@ -161,7 +161,7 @@ useVisibilityPolling(() => load(true))
           <el-form-item label="证书到期告警"><el-input-number v-model="form.certificateThresholdDays" :min="0" :max="3650" /><span class="field-suffix">天，0 为关闭</span></el-form-item>
         </div>
         <div class="form-inline-options"><el-checkbox v-model="form.publicVisible">在公开状态页展示</el-checkbox><el-checkbox v-model="form.enabled">启用自动探测</el-checkbox></div>
-        <p class="form-help"><Wifi :size="14" />HTTPS 会记录证书到期时间；HTTP 会记录响应状态码；Ping 与 TCPing 会记录连接延迟。</p>
+        <p class="form-help"><Wifi :size="14" />HTTPS 会记录证书到期时间；HTTP 会记录响应状态码；Ping 与 TCPing 会记录连接延迟。告警会在首次达到阈值时发送，恢复后再发送一条恢复通知。</p>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存监控</el-button></template>
     </el-dialog>

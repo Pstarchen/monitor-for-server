@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { visibleApiTokenScopes } from './api-token-scopes'
+import { apiTokenScopeLabel, visibleApiTokenScopeGroups, visibleApiTokenScopes } from './api-token-scopes'
 
 describe('api token scopes', () => {
   it('exposes every supported resource scope', () => {
@@ -17,5 +17,16 @@ describe('api token scopes', () => {
   it('only exposes administrator scope to administrators', () => {
     expect(visibleApiTokenScopes(false).some(([value]) => value === 'nezha:admin:*')).toBe(false)
     expect(visibleApiTokenScopes(true).some(([value]) => value === 'nezha:admin:*')).toBe(true)
+  })
+
+  it('groups scopes by resource while keeping the least-privilege read scope available first', () => {
+    const groups = visibleApiTokenScopeGroups(false)
+    expect(groups.map((group) => group.key)).toEqual(['inventory', 'server', 'service', 'ddns', 'alertrule', 'alert'])
+    expect(groups[0].options[0]).toEqual(['nezha:inventory:read', '设备清单读取'])
+    expect(apiTokenScopeLabel('nezha:server:exec')).toBe('远程任务执行')
+  })
+
+  it('falls back to the raw value for a scope introduced by a newer server', () => {
+    expect(apiTokenScopeLabel('nezha:future:read')).toBe('nezha:future:read')
   })
 })
