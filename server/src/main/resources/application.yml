@@ -74,6 +74,7 @@ app:
   metric-retention-days: ${METRIC_RETENTION_DAYS:30}
   device-offline-after-seconds: ${DEVICE_OFFLINE_AFTER_SECONDS:30}
   redis-enabled: ${REDIS_ENABLED:false}
+  enable-mcp: ${ENABLE_MCP:false}
   allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
   controller-agent:
     enabled: ${CONTROLLER_AGENT_ENABLED:false}

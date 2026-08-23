@@ -36,7 +36,7 @@ async function completeSetup() {
   submitting.value = true
   try {
     await api.post('/setup/complete', form, { timeout: 60_000 })
-    await router.replace({ name: 'login' })
+    await router.replace({ name: 'public-status' })
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {

@@ -11,9 +11,11 @@ import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 import java.util.Map;
 import java.util.Properties;
+import java.time.Duration;
 
 @Service
 @RequiredArgsConstructor
@@ -21,11 +23,15 @@ public class NotificationService {
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
     private final SettingService settings;
     private final AuditService audit;
-    private final RestClient restClient = RestClient.create();
+    private final RestClient restClient = RestClient.builder().requestFactory(requestFactory()).build();
 
     @Async
     public void send(AlertEvent event) {
-        String text = "[" + brandName() + "] " + event.getMessage();
+        sendMessage("[" + brandName() + "] " + event.getMessage());
+    }
+
+    @Async
+    public void sendMessage(String text) {
         SettingService.NotificationRuntime config = settings.notificationRuntime();
         runSafely("邮件", () -> sendEmail(config.email(), text));
         runSafely("钉钉", () -> sendWebhook(config.dingtalk(), text));
@@ -113,6 +119,13 @@ public class NotificationService {
     }
 
     private boolean blank(String value) { return value == null || value.isBlank(); }
+
+    private static SimpleClientHttpRequestFactory requestFactory() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(5));
+        factory.setReadTimeout(Duration.ofSeconds(10));
+        return factory;
+    }
 
     public record TestResult(String channel, String message) {}
 }

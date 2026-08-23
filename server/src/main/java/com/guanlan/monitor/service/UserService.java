@@ -57,8 +57,32 @@ public class UserService {
         return view(user);
     }
 
+    @Transactional
+    public UserDtos.View updateProfile(String username, UserDtos.ProfileUpdateRequest request) {
+        if (request == null || request.displayName() == null || request.displayName().isBlank()
+                || request.displayName().trim().length() > 80) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "显示名称长度应为 1-80 个字符");
+        }
+        UserAccount user = users.findByUsernameIgnoreCase(username)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "会话已失效"));
+        boolean changingPassword = request.newPassword() != null && !request.newPassword().isBlank();
+        if (changingPassword) {
+            if (request.currentPassword() == null || request.currentPassword().isBlank()
+                    || !passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+                throw new ApiException(HttpStatus.UNAUTHORIZED, "当前密码不正确");
+            }
+            if (request.newPassword().length() < 12 || request.newPassword().length() > 128) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "新密码长度应为 12-128 个字符");
+            }
+            user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        }
+        user.setDisplayName(request.displayName().trim());
+        audit.record(changingPassword ? "PROFILE_PASSWORD_CHANGE" : "PROFILE_UPDATE", "user:" + user.getId(),
+                changingPassword ? "用户更新个人资料并修改密码" : "用户更新个人资料");
+        return view(user);
+    }
+
     private UserDtos.View view(UserAccount user) {
         return new UserDtos.View(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole(), user.isEnabled(), user.getCreatedAt());
     }
 }
-

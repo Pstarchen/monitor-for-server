@@ -13,5 +13,6 @@ public interface AlertEventRepository extends JpaRepository<AlertEvent, Long> {
     Optional<AlertEvent> findFirstByDeviceIdAndRuleIdAndStatusInOrderByStartedAtDesc(
             String deviceId, Long ruleId, Collection<AlertEvent.Status> statuses);
     long countByStatusIn(Collection<AlertEvent.Status> statuses);
+    long countByDeviceIdInAndStatusIn(Collection<String> deviceIds, Collection<AlertEvent.Status> statuses);
     long countByRuleId(Long ruleId);
 }

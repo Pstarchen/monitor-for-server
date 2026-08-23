@@ -21,6 +21,7 @@ public class AppProperties {
     private int metricRetentionDays = 30;
     private int deviceOfflineAfterSeconds = 30;
     private boolean redisEnabled;
+    private boolean enableMcp;
     private String allowedOrigins = "http://localhost:5173";
     private Notification notification = new Notification();
     private ControllerAgent controllerAgent = new ControllerAgent();

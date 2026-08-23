@@ -74,7 +74,7 @@ func TestConfiguredEnvRequiresPostgreSQLAndApplicationSecrets(t *testing.T) {
 func TestComposeApplyDoesNotRecreateSetupService(t *testing.T) {
 	t.Setenv("CONTROLLER_AGENT_ENABLED", "false")
 	got := strings.Join(composeApplyArgs(), " ")
-	want := "compose --project-directory " + workspace + " --env-file " + envPath + " up -d --build --no-deps --wait --wait-timeout 300 server"
+	want := "compose --project-directory " + workspace + " --env-file " + envPath + " up -d --build --no-deps --wait --wait-timeout 300 server web"
 	if got != want {
 		t.Fatalf("composeApplyArgs() = %q, want %q", got, want)
 	}

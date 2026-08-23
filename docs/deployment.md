@@ -31,7 +31,7 @@ bash ./deploy/install-controller.sh --build
 http://<服务器IP>:18080/setup
 ```
 
-安装器会生成 PostgreSQL 凭据并启动数据库。首次向导只需配置站点入口、来源、时区和首个管理员；Web 端口、绑定地址和 Compose 项目名在总终端启动前确定。向导写入生产 `.env` 后只重建 `server`，不会重建当前提供页面的 Web 容器，因此提交后会直接进入登录页而不会回到 Setup 或出现 502。Flyway 在服务端启动时创建或升级表结构。数据库凭据只写入总终端私有配置，不会进入日志。
+安装器会生成 PostgreSQL 凭据并启动数据库。首次向导只需配置站点入口、来源、时区和首个管理员；Web 端口、绑定地址和 Compose 项目名在总终端启动前确定。向导写入生产 `.env` 后会同时重建 `server` 和 `web`，因此提交后会进入公开状态页，不会回到 Setup 或出现 502；服务完全就绪后可从状态页进入登录控制台。Flyway 在服务端启动时创建或升级表结构。数据库凭据只写入总终端私有配置，不会进入日志。
 
 Linux 总终端不需要单独安装 Agent。安装器启动的 `controller-agent` 通过本机网关上报宿主机指标，生产服务就绪后“设备管理”会出现“总控服务器”。它读取宿主机而非容器的 CPU、内存、网络和磁盘信息；不要在控制台轮换或删除这台系统管理设备。
 
@@ -47,6 +47,14 @@ Linux 总终端不需要单独安装 Agent。安装器启动的 `controller-agen
 - Web 端口与绑定地址由总终端安装器在首次启动前写入 `.env`，默认是 `18080` 和 `0.0.0.0`。只通过宝塔/Caddy/Nginx 反代时，在安装器启动前将绑定地址改为 `127.0.0.1`。浏览器向导不会再修改这两项，避免提交时切断当前页面。
 
 正式域名和 TLS 生效后，在“系统设置”同步修改站点入口，确保 `PUBLIC_BASE_URL`、`ALLOWED_ORIGINS` 使用 HTTPS 且来源完全一致，并执行 `docker compose up -d --force-recreate server web`。不要把数据库密码、Agent 密钥或管理员密码写进站点地址。
+
+安装完成后，直接访问 `PUBLIC_BASE_URL` 对应的域名根路径即可进入公开状态页，不需要追加 `/status`。安装向导会同时重建 `server` 和 `web`，确保当前源码中的根路径规则已生效。若是已有实例升级了这项规则，请执行：
+
+```bash
+docker compose up -d --build --no-deps server web
+```
+
+旧的 `/status` 和 `/status/` 地址会自动重定向到根路径。
 
 无法使用浏览器时，命令行安装器仍然可用：
 
@@ -123,7 +131,7 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
   --service sshd
 ```
 
-低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
+低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
 `--server-url` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。也可以直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS，HTTP 仅适合没有证书的临时或内网部署。默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。可用 `--image` 或 `GUANLAN_AGENT_IMAGE` 指向固定版本/内部仓库，`--container` 可覆盖容器名。Docker 模式安装结果：
 
@@ -165,7 +173,7 @@ $env:GUANLAN_AGENT_KEY = '<一次性密钥>'
   -MonitoredService 'W3SVC','MSSQLSERVER'
 ```
 
-轻量采集可添加 `-SkipProcesses -SkipConnections`；不传 `-DiskMountpoint` 时采集全部可用分区。
+轻量采集可添加 `-SkipProcesses -SkipConnections`；如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `-AllowCommandExecution`、`-AllowFileOperations`，两项默认关闭。不传 `-DiskMountpoint` 时采集全部可用分区。
 
 使用预编译程序时添加 `-BinaryPath 'C:\staging\guanlan-agent.exe'`。脚本注册自动启动的 `GuanlanAgent` Windows 服务，并将配置写入 `%ProgramData%\GuanlanMonitor\agent.json`，ACL 仅允许 SYSTEM 与管理员访问。即使已安装 Docker Desktop，Windows 也保持原生服务模式，以免采集到 Docker 的 Linux 虚拟机而不是 Windows 宿主机。
 

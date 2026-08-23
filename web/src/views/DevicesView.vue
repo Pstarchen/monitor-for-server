@@ -10,12 +10,14 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { percent, relativeTime } from '@/lib/format'
+import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
-import type { AgentBootstrap, Device, DeviceCredential, DeviceStatus } from '@/types'
+import type { AgentBootstrap, Device, DeviceCredential, DeviceStatus, DdnsConfig } from '@/types'
 
 const router = useRouter()
 const auth = useAuthStore()
 const devices = ref<Device[]>([])
+const ddnsConfigs = ref<DdnsConfig[]>([])
 const loading = ref(true)
 const error = ref('')
 const search = ref('')
@@ -29,7 +31,7 @@ const agentServerUrl = ref(window.location.origin)
 const collectionSeconds = ref(3)
 const lightweight = ref(false)
 const diskMountpoints = ref('')
-const form = reactive({ name: '', location: '', groupName: '', primaryIp: '' })
+const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
 const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent'
 const agentInstallerCacheKey = 'v5'
 const agentKeyElement = ref<HTMLElement | null>(null)
@@ -62,7 +64,9 @@ async function load(background = false) {
   if (!background) loading.value = true
   error.value = ''
   try {
-    devices.value = (await api.get<Device[]>('/devices')).data
+    const [deviceResponse, ddnsResponse] = await Promise.all([api.get<Device[]>('/devices'), api.get<DdnsConfig[]>('/ddns')])
+    devices.value = deviceResponse.data
+    ddnsConfigs.value = ddnsResponse.data
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
@@ -89,13 +93,13 @@ function showCredential(value: DeviceCredential) {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { name: '', location: '', groupName: '', primaryIp: '' })
+  Object.assign(form, { name: '', location: '', groupName: '', primaryIp: '', ddnsEnabled: false, ddnsConfigId: null, publicVisible: true })
   dialog.value = true
 }
 
 function openEdit(device: Device) {
   editingId.value = device.id
-  Object.assign(form, { name: device.name, location: device.location ?? '', groupName: device.groupName ?? '', primaryIp: device.primaryIp ?? '' })
+  Object.assign(form, { name: device.name, location: device.location ?? '', groupName: device.groupName ?? '', primaryIp: device.primaryIp ?? '', ddnsEnabled: device.ddnsEnabled, ddnsConfigId: device.ddnsConfigId, publicVisible: device.publicVisible })
   dialog.value = true
 }
 
@@ -106,7 +110,7 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = { name: form.name.trim(), location: form.location.trim() || null, groupName: form.groupName.trim() || null, primaryIp: form.primaryIp.trim() || null }
+    const payload = { name: form.name.trim(), location: form.location.trim() || null, groupName: form.groupName.trim() || null, primaryIp: form.primaryIp.trim() || null, ddnsEnabled: form.ddnsEnabled, ddnsConfigId: form.ddnsEnabled ? form.ddnsConfigId : null, publicVisible: form.publicVisible }
     if (editingId.value) {
       await api.put(`/devices/${editingId.value}`, payload)
       ElMessage.success('设备信息已更新')
@@ -203,6 +207,7 @@ onMounted(() => {
   loadAgentBootstrap()
   window.addEventListener('guanlan:realtime', scheduleRefresh)
 })
+useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
   window.removeEventListener('guanlan:realtime', scheduleRefresh)
@@ -261,6 +266,8 @@ onBeforeUnmount(() => {
           <el-form-item label="主 IP"><el-input v-model="form.primaryIp" maxlength="64" placeholder="可由 Agent 上报后补充" /></el-form-item>
           <el-form-item label="设备分组"><el-input v-model="form.groupName" maxlength="80" placeholder="例如：生产环境" /></el-form-item>
           <el-form-item label="物理位置"><el-input v-model="form.location" maxlength="120" placeholder="例如：上海机房 A3" /></el-form-item>
+          <el-form-item label="DDNS 配置"><el-checkbox v-model="form.ddnsEnabled">启用动态域名解析</el-checkbox><el-select v-if="form.ddnsEnabled" v-model="form.ddnsConfigId" clearable placeholder="选择 DDNS 配置"><el-option v-for="config in ddnsConfigs" :key="config.id" :label="config.name" :value="config.id" /></el-select></el-form-item>
+          <el-form-item label="公开状态页"><el-checkbox v-model="form.publicVisible">在公开状态页展示此设备</el-checkbox></el-form-item>
         </div>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ editingId ? '保存修改' : '创建设备' }}</el-button></template>

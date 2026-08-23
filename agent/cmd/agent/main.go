@@ -14,6 +14,7 @@ import (
 	"guanlan-monitor/agent/internal/collector"
 	"guanlan-monitor/agent/internal/config"
 	"guanlan-monitor/agent/internal/spool"
+	"guanlan-monitor/agent/internal/worker"
 )
 
 func main() {
@@ -42,6 +43,11 @@ func main() {
 	defer stop()
 
 	logger.Info("agent started", "device_id", cfg.DeviceID, "interval", cfg.Interval.String())
+	if cfg.AllowCommandExecution || cfg.AllowFileOperations {
+		go worker.Run(ctx, logger, client, cfg.CommandPollInterval, cfg.MaxCommandOutputBytes, cfg.AllowCommandExecution, cfg.AllowFileOperations, cfg.HostRoot)
+	} else {
+		logger.Info("remote task execution disabled")
+	}
 	interval := cfg.Interval
 	if updated := collectAndSend(ctx, logger, metrics, queue, client); updated > 0 {
 		interval = updated

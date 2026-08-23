@@ -179,7 +179,9 @@ for attempt in {1..40}; do
 done
 
 cat <<'MESSAGE'
-总终端服务器已启动。请打开 http://<服务器IP>:<WEB_PORT>/setup 完成首次安装。
+总终端服务器已启动。首次安装请打开 http://<服务器IP>:<WEB_PORT>/setup。
+
+安装完成后，直接访问配置的域名根路径即可进入公开状态页，无需追加 /status。
 
 PostgreSQL 已内置，数据库凭据由安装器自动生成，无需填写或执行数据库命令。
 向导只需设置站点入口、来源、时区和首个管理员。

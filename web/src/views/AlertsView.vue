@@ -8,6 +8,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
+import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
 import type { AlertEvent, AlertSeverity, AlertStatus } from '@/types'
 
@@ -27,8 +28,8 @@ const filtered = computed(() => {
     && (!needle || [alert.deviceName, alert.ruleName, alert.message].some((value) => value.toLowerCase().includes(needle))))
 })
 
-async function load() {
-  loading.value = true
+async function load(background = false) {
+  if (!background) loading.value = true
   error.value = ''
   try {
     alerts.value = (await api.get<AlertEvent[]>('/alerts', { params: { limit: 200 } })).data
@@ -53,6 +54,7 @@ async function acknowledge(alert: AlertEvent) {
 }
 
 onMounted(load)
+useVisibilityPolling(() => load(true))
 </script>
 
 <template>

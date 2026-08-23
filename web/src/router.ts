@@ -10,14 +10,20 @@ const router = createRouter({
   routes: [
     { path: '/setup', name: 'setup', component: () => import('@/views/SetupGuideView.vue'), meta: { public: true } },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    { path: '/', name: 'public-status', component: () => import('@/views/PublicStatusView.vue'), meta: { public: true } },
+    { path: '/status', redirect: '/' },
+    { path: '/status/', redirect: '/' },
     {
       path: '/', component: AppShell, children: [
-        { path: '', redirect: '/dashboard' },
         { path: 'dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
         { path: 'devices', name: 'devices', component: () => import('@/views/DevicesView.vue') },
         { path: 'devices/:id', name: 'device-detail', component: () => import('@/views/DeviceDetailView.vue') },
         { path: 'alerts', name: 'alerts', component: () => import('@/views/AlertsView.vue') },
         { path: 'alert-rules', name: 'alert-rules', component: () => import('@/views/AlertRulesView.vue') },
+        { path: 'services', name: 'services', component: () => import('@/views/ServiceChecksView.vue') },
+        { path: 'ddns', name: 'ddns', component: () => import('@/views/DdnsView.vue') },
+        { path: 'tasks', name: 'tasks', component: () => import('@/views/AgentTasksView.vue') },
+        { path: 'tokens', name: 'tokens', component: () => import('@/views/ApiTokensView.vue') },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { role: 'ADMIN' } },
         { path: 'users', name: 'users', component: () => import('@/views/UsersView.vue'), meta: { role: 'ADMIN' } },
         { path: 'audit', name: 'audit', component: () => import('@/views/AuditView.vue'), meta: { role: 'ADMIN' } },
@@ -28,6 +34,11 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // The public status page must remain reachable when the setup service is
+  // still starting or temporarily unavailable. Its data request handles its
+  // own loading/error state after the page has rendered.
+  if (to.name === 'public-status') return true
+
   let setup: Awaited<ReturnType<typeof getSetupStatus>>
   try {
     setup = await getSetupStatus()

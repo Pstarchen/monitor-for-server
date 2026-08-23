@@ -2,14 +2,23 @@ package com.guanlan.monitor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guanlan.monitor.api.dto.DeviceDtos;
+import com.guanlan.monitor.api.dto.ApiTokenDtos;
 import com.guanlan.monitor.domain.AlertEvent;
+import com.guanlan.monitor.domain.AgentTask;
+import com.guanlan.monitor.domain.DdnsConfig;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.domain.SystemSetting;
+import com.guanlan.monitor.domain.UserAccount;
 import com.guanlan.monitor.repository.AlertEventRepository;
+import com.guanlan.monitor.repository.AgentTaskRepository;
 import com.guanlan.monitor.repository.DeviceRepository;
+import com.guanlan.monitor.repository.DdnsConfigRepository;
 import com.guanlan.monitor.repository.SystemSettingRepository;
+import com.guanlan.monitor.repository.UserAccountRepository;
 import com.guanlan.monitor.service.AlertService;
+import com.guanlan.monitor.service.ApiTokenService;
 import com.guanlan.monitor.service.DeviceService;
+import com.guanlan.monitor.service.MaintenanceJobs;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -17,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -39,9 +49,15 @@ class AuthAndAgentIntegrationTest {
     @Autowired ObjectMapper mapper;
     @Autowired DeviceService devices;
     @Autowired DeviceRepository deviceRepository;
+    @Autowired DdnsConfigRepository ddnsConfigs;
     @Autowired AlertEventRepository alertEvents;
     @Autowired AlertService alertService;
+    @Autowired ApiTokenService apiTokens;
+    @Autowired AgentTaskRepository agentTasks;
+    @Autowired MaintenanceJobs maintenanceJobs;
     @Autowired SystemSettingRepository settings;
+    @Autowired UserAccountRepository userAccounts;
+    @Autowired PasswordEncoder passwordEncoder;
 
     @Test
     void publicBrandUsesPersistedSiteNameWithoutAuthentication() throws Exception {
@@ -66,6 +82,43 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    void publicOverviewOnlyIncludesDevicesMarkedPublic() throws Exception {
+        DeviceDtos.Credential hidden = devices.create(new DeviceDtos.CreateRequest("hidden-node", "lab", "tests", "127.0.0.7"));
+        devices.update(hidden.device().id(), new DeviceDtos.UpdateRequest("hidden-node", "lab", "tests", "127.0.0.7", false, null, false));
+        DeviceDtos.Credential visible = devices.create(new DeviceDtos.CreateRequest("visible-node", "lab", "tests", "127.0.0.8"));
+
+        mvc.perform(get("/api/public/overview"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.devices[?(@.id == '" + hidden.device().id() + "')]").doesNotExist())
+                .andExpect(jsonPath("$.devices[?(@.id == '" + visible.device().id() + "')]").isArray());
+    }
+
+    @Test
+    void publicServiceEndpointIsAccessibleWithoutAuthentication() throws Exception {
+        mvc.perform(get("/api/services/public"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void serviceMonitorRejectsMalformedHttpTarget() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/services")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"bad\",\"target\":\"http:///health\",\"type\":\"HTTP_GET\",\"intervalSeconds\":60,\"timeoutMs\":5000,\"publicVisible\":true,\"sortOrder\":0,\"enabled\":true,\"failureThreshold\":1,\"latencyThresholdMs\":0}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void ddnsRejectsMalformedDomain() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/ddns")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"invalid-ddns\",\"provider\":\"DUMMY\",\"domains\":[\"bad domain/path\"],\"enabled\":true,\"ipv4Enabled\":true,\"ipv6Enabled\":false,\"maxRetries\":1}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void loginCreatesAUsableServerSession() throws Exception {
         var result = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/login")
                         .with(csrf())
@@ -85,6 +138,39 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    void currentUserCanUpdateProfileAndChangePasswordWithCurrentPassword() throws Exception {
+        UserAccount profileUser = new UserAccount();
+        profileUser.setUsername("profile-test");
+        profileUser.setDisplayName("资料测试");
+        profileUser.setPasswordHash(passwordEncoder.encode("Profile-password-123"));
+        profileUser.setRole(UserAccount.Role.VIEWER);
+        profileUser.setEnabled(true);
+        userAccounts.save(profileUser);
+        var login = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/login")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"profile-test\",\"password\":\"Profile-password-123\"}"))
+                .andExpect(status().isOk()).andReturn();
+        MockHttpSession session = (MockHttpSession) login.getRequest().getSession(false);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/auth/profile")
+                        .session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"新的显示名\",\"currentPassword\":\"wrong-password\",\"newPassword\":\"Another-password-123\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/auth/profile")
+                        .session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"displayName\":\"新的显示名\",\"currentPassword\":\"Profile-password-123\",\"newPassword\":\"Another-password-123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.displayName").value("新的显示名"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/login")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"profile-test\",\"password\":\"Another-password-123\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @WithMockUser(roles = "VIEWER")
     void viewerCannotCreateDevices() throws Exception {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/devices")
@@ -92,6 +178,57 @@ class AuthAndAgentIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"blocked\"}"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerCannotWriteDdnsConfiguration() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/ddns")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"blocked-ddns\",\"provider\":\"DUMMY\",\"domains\":[\"node.example.com\"],\"enabled\":true,\"ipv4Enabled\":true,\"ipv6Enabled\":false,\"maxRetries\":3}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void viewerCannotReadDdnsErrorDetails() throws Exception {
+        DdnsConfig config = new DdnsConfig();
+        config.setName("failed-ddns");
+        config.setProvider(DdnsConfig.Provider.WEBHOOK);
+        config.setDomains("node.example.com");
+        config.setHttpMethod(DdnsConfig.HttpMethod.GET);
+        config.setEnabled(true);
+        config.setIpv4Enabled(true);
+        config.setIpv6Enabled(false);
+        config.setMaxRetries(1);
+        config.setLastStatus("FAILED");
+        config.setLastError("POST https://example.com/update?token=secret");
+        ddnsConfigs.save(config);
+
+        mvc.perform(get("/api/ddns"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.name == 'failed-ddns')].lastStatus").value(org.hamcrest.Matchers.hasItem("FAILED")))
+                .andExpect(jsonPath("$[?(@.name == 'failed-ddns')].lastError").value(org.hamcrest.Matchers.hasItem(org.hamcrest.Matchers.nullValue())));
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void resourceAlertThresholdCannotExceedPercentRange() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/alert-rules")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"invalid-cpu\",\"metric\":\"CPU_USAGE\",\"threshold\":101,\"severity\":\"WARNING\",\"enabled\":true}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void tcpConnectionAlertRuleAcceptsConnectionCountThreshold() throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/alert-rules")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"连接数过高\",\"metric\":\"TCP_CONNECTIONS\",\"threshold\":500,\"severity\":\"WARNING\",\"enabled\":true}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.metric").value("TCP_CONNECTIONS"))
+                .andExpect(jsonPath("$.threshold").value(500));
     }
 
     @Test
@@ -145,6 +282,19 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    void agentRejectsNegativeMemoryCounters() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("invalid-memory-node", "lab", "tests", "127.0.0.4"));
+        String report = sampleReport().replace("\"totalBytes\":1024", "\"totalBytes\":-1");
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(report))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void agentRecoveryResolvesAnOfflineAlert() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("recovery-node", "lab", "tests", "127.0.0.2"));
         Device device = deviceRepository.findById(credential.device().id()).orElseThrow();
@@ -162,6 +312,207 @@ class AuthAndAgentIntegrationTest {
                 .andExpect(status().isAccepted());
 
         assertThat(alertEvents.findAll()).anyMatch(event -> event.getDevice().getId().equals(device.getId()) && event.getStatus() == AlertEvent.Status.RESOLVED);
+    }
+
+    @Test
+    void apiTokenEnforcesScopeAndCanBeRevoked() throws Exception {
+        ApiTokenDtos.Created created = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "mobile-read", java.util.List.of("nezha:inventory:read"), java.util.List.of(), 7));
+        String authorization = "Bearer " + created.secret();
+
+        mvc.perform(get("/api/dashboard").header("Authorization", authorization))
+                .andExpect(status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/devices")
+                        .header("Authorization", authorization)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"blocked-by-scope\"}"))
+                .andExpect(status().isForbidden());
+
+        apiTokens.revoke("test-admin", created.token().id());
+        mvc.perform(get("/api/dashboard").header("Authorization", authorization))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void apiTokenCannotUseSessionOnlyLogoutEndpoint() throws Exception {
+        ApiTokenDtos.Created created = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "inventory-only", java.util.List.of("nezha:inventory:read"), java.util.List.of(), 7));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/logout")
+                        .header("Authorization", "Bearer " + created.secret()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void apiTokenCannotReadBrowserSessionProfile() throws Exception {
+        ApiTokenDtos.Created created = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "inventory-only", java.util.List.of("nezha:inventory:read"), java.util.List.of(), 7));
+
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + created.secret()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void apiTokenServerWhitelistFiltersInventoryAndDashboard() throws Exception {
+        DeviceDtos.Credential allowed = devices.create(new DeviceDtos.CreateRequest("allowed-node", "lab", "tests", "127.0.0.20"));
+        DeviceDtos.Credential hidden = devices.create(new DeviceDtos.CreateRequest("hidden-node-for-token", "lab", "tests", "127.0.0.21"));
+        ApiTokenDtos.Created created = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "scoped-read", java.util.List.of("nezha:inventory:read"), java.util.List.of(allowed.device().id()), 7));
+
+        mvc.perform(get("/api/devices").header("Authorization", "Bearer " + created.secret()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.id == '" + allowed.device().id() + "')]").isArray())
+                .andExpect(jsonPath("$[?(@.id == '" + hidden.device().id() + "')]").doesNotExist());
+        mvc.perform(get("/api/dashboard").header("Authorization", "Bearer " + created.secret()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalDevices").value(1))
+                .andExpect(jsonPath("$.devices[0].id").value(allowed.device().id()));
+    }
+
+    @Test
+    void apiTokenServerWhitelistBlocksDeviceDetailsAndMetrics() throws Exception {
+        DeviceDtos.Credential allowed = devices.create(new DeviceDtos.CreateRequest("metrics-allowed", "lab", "tests", "127.0.0.23"));
+        DeviceDtos.Credential hidden = devices.create(new DeviceDtos.CreateRequest("metrics-hidden", "lab", "tests", "127.0.0.24"));
+        String report = sampleReport();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", allowed.device().id()).header("X-Agent-Key", allowed.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON).content(report))
+                .andExpect(status().isAccepted());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", hidden.device().id()).header("X-Agent-Key", hidden.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON).content(report))
+                .andExpect(status().isAccepted());
+
+        ApiTokenDtos.Created created = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "metrics-read", java.util.List.of("nezha:server:read"), java.util.List.of(allowed.device().id()), 7));
+        String authorization = "Bearer " + created.secret();
+
+        mvc.perform(get("/api/devices/" + allowed.device().id()).header("Authorization", authorization))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/devices/" + allowed.device().id() + "/metrics/latest").header("Authorization", authorization))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/devices/" + hidden.device().id()).header("Authorization", authorization))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/devices/" + hidden.device().id() + "/metrics/latest").header("Authorization", authorization))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void agentTaskCanBeQueuedClaimedAndCompleted() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("task-node", "lab", "tests", "127.0.0.4"));
+        String body = "{\"deviceId\":\"" + credential.device().id() + "\",\"command\":\"uname\",\"args\":[\"-a\"],\"timeoutSeconds\":10,\"maxOutputBytes\":4096}";
+
+        var created = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/tasks")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("QUEUED"))
+                .andReturn();
+        long taskId = mapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+
+        mvc.perform(get("/api/agent/v1/tasks/next")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(taskId))
+                .andExpect(jsonPath("$.command").value("uname"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/tasks/" + taskId + "/result")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"SUCCEEDED\",\"exitCode\":0,\"stdout\":\"Linux test\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.stdout").value("Linux test"));
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void staleRunningAgentTaskIsRecoveredAsTimedOut() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("stale-task-node", "lab", "tests", "127.0.0.22"));
+        String body = "{\"deviceId\":\"" + credential.device().id() + "\",\"command\":\"uname\",\"args\":[],\"timeoutSeconds\":1,\"maxOutputBytes\":4096}";
+        var created = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/tasks")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn();
+        long taskId = mapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+        mvc.perform(get("/api/agent/v1/tasks/next")
+                        .header("X-Device-Id", credential.device().id()).header("X-Agent-Key", credential.agentKey()))
+                .andExpect(status().isOk());
+        AgentTask task = agentTasks.findById(taskId).orElseThrow();
+        task.setStartedAt(Instant.now().minusSeconds(20));
+        agentTasks.save(task);
+        maintenanceJobs.recoverStaleAgentTasks();
+        assertThat(agentTasks.findById(taskId).orElseThrow().getStatus()).isEqualTo(AgentTask.Status.TIMED_OUT);
+    }
+
+    @Test
+    void mcpRequiresApiTokenAndExposesScopedServerTools() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("mcp-node", "lab", "tests", "127.0.0.5"));
+        ApiTokenDtos.Created created = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "mcp-read-exec", java.util.List.of("nezha:inventory:read", "nezha:server:read", "nezha:server:write", "nezha:server:delete", "nezha:server:exec"), java.util.List.of(credential.device().id()), 7));
+        String authorization = "Bearer " + created.secret();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/mcp")
+                        .header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.serverInfo.name").value("guanlan-monitor"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/mcp")
+                        .header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"server.list\",\"arguments\":{}}}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.isError").value(false)).andExpect(jsonPath("$.result.structuredContent.servers[0].id").value(credential.device().id()));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/mcp")
+                        .header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"server.exec\",\"arguments\":{\"server_id\":\"" + credential.device().id() + "\",\"cmd\":\"uname\",\"args\":[\"-a\"]}}}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.isError").value(false)).andExpect(jsonPath("$.result.structuredContent.status").value("QUEUED"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/mcp")
+                        .header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"fs.write\",\"arguments\":{\"server_id\":\"" + credential.device().id() + "\",\"path\":\"/tmp/check.txt\",\"content\":\"hello\"}}}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.isError").value(false)).andExpect(jsonPath("$.result.structuredContent.operation").value("FILE_WRITE"))
+                .andExpect(jsonPath("$.result.structuredContent.status").value("QUEUED"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/mcp")
+                        .header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"fs.delete\",\"arguments\":{\"server_id\":\"" + credential.device().id() + "\",\"path\":\"/tmp/check.txt\"}}}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.isError").value(false));
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void ddnsConfigurationCanBeLinkedAndUpdatesOnlyAfterAgentReport() throws Exception {
+        var created = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/ddns")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"dummy-ddns","provider":"DUMMY","domains":["node.example.com"],"method":"GET","enabled":true,"ipv4Enabled":true,"ipv6Enabled":false,"maxRetries":3}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.domains[0]").value("node.example.com"))
+                .andReturn();
+        long ddnsId = mapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("ddns-node", "lab", "tests", "127.0.0.6"));
+        devices.update(credential.device().id(), new DeviceDtos.UpdateRequest("ddns-node", "lab", "tests", "127.0.0.6", true, ddnsId));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .header("X-Real-IP", "203.0.113.7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sampleReport()))
+                .andExpect(status().isAccepted());
+
+        Device updated = null;
+        for (int attempt = 0; attempt < 30; attempt++) {
+            updated = deviceRepository.findById(credential.device().id()).orElseThrow();
+            if ("203.0.113.7".equals(updated.getLastDdnsIpv4())) break;
+            Thread.sleep(100);
+        }
+        assertThat(updated).isNotNull();
+        assertThat(updated.getLastDdnsIpv4()).isEqualTo("203.0.113.7");
+        assertThat(ddnsConfigs.findById(ddnsId).orElseThrow().getLastStatus()).isEqualTo("SUCCEEDED");
     }
 
     private String sampleReport() throws Exception {

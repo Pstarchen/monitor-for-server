@@ -7,6 +7,7 @@ import com.guanlan.monitor.api.dto.MetricView;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.repository.DeviceRepository;
 import com.guanlan.monitor.repository.MetricSnapshotRepository;
+import com.guanlan.monitor.repository.DdnsConfigRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,6 +27,7 @@ public class DeviceService {
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper mapper;
     private final AuditService audit;
+    private final DdnsConfigRepository ddnsConfigs;
     private final SecureRandom random = new SecureRandom();
 
     @Transactional(readOnly = true)
@@ -44,6 +46,9 @@ public class DeviceService {
         device.setLocation(request.location());
         device.setGroupName(request.groupName());
         device.setPrimaryIp(request.primaryIp());
+        device.setDdnsEnabled(request.ddnsEnabled());
+        device.setDdnsConfigId(validDdnsConfig(request.ddnsEnabled(), request.ddnsConfigId()));
+        device.setPublicVisible(request.publicVisible());
         device.setAgentKeyPrefix(rawKey.substring(0, 8));
         device.setAgentKeyHash(passwordEncoder.encode(rawKey));
         devices.save(device);
@@ -58,6 +63,9 @@ public class DeviceService {
         device.setLocation(request.location());
         device.setGroupName(request.groupName());
         device.setPrimaryIp(request.primaryIp());
+        device.setDdnsEnabled(request.ddnsEnabled());
+        device.setDdnsConfigId(validDdnsConfig(request.ddnsEnabled(), request.ddnsConfigId()));
+        device.setPublicVisible(request.publicVisible());
         audit.record("DEVICE_UPDATE", "device:" + id, "更新设备 " + device.getName());
         return view(device);
     }
@@ -101,8 +109,14 @@ public class DeviceService {
     public DeviceDtos.View view(Device device) {
         MetricView latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).map(metric -> MetricView.from(metric, mapper)).orElse(null);
         return new DeviceDtos.View(device.getId(), device.getName(), device.getHostname(), device.getOs(), device.getArchitecture(),
-                device.getPrimaryIp(), device.getLocation(), device.getGroupName(), device.getStatus(), device.getLastSeenAt(),
+                device.getPrimaryIp(), device.getLocation(), device.getGroupName(), device.isDdnsEnabled(), device.getDdnsConfigId(), device.isPublicVisible(), device.getStatus(), device.getLastSeenAt(),
                 device.getAgentKeyPrefix(), device.isControllerManaged(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest);
+    }
+
+    private Long validDdnsConfig(boolean enabled, Long id) {
+        if (!enabled) return null;
+        if (id == null || !ddnsConfigs.existsById(id)) throw new ApiException(HttpStatus.BAD_REQUEST, "DDNS 配置不存在");
+        return id;
     }
 
     @SuppressWarnings("unchecked")

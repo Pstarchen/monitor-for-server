@@ -27,4 +27,10 @@ describe('setup flow', () => {
     expect(setupIsReady(value)).toBe(false)
     expect(setupIsReady(status(true, 'configured'))).toBe(true)
   })
+
+  it('keeps the public status page reachable while setup is unavailable', () => {
+    expect(setupRouteRedirect(status(false, 'ready'), 'public-status', true)).toBeNull()
+    expect(setupRouteRedirect(status(true, 'applying'), 'public-status', true)).toBeNull()
+    expect(setupRouteRedirect(status(true, 'error'), 'public-status', true)).toBeNull()
+  })
 })

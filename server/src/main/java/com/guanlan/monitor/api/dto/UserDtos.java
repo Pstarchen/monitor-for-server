@@ -25,6 +25,11 @@ public final class UserDtos {
             @Size(min = 12, max = 128) String newPassword
     ) {}
 
+    public record ProfileUpdateRequest(
+            @NotBlank @Size(max = 80) String displayName,
+            @Size(min = 12, max = 128) String currentPassword,
+            @Size(min = 12, max = 128) String newPassword
+    ) {}
+
     public record View(Long id, String username, String displayName, UserAccount.Role role, boolean enabled, Instant createdAt) {}
 }
-

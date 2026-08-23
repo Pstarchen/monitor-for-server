@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'DEVICE_OFFLINE'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'TCP_CONNECTIONS' | 'DEVICE_OFFLINE'
 
 export interface User {
   id: number
@@ -51,6 +51,8 @@ export interface Metric {
   diskWriteBps: number
   networkSentBps: number
   networkRecvBps: number
+  networkSentBytes: number
+  networkRecvBytes: number
   tcpConnections: number
   disks: DiskMetric[]
   processes: ProcessMetric[]
@@ -66,6 +68,9 @@ export interface Device {
   primaryIp: string | null
   location: string | null
   groupName: string | null
+  ddnsEnabled: boolean
+  ddnsConfigId: number | null
+  publicVisible: boolean
   status: DeviceStatus
   lastSeenAt: string | null
   agentKeyPrefix: string
@@ -73,6 +78,26 @@ export interface Device {
   createdAt: string
   hardware: Record<string, unknown>
   latest: Metric | null
+}
+
+export type DdnsProvider = 'DUMMY' | 'WEBHOOK'
+export type DdnsHttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export interface DdnsConfig {
+  id: number
+  name: string
+  provider: DdnsProvider
+  domains: string[]
+  webhookConfigured: boolean
+  method: DdnsHttpMethod
+  enabled: boolean
+  ipv4Enabled: boolean
+  ipv6Enabled: boolean
+  maxRetries: number
+  lastStatus: string | null
+  lastError: string | null
+  lastUpdatedAt: string | null
+  credentialOneConfigured: boolean
+  credentialTwoConfigured: boolean
 }
 
 export interface DeviceCredential {
@@ -153,6 +178,7 @@ export interface Settings {
   siteIconUrl: string
   publicBaseUrl: string
   timezone: string
+  enableMcp: boolean
   secretStorageReady: boolean
   email: EmailSettings
   dingtalk: WebhookSettings
@@ -214,4 +240,114 @@ export interface ControllerUpdateStatus {
   autoUpdate: boolean
   nextAutoUpdateAt?: string
   services: ControllerServiceStatus[]
+}
+
+export interface ApiToken {
+  id: number
+  name: string
+  tokenPrefix: string
+  scopes: string[]
+  serverIds: string[]
+  expiresAt: string | null
+  lastUsedAt: string | null
+  lastUsedIp: string | null
+  revokedAt: string | null
+  createdAt: string
+}
+
+export interface CreatedApiToken {
+  token: ApiToken
+  secret: string
+}
+
+export type AgentTaskStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT' | 'CANCELED'
+export type AgentTaskOperation = 'COMMAND' | 'FILE_LIST' | 'FILE_READ' | 'FILE_WRITE' | 'FILE_DELETE'
+
+export interface AgentTask {
+  id: number
+  deviceId: string
+  deviceName: string
+  operation: AgentTaskOperation
+  command: string
+  args: string[]
+  timeoutSeconds: number
+  maxOutputBytes: number
+  status: AgentTaskStatus
+  createdBy: string
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  exitCode: number | null
+  stdout: string
+  stderr: string
+  error: string
+}
+
+export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING'
+
+export interface ServiceCheckResult {
+  checkedAt: string
+  success: boolean
+  latencyMs: number
+  statusCode: number | null
+  certificateExpiresAt: string | null
+  error: string | null
+}
+
+export interface ServiceCheck {
+  id: number
+  name: string
+  target: string
+  type: ServiceCheckType
+  intervalSeconds: number
+  timeoutMs: number
+  publicVisible: boolean
+  sortOrder: number
+  enabled: boolean
+  failureThreshold: number
+  latencyThresholdMs: number
+  certificateThresholdDays: number
+  alertActive: boolean
+  createdAt: string
+  updatedAt: string
+  latest: ServiceCheckResult | null
+}
+
+export interface PublicServiceCheck {
+  id: number
+  name: string
+  type: ServiceCheckType
+  sortOrder: number
+  latest: { checkedAt: string; success: boolean; latencyMs: number; statusCode: number | null; certificateExpiresAt: string | null } | null
+}
+
+export interface PublicDevice {
+  id: string
+  name: string
+  groupName: string | null
+  os: string | null
+  status: DeviceStatus
+  lastSeenAt: string | null
+  cpuUsage: number
+  memoryUsage: number
+  diskUsage: number
+  networkSentBps: number
+  networkRecvBps: number
+  networkSentBytes: number
+  networkRecvBytes: number
+  uptimeSeconds: number
+}
+
+export interface PublicOverview {
+  siteName: string
+  generatedAt: string
+  totalDevices: number
+  onlineDevices: number
+  offlineDevices: number
+  networkSentBps: number
+  networkRecvBps: number
+  totalNetworkSentBytes: number
+  totalNetworkRecvBytes: number
+  devices: PublicDevice[]
+  services: PublicServiceCheck[]
 }

@@ -1,6 +1,7 @@
 package com.guanlan.monitor.config;
 
 import com.guanlan.monitor.security.MonitorUserDetailsService;
+import com.guanlan.monitor.security.ApiTokenAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.logout.LogoutFilter;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -29,6 +32,7 @@ import java.util.List;
 public class SecurityConfig {
     private final AppProperties properties;
     private final MonitorUserDetailsService userDetailsService;
+    private final ApiTokenAuthenticationFilter apiTokenAuthenticationFilter;
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -36,9 +40,12 @@ public class SecurityConfig {
         csrf.setCookiePath("/");
         http
                 .cors(Customizer.withDefaults())
-                .csrf(config -> config.csrfTokenRepository(csrf).ignoringRequestMatchers("/api/agent/**"))
+                .csrf(config -> config.csrfTokenRepository(csrf)
+                        .ignoringRequestMatchers("/api/agent/**")
+                        .ignoringRequestMatchers(apiTokenAuthenticationFilter::isApiTokenRequest))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/settings/public", "/api/settings/site-icon", "/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/settings/public", "/api/settings/site-icon", "/api/public/overview", "/api/services/public", "/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/agent/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/agent/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/ws/**").authenticated()
@@ -68,7 +75,10 @@ public class SecurityConfig {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
         provider.setUserDetailsService(userDetailsService);
         provider.setPasswordEncoder(passwordEncoder());
-        http.authenticationProvider(provider);
+        http.authenticationProvider(provider)
+                // Run before LogoutFilter so a Bearer token cannot trigger the
+                // browser session logout endpoint without a session.
+                .addFilterBefore(apiTokenAuthenticationFilter, LogoutFilter.class);
         return http.build();
     }
 
@@ -87,7 +97,7 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(allowedOrigins());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Content-Type", "X-XSRF-TOKEN", "X-Device-Id", "X-Agent-Key"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-XSRF-TOKEN", "X-Device-Id", "X-Agent-Key"));
         config.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

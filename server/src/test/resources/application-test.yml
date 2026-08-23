@@ -13,4 +13,5 @@ app:
   bootstrap-admin-password: Test-only-password-123
   settings-encryption-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
   redis-enabled: false
+  enable-mcp: true
   allowed-origins: http://localhost:5173,http://127.0.0.1:5173

@@ -27,6 +27,7 @@ public class SettingService {
     private static final String UPLOADED_SITE_ICON_URL = "/api/settings/site-icon";
     private static final String PUBLIC_BASE_URL = "system.public_base_url";
     private static final String TIMEZONE = "system.timezone";
+    private static final String ENABLE_MCP = "system.enable_mcp";
     private static final String EMAIL_ENABLED = "notification.email.enabled";
     private static final String EMAIL_HOST = "notification.email.host";
     private static final String EMAIL_PORT = "notification.email.port";
@@ -58,6 +59,7 @@ public class SettingService {
                 stringValue(SITE_ICON_URL, DEFAULT_SITE_ICON_URL),
                 stringValue(PUBLIC_BASE_URL, properties.getPublicBaseUrl()),
                 stringValue(TIMEZONE, properties.getTimezone()),
+                booleanValue(ENABLE_MCP, properties.isEnableMcp()),
                 secretCodec.available(),
                 emailView(notification.email()),
                 webhookView(notification.dingtalk()),
@@ -77,6 +79,7 @@ public class SettingService {
         save(SITE_ICON_URL, siteIconUrl);
         save(PUBLIC_BASE_URL, normalizeBaseUrl(request.publicBaseUrl()));
         save(TIMEZONE, request.timezone().trim());
+        save(ENABLE_MCP, request.enableMcp());
         updateEmail(request.email());
         updateWebhook(DINGTALK_ENABLED, DINGTALK_WEBHOOK, request.dingtalk());
         updateWebhook(WECOM_ENABLED, WECOM_WEBHOOK, request.wecom());
@@ -123,6 +126,7 @@ public class SettingService {
     public int retentionDays() { return intValue(RETENTION_DAYS, properties.getMetricRetentionDays()); }
     public int offlineSeconds() { return intValue(OFFLINE_SECONDS, properties.getDeviceOfflineAfterSeconds()); }
     public int agentCollectionSeconds() { return intValue(COLLECTION_SECONDS, 3); }
+    public boolean mcpEnabled() { return booleanValue(ENABLE_MCP, properties.isEnableMcp()); }
 
     @Transactional(readOnly = true)
     public AgentBootstrapView agentBootstrap() {
@@ -182,6 +186,9 @@ public class SettingService {
         if (request.siteName() == null || request.siteName().isBlank() || request.siteName().trim().length() > 60) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "站点名称长度应为 1-60 个字符");
         }
+        if (request.timezone() == null || request.timezone().isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "时区格式无效");
+        }
         validateSiteIconUrl(request.siteIconUrl());
         validateBaseUrl(request.publicBaseUrl());
         try {
@@ -207,7 +214,9 @@ public class SettingService {
             boolean localHttp = "http".equalsIgnoreCase(uri.getScheme())
                     && Set.of("localhost", "127.0.0.1", "::1").contains(uri.getHost());
             boolean insecureHttp = "http".equalsIgnoreCase(uri.getScheme()) && properties.isAllowInsecureHttp();
-            if (uri.getHost() == null || (!("https".equalsIgnoreCase(uri.getScheme()) || insecureHttp) && !localHttp)
+            if (uri.getHost() == null || uri.getUserInfo() != null
+                    || (uri.getPath() != null && !uri.getPath().isBlank() && !"/".equals(uri.getPath()))
+                    || (!("https".equalsIgnoreCase(uri.getScheme()) || insecureHttp) && !localHttp)
                     || uri.getQuery() != null || uri.getFragment() != null) {
                 throw new IllegalArgumentException();
             }
@@ -306,15 +315,21 @@ public class SettingService {
     private boolean blank(String value) { return value == null || value.isBlank(); }
 
     public record View(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
-                       String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean secretStorageReady,
+                       String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, boolean secretStorageReady,
                        EmailView email, WebhookView dingtalk, WebhookView wecom) {}
     public record EmailView(boolean enabled, boolean configured, String source, String host, int port,
                             String username, String from, String recipients, boolean auth, boolean startTls,
                             boolean passwordConfigured) {}
     public record WebhookView(boolean enabled, boolean configured, String source, boolean webhookConfigured) {}
     public record Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
-                         String siteName, String siteIconUrl, String publicBaseUrl, String timezone, EmailUpdate email,
-                         WebhookUpdate dingtalk, WebhookUpdate wecom) {}
+                         String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, EmailUpdate email,
+                         WebhookUpdate dingtalk, WebhookUpdate wecom) {
+        public Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
+                      String siteName, String siteIconUrl, String publicBaseUrl, String timezone, EmailUpdate email,
+                      WebhookUpdate dingtalk, WebhookUpdate wecom) {
+            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, false, email, dingtalk, wecom);
+        }
+    }
     public record EmailUpdate(boolean enabled, String host, int port, String username, String password,
                               boolean clearPassword, String from, String recipients, boolean auth, boolean startTls) {}
     public record WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook) {}

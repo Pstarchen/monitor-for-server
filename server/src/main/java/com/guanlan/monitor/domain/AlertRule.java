@@ -13,7 +13,7 @@ import java.time.Instant;
 @Entity
 @Table(name = "alert_rules")
 public class AlertRule {
-    public enum Metric { CPU_USAGE, MEMORY_USAGE, DISK_USAGE, DEVICE_OFFLINE }
+    public enum Metric { CPU_USAGE, MEMORY_USAGE, DISK_USAGE, TCP_CONNECTIONS, DEVICE_OFFLINE }
     public enum Severity { INFO, WARNING, CRITICAL }
 
     @Id
@@ -53,4 +53,3 @@ public class AlertRule {
     @PreUpdate
     void onUpdate() { updatedAt = Instant.now(); }
 }
-

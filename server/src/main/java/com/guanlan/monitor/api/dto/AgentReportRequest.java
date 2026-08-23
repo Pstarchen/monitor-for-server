@@ -3,6 +3,8 @@ package com.guanlan.monitor.api.dto;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -28,18 +30,19 @@ public record AgentReportRequest(
             @Size(max = 256) List<@Valid Temperature> temperatures
     ) {}
 
-    public record Temperature(@Size(max = 255) String sensor, double value) {}
+    public record Temperature(@Size(max = 255) String sensor,
+                               @DecimalMin(value = "-273.15") @DecimalMax(value = "1000.0") double value) {}
 
     public record CpuStats(
             @Size(max = 255) String model, @PositiveOrZero int logicalCores, @PositiveOrZero int physicalCores,
-            @Min(0) @Max(100) double usagePercent, @Size(max = 1024) List<Double> perCorePercent,
+            @Min(0) @Max(100) double usagePercent, @Size(max = 1024) List<@NotNull @Min(0) @Max(100) Double> perCorePercent,
             @PositiveOrZero double load1, @PositiveOrZero double load5, @PositiveOrZero double load15
     ) {}
 
     public record MemoryStats(
-            long totalBytes, long usedBytes, long availableBytes,
+            @PositiveOrZero long totalBytes, @PositiveOrZero long usedBytes, @PositiveOrZero long availableBytes,
             @Min(0) @Max(100) double usagePercent,
-            long cachedBytes, long swapTotalBytes, long swapUsedBytes,
+            @PositiveOrZero long cachedBytes, @PositiveOrZero long swapTotalBytes, @PositiveOrZero long swapUsedBytes,
             @Min(0) @Max(100) double swapPercent
     ) {}
 
@@ -51,6 +54,7 @@ public record AgentReportRequest(
     ) {}
 
     public record NetworkStats(@PositiveOrZero double bytesSentPerSec, @PositiveOrZero double bytesRecvPerSec,
+                               @PositiveOrZero long bytesSent, @PositiveOrZero long bytesRecv,
                                @PositiveOrZero int tcpConnections) {}
 
     public record ProcessStats(@PositiveOrZero int pid, @Size(max = 255) String name, @Size(max = 255) String username,

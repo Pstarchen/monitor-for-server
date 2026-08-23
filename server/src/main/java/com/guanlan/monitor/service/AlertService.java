@@ -40,8 +40,14 @@ public class AlertService {
         return rules.findAll().stream().map(this::ruleView).toList();
     }
 
+    @Transactional(readOnly = true)
+    public String ruleDeviceId(Long id) {
+        return requireRule(id).getDevice() == null ? null : requireRule(id).getDevice().getId();
+    }
+
     @Transactional
     public AlertDtos.RuleView createRule(AlertDtos.RuleRequest request) {
+        validate(request);
         AlertRule rule = new AlertRule();
         apply(rule, request);
         rules.save(rule);
@@ -51,6 +57,7 @@ public class AlertService {
 
     @Transactional
     public AlertDtos.RuleView updateRule(Long id, AlertDtos.RuleRequest request) {
+        validate(request);
         AlertRule rule = requireRule(id);
         apply(rule, request);
         audit.record("ALERT_RULE_UPDATE", "rule:" + id, "更新规则 " + rule.getName());
@@ -81,6 +88,13 @@ public class AlertService {
         return eventView(event);
     }
 
+    @Transactional(readOnly = true)
+    public String deviceId(Long id) {
+        return events.findById(id)
+                .map(event -> event.getDevice().getId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "告警不存在"));
+    }
+
     @Transactional
     public void evaluateMetric(Device device, MetricSnapshot metric) {
         for (AlertRule rule : rules.findByEnabledTrue()) {
@@ -89,6 +103,7 @@ public class AlertService {
                 case CPU_USAGE -> metric.getCpuUsage();
                 case MEMORY_USAGE -> metric.getMemoryUsage();
                 case DISK_USAGE -> metric.getDiskUsage();
+                case TCP_CONNECTIONS -> metric.getTcpConnections();
                 case DEVICE_OFFLINE -> 0;
             };
             evaluate(rule, device, value, value >= rule.getThreshold());
@@ -130,7 +145,7 @@ public class AlertService {
     }
 
     private void apply(AlertRule rule, AlertDtos.RuleRequest request) {
-        rule.setName(request.name());
+        rule.setName(request.name().trim());
         rule.setMetric(request.metric());
         rule.setThreshold(request.threshold());
         rule.setSeverity(request.severity());
@@ -138,14 +153,27 @@ public class AlertService {
         rule.setDevice(request.deviceId() == null || request.deviceId().isBlank() ? null : devices.require(request.deviceId()));
     }
 
+    private void validate(AlertDtos.RuleRequest request) {
+        if (request == null || request.name() == null || request.name().isBlank() || request.metric() == null || request.severity() == null
+                || !Double.isFinite(request.threshold()) || request.threshold() < 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "告警规则内容无效");
+        }
+        if (request.metric() == AlertRule.Metric.CPU_USAGE || request.metric() == AlertRule.Metric.MEMORY_USAGE || request.metric() == AlertRule.Metric.DISK_USAGE) {
+            if (request.threshold() > 100) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "资源使用率阈值必须在 0-100 之间");
+            }
+        }
+    }
+
     private String message(AlertRule rule, Device device, double value) {
         String metric = switch (rule.getMetric()) {
             case CPU_USAGE -> "CPU 使用率";
             case MEMORY_USAGE -> "内存使用率";
             case DISK_USAGE -> "磁盘使用率";
+            case TCP_CONNECTIONS -> "TCP 连接数";
             case DEVICE_OFFLINE -> "离线时长";
         };
-        String unit = rule.getMetric() == AlertRule.Metric.DEVICE_OFFLINE ? " 秒" : "%";
+        String unit = rule.getMetric() == AlertRule.Metric.DEVICE_OFFLINE ? " 秒" : rule.getMetric() == AlertRule.Metric.TCP_CONNECTIONS ? " 个" : "%";
         return device.getName() + " 的" + metric + "达到 " + String.format("%.1f", value) + unit + "，规则阈值 " + rule.getThreshold() + unit;
     }
 
@@ -166,4 +194,3 @@ public class AlertService {
                 event.getAcknowledgedBy(), event.getResolvedAt());
     }
 }
-

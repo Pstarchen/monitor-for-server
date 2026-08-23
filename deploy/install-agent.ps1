@@ -8,6 +8,8 @@ param(
     [string[]] $MonitoredService = @(),
     [string[]] $DiskMountpoint = @(),
     [switch] $AllowInsecureHttp,
+    [switch] $AllowCommandExecution,
+    [switch] $AllowFileOperations,
     [switch] $NoAutoUpdate,
     [switch] $SkipProcesses,
     [switch] $SkipConnections
@@ -165,6 +167,8 @@ try {
         spool_dir = (Join-Path $dataDir 'spool')
         max_buffered_reports = 10000
         allow_insecure_http = $configAllowInsecureHttp
+        allow_command_execution = $AllowCommandExecution.IsPresent
+        allow_file_operations = $AllowFileOperations.IsPresent
         monitored_services = $MonitoredService
         skip_process_collection = $SkipProcesses.IsPresent
         skip_connection_count = $SkipConnections.IsPresent

@@ -18,6 +18,27 @@ func TestLoadRejectsRemotePlainHTTP(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsNonOriginServerURL(t *testing.T) {
+	for _, serverURL := range []string{
+		"ftp://monitor.example.com",
+		"https://user:password@monitor.example.com",
+		"https://monitor.example.com/monitor",
+		"https://monitor.example.com?token=secret",
+	} {
+		t.Run(serverURL, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "agent.json")
+			body := []byte(`{"server_url":"` + serverURL + `","device_id":"device","agent_key":"secret"}`)
+			if err := os.WriteFile(path, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load([]string{"-config", path}); err == nil {
+				t.Fatal("expected invalid server URL to be rejected")
+			}
+		})
+	}
+}
+
 func TestLoadAllowsLocalDevelopmentHTTP(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.json")
@@ -77,5 +98,36 @@ func TestLoadAcceptsUtf8BomAndSixtySecondInterval(t *testing.T) {
 	}
 	if cfg.Interval.Seconds() != 60 {
 		t.Fatalf("unexpected interval: %s", cfg.Interval)
+	}
+}
+
+func TestCommandExecutionIsOptIn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.json")
+	body := []byte(`{"server_url":"https://monitor.example.com","device_id":"device","agent_key":"secret"}`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load([]string{"-config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AllowCommandExecution {
+		t.Fatal("command execution must be disabled by default")
+	}
+	if cfg.CommandPollInterval.Seconds() != 1 || cfg.MaxCommandOutputBytes != 65536 {
+		t.Fatalf("unexpected command defaults: %+v", cfg)
+	}
+}
+
+func TestLoadRejectsUnsafeResourceLimits(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.json")
+	body := []byte(`{"server_url":"https://monitor.example.com","device_id":"device","agent_key":"secret","request_timeout":"3m","max_buffered_reports":100001}`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load([]string{"-config", path}); err == nil {
+		t.Fatal("expected unsafe resource limits to be rejected")
 	}
 }

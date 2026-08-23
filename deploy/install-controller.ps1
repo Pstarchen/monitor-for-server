@@ -114,7 +114,8 @@ finally {
     Pop-Location
 }
 
-Write-Host "总终端服务器已启动。请打开 http://<服务器IP>:$webPort/setup 完成首次安装。"
+Write-Host "总终端服务器已启动。首次安装请打开 http://<服务器IP>:$webPort/setup。"
+Write-Host "安装完成后，直接访问配置的域名根路径即可进入公开状态页，无需追加 /status。"
 Write-Host 'PostgreSQL 已内置，数据库凭据由安装器自动生成，无需填写或执行数据库命令。'
 Write-Host '向导只需设置站点入口、来源、时区和首个管理员。端口与绑定地址已在总终端启动前确定。'
 Write-Host 'Windows 总终端默认不自动采集宿主机；请在设备管理中按普通 Windows Agent 流程接入。'

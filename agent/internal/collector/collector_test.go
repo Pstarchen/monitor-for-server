@@ -5,7 +5,20 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	netstat "github.com/shirou/gopsutil/v4/net"
 )
+
+func TestNetworkCountersAggregateAllInterfaces(t *testing.T) {
+	counters := []netstat.IOCountersStat{
+		{BytesSent: 100, BytesRecv: 200},
+		{BytesSent: 30, BytesRecv: 40},
+	}
+	gotSent, gotRecv := aggregateNetworkCounters(counters)
+	if gotSent != 130 || gotRecv != 240 {
+		t.Fatalf("aggregated network counters = %d/%d, want 130/240", gotSent, gotRecv)
+	}
+}
 
 func TestAllowedMountpoint(t *testing.T) {
 	if !allowedMountpoint("/data", nil) {

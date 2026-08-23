@@ -22,6 +22,8 @@ public record MetricView(
         double diskWriteBps,
         double networkSentBps,
         double networkRecvBps,
+        long networkSentBytes,
+        long networkRecvBytes,
         int tcpConnections,
         List<AgentReportRequest.DiskStats> disks,
         List<AgentReportRequest.ProcessStats> processes,
@@ -33,7 +35,7 @@ public record MetricView(
                 metric.getCpuUsage(), metric.getMemoryUsage(), metric.getSwapUsage(),
                 metric.getLoad1(), metric.getLoad5(), metric.getLoad15(), metric.getDiskUsage(),
                 metric.getDiskReadBps(), metric.getDiskWriteBps(), metric.getNetworkSentBps(),
-                metric.getNetworkRecvBps(), metric.getTcpConnections(),
+                metric.getNetworkRecvBps(), metric.getNetworkSentBytes(), metric.getNetworkRecvBytes(), metric.getTcpConnections(),
                 readList(mapper, metric.getDisksJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getProcessesJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getServicesJson(), new TypeReference<>() {})
@@ -49,4 +51,3 @@ public record MetricView(
         }
     }
 }
-

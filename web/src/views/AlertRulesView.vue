@@ -21,7 +21,7 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive<{ name: string; deviceId: string; metric: AlertMetric; threshold: number; severity: AlertSeverity; enabled: boolean }>({ name: '', deviceId: '', metric: 'CPU_USAGE', threshold: 80, severity: 'WARNING', enabled: true })
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
-const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', DEVICE_OFFLINE: '设备离线' }
+const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', TCP_CONNECTIONS: 'TCP 连接数', DEVICE_OFFLINE: '设备离线' }
 
 async function load() {
   loading.value = true
@@ -38,7 +38,7 @@ async function load() {
 }
 
 function defaultThreshold(metric: AlertMetric) {
-  return metric === 'DEVICE_OFFLINE' ? 30 : metric === 'DISK_USAGE' ? 85 : 80
+  return metric === 'DEVICE_OFFLINE' ? 30 : metric === 'DISK_USAGE' ? 85 : metric === 'TCP_CONNECTIONS' ? 100 : 80
 }
 
 function openCreate() {
@@ -99,7 +99,7 @@ onMounted(load)
     <LoadingState v-if="loading" />
     <div v-else-if="error" class="panel state-panel"><EmptyState title="规则加载失败" :description="error"><el-button @click="load">重新加载</el-button></EmptyState></div>
     <article v-else class="panel">
-      <div v-if="rules.length" class="table-wrap"><table class="data-table"><thead><tr><th>规则</th><th>监控范围</th><th>指标</th><th>触发阈值</th><th>级别</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="rule in rules" :key="rule.id"><td><strong>{{ rule.name }}</strong></td><td>{{ rule.deviceName || '全部设备' }}</td><td>{{ metricLabels[rule.metric] }}</td><td>{{ rule.metric === 'DEVICE_OFFLINE' ? `${rule.threshold.toFixed(0)} 秒` : `${rule.threshold.toFixed(1)}%` }}</td><td><StatusBadge :status="rule.severity" /></td><td><StatusBadge :status="rule.enabled ? 'ONLINE' : 'OFFLINE'" /></td><td>{{ dateTime(rule.updatedAt) }}</td><td class="row-actions"><button v-if="canEdit" class="table-icon-button" type="button" title="编辑规则" aria-label="编辑规则" @click="openEdit(rule)"><Pencil :size="16" /></button><button v-if="canEdit" class="table-icon-button danger-command" type="button" title="删除规则" aria-label="删除规则" @click="remove(rule)"><Trash2 :size="16" /></button></td></tr></tbody></table></div>
+      <div v-if="rules.length" class="table-wrap"><table class="data-table"><thead><tr><th>规则</th><th>监控范围</th><th>指标</th><th>触发阈值</th><th>级别</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="rule in rules" :key="rule.id"><td><strong>{{ rule.name }}</strong></td><td>{{ rule.deviceName || '全部设备' }}</td><td>{{ metricLabels[rule.metric] }}</td><td>{{ rule.metric === 'DEVICE_OFFLINE' ? `${rule.threshold.toFixed(0)} 秒` : rule.metric === 'TCP_CONNECTIONS' ? `${rule.threshold.toFixed(0)} 个` : `${rule.threshold.toFixed(1)}%` }}</td><td><StatusBadge :status="rule.severity" /></td><td><StatusBadge :status="rule.enabled ? 'ONLINE' : 'OFFLINE'" /></td><td>{{ dateTime(rule.updatedAt) }}</td><td class="row-actions"><button v-if="canEdit" class="table-icon-button" type="button" title="编辑规则" aria-label="编辑规则" @click="openEdit(rule)"><Pencil :size="16" /></button><button v-if="canEdit" class="table-icon-button danger-command" type="button" title="删除规则" aria-label="删除规则" @click="remove(rule)"><Trash2 :size="16" /></button></td></tr></tbody></table></div>
       <EmptyState v-else title="暂无告警规则" description="创建规则后，服务端会在每次 Agent 上报时自动评估指标。"><el-button v-if="canEdit" type="primary" @click="openCreate"><SlidersHorizontal :size="16" />新建规则</el-button></EmptyState>
     </article>
 
@@ -110,7 +110,7 @@ onMounted(load)
           <el-form-item label="监控范围"><el-select v-model="form.deviceId" placeholder="全部设备" clearable><el-option label="全部设备" value="" /><el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" /></el-select></el-form-item>
           <el-form-item label="监控指标" required><el-select v-model="form.metric" @change="metricChanged"><el-option v-for="(label, value) in metricLabels" :key="value" :label="label" :value="value" /></el-select></el-form-item>
           <el-form-item label="告警级别" required><el-select v-model="form.severity"><el-option label="提示" value="INFO" /><el-option label="警告" value="WARNING" /><el-option label="严重" value="CRITICAL" /></el-select></el-form-item>
-          <el-form-item label="触发阈值"><el-input-number v-model="form.threshold" :min="0" :max="form.metric === 'DEVICE_OFFLINE' ? 86400 : 100" :precision="form.metric === 'DEVICE_OFFLINE' ? 0 : 1" /><span class="field-suffix">{{ form.metric === 'DEVICE_OFFLINE' ? '秒' : '%' }}</span></el-form-item>
+          <el-form-item label="触发阈值"><el-input-number v-model="form.threshold" :min="0" :max="form.metric === 'DEVICE_OFFLINE' ? 86400 : ['CPU_USAGE', 'MEMORY_USAGE', 'DISK_USAGE'].includes(form.metric) ? 100 : 1000000" :precision="form.metric === 'DEVICE_OFFLINE' || form.metric === 'TCP_CONNECTIONS' ? 0 : 1" /><span class="field-suffix">{{ form.metric === 'DEVICE_OFFLINE' ? '秒' : form.metric === 'TCP_CONNECTIONS' ? '个' : '%' }}</span></el-form-item>
         </div>
         <el-form-item label="启用规则"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>

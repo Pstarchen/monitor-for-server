@@ -202,7 +202,7 @@ func composeApplyArgs() []string {
 	if strings.EqualFold(environmentValue("CONTROLLER_AGENT_ENABLED", "false"), "true") {
 		args = append(args, "--profile", "host-monitoring")
 	}
-	return append(args, "up", "-d", "--build", "--no-deps", "--wait", "--wait-timeout", "300", "server")
+	return append(args, "up", "-d", "--build", "--no-deps", "--wait", "--wait-timeout", "300", "server", "web")
 }
 
 func writeEnvironment(request setupRequest) error {

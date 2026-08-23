@@ -58,12 +58,36 @@ class SettingServiceIntegrationTest {
     }
 
     @Test
+    void publicBaseUrlMustBeAnOriginWithoutAPath() {
+        assertThatThrownBy(() -> settings.update(new SettingService.Update(
+                30, 30, 3, "观澜监控", "/favicon.svg", "https://monitor.example.com/status", "Asia/Shanghai",
+                disabledEmail(), new SettingService.WebhookUpdate(false, null, false), new SettingService.WebhookUpdate(false, null, false)
+        ))).isInstanceOf(ApiException.class).hasMessageContaining("公网入口");
+    }
+
+    @Test
+    void missingTimezoneReturnsBadRequestInsteadOfServerError() {
+        assertThatThrownBy(() -> settings.update(new SettingService.Update(
+                30, 30, 3, "观澜监控", "/favicon.svg", "http://localhost:8080", null,
+                disabledEmail(), new SettingService.WebhookUpdate(false, null, false), new SettingService.WebhookUpdate(false, null, false)
+        ))).isInstanceOf(ApiException.class).hasMessageContaining("时区");
+    }
+
+    @Test
     void disabledChannelCannotReportSuccessfulTest() {
         settings.update(update(disabledEmail(), new SettingService.WebhookUpdate(false, null, false)));
 
         assertThatThrownBy(() -> notifications.test("email"))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("请先启用");
+    }
+
+    @Test
+    void mcpCanBeEnabledFromPersistedSettings() {
+        SettingService.Update update = new SettingService.Update(30, 30, 3, "观澜监控", "/favicon.svg", "http://localhost:8080", "Asia/Shanghai", true,
+                disabledEmail(), new SettingService.WebhookUpdate(false, null, false), new SettingService.WebhookUpdate(false, null, false));
+        assertThat(settings.update(update).enableMcp()).isTrue();
+        assertThat(settings.mcpEnabled()).isTrue();
     }
 
     private SettingService.Update update(SettingService.EmailUpdate email,

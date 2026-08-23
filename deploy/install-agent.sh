@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -17,6 +17,8 @@ services=()
 disks=()
 skip_processes=false
 skip_connections=false
+allow_command_execution=false
+allow_file_operations=false
 no_docker=false
 allow_insecure_http=false
 auto_update=true
@@ -26,6 +28,8 @@ while [[ $# -gt 0 ]]; do
     --server-url) server_url="${2:-}"; shift 2 ;;
     --device-id) device_id="${2:-}"; shift 2 ;;
     --allow-insecure-http) allow_insecure_http=true; shift ;;
+    --allow-command-execution) allow_command_execution=true; shift ;;
+    --allow-file-operations) allow_file_operations=true; shift ;;
     --no-auto-update) auto_update=false; shift ;;
     --binary) binary_path="${2:-}"; shift 2 ;;
     --image) agent_image="${2:-}"; shift 2 ;;
@@ -182,8 +186,8 @@ if ((${#disks[@]} > 0)); then
 fi
 
 config_tmp="${temp_dir}/agent.json"
-printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s"\n}\n' \
-  "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" > "${config_tmp}"
+printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "allow_command_execution": %s,\n  "allow_file_operations": %s,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s"\n}\n' \
+  "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${allow_command_execution}" "${allow_file_operations}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" > "${config_tmp}"
 
 if [[ "${config_allow_insecure_http}" == true ]]; then
   sed -i 's/"allow_insecure_http": false/"allow_insecure_http": true/' "${config_tmp}"

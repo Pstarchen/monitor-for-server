@@ -36,5 +36,16 @@ export const useAuthStore = defineStore('auth', () => {
     clearCsrf()
   }
 
-  return { user, initialized, initialize, login, logout }
+  async function updateProfile(displayName: string, currentPassword: string, newPassword: string) {
+    const response = await api.put<User>('/auth/profile', {
+      displayName,
+      currentPassword: currentPassword || null,
+      newPassword: newPassword || null,
+    })
+    user.value = response.data
+    await refreshCsrf()
+    return response.data
+  }
+
+  return { user, initialized, initialize, login, logout, updateProfile }
 })

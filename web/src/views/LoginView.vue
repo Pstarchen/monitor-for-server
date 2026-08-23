@@ -133,6 +133,7 @@ onBeforeUnmount(() => {
           <span>{{ loading ? '正在验证' : '登录' }}</span>
         </button>
         <p class="auth-security"><LockKeyhole :size="13" /> 会话凭据仅保存在安全 Cookie 中</p>
+        <RouterLink class="auth-public-link" to="/"><Activity :size="13" /> 查看公开状态页</RouterLink>
       </form>
     </section>
   </main>

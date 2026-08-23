@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity, BellRing, ChevronDown, CircleGauge, ClipboardList, LogOut,
-  Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Users, X,
+  Activity, BellRing, ChevronDown, CircleGauge, ClipboardList, Globe2, LogOut,
+  Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
+import { ElMessage } from 'element-plus'
+import { errorMessage } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import { loadBranding, siteName } from '@/lib/branding'
 
@@ -12,6 +14,10 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const drawer = ref(false)
+const profileDialog = ref(false)
+const profileSaving = ref(false)
+const profileError = ref('')
+const profileForm = reactive({ displayName: '', currentPassword: '', newPassword: '' })
 const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
 let socket: WebSocket | null = null
 let reconnectTimer = 0
@@ -22,6 +28,10 @@ const navigation = [
   { label: '设备管理', path: '/devices', icon: Server },
   { label: '告警事件', path: '/alerts', icon: BellRing },
   { label: '告警规则', path: '/alert-rules', icon: SlidersHorizontal },
+  { label: '服务监控', path: '/services', icon: Globe2 },
+  { label: '动态域名解析', path: '/ddns', icon: Globe2 },
+  { label: '任务执行', path: '/tasks', icon: Terminal },
+  { label: 'API Token', path: '/tokens', icon: KeyRound },
 ]
 const administration = [
   { label: '系统设置', path: '/settings', icon: Settings },
@@ -52,6 +62,36 @@ function toggleTheme() {
 async function logout() {
   await auth.logout()
   await router.replace('/login')
+}
+
+function openProfile() {
+  profileForm.displayName = auth.user?.displayName ?? ''
+  profileForm.currentPassword = ''
+  profileForm.newPassword = ''
+  profileError.value = ''
+  profileDialog.value = true
+}
+
+async function saveProfile() {
+  if (!profileForm.displayName.trim()) {
+    profileError.value = '请输入显示名称'
+    return
+  }
+  if (profileForm.newPassword && !profileForm.currentPassword) {
+    profileError.value = '修改密码前请先输入当前密码'
+    return
+  }
+  profileSaving.value = true
+  profileError.value = ''
+  try {
+    await auth.updateProfile(profileForm.displayName.trim(), profileForm.currentPassword, profileForm.newPassword)
+    profileDialog.value = false
+    ElMessage.success(profileForm.newPassword ? '个人资料和密码已更新' : '个人资料已更新')
+  } catch (cause) {
+    profileError.value = errorMessage(cause)
+  } finally {
+    profileSaving.value = false
+  }
 }
 
 function connectRealtime() {
@@ -147,6 +187,7 @@ onBeforeUnmount(() => {
             </button>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item @click="openProfile"><KeyRound :size="16" /> 个人资料与密码</el-dropdown-item>
                 <el-dropdown-item @click="logout"><LogOut :size="16" /> 退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -159,5 +200,15 @@ onBeforeUnmount(() => {
         </RouterView>
       </main>
     </div>
+
+    <el-dialog v-model="profileDialog" title="个人资料与密码" width="min(480px, calc(100vw - 28px))" destroy-on-close>
+      <el-form label-position="top" @submit.prevent="saveProfile">
+        <el-form-item label="显示名称" required><el-input v-model="profileForm.displayName" maxlength="80" autocomplete="name" /></el-form-item>
+        <el-form-item label="当前密码"><el-input v-model="profileForm.currentPassword" type="password" show-password autocomplete="current-password" placeholder="修改密码时填写" /></el-form-item>
+        <el-form-item label="新密码"><el-input v-model="profileForm.newPassword" type="password" show-password autocomplete="new-password" placeholder="留空表示不修改，至少 12 位" /></el-form-item>
+        <p v-if="profileError" class="form-error" role="alert">{{ profileError }}</p>
+      </el-form>
+      <template #footer><el-button @click="profileDialog = false">取消</el-button><el-button type="primary" :loading="profileSaving" @click="saveProfile">保存</el-button></template>
+    </el-dialog>
   </div>
 </template>

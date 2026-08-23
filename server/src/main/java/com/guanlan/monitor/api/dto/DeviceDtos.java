@@ -14,19 +14,36 @@ public final class DeviceDtos {
             @NotBlank @Size(max = 100) String name,
             @Size(max = 120) String location,
             @Size(max = 80) String groupName,
-            @Size(max = 64) String primaryIp
-    ) {}
+            @Size(max = 64) String primaryIp,
+            boolean ddnsEnabled,
+            Long ddnsConfigId,
+            boolean publicVisible
+    ) {
+        public CreateRequest(String name, String location, String groupName, String primaryIp) {
+            this(name, location, groupName, primaryIp, false, null, true);
+        }
+    }
 
     public record UpdateRequest(
             @NotBlank @Size(max = 100) String name,
             @Size(max = 120) String location,
             @Size(max = 80) String groupName,
-            @Size(max = 64) String primaryIp
-    ) {}
+            @Size(max = 64) String primaryIp,
+            boolean ddnsEnabled,
+            Long ddnsConfigId,
+            boolean publicVisible
+    ) {
+        public UpdateRequest(String name, String location, String groupName, String primaryIp) {
+            this(name, location, groupName, primaryIp, false, null, true);
+        }
+        public UpdateRequest(String name, String location, String groupName, String primaryIp, boolean ddnsEnabled, Long ddnsConfigId) {
+            this(name, location, groupName, primaryIp, ddnsEnabled, ddnsConfigId, true);
+        }
+    }
 
     public record View(
             String id, String name, String hostname, String os, String architecture,
-            String primaryIp, String location, String groupName, Device.Status status,
+            String primaryIp, String location, String groupName, boolean ddnsEnabled, Long ddnsConfigId, boolean publicVisible, Device.Status status,
             Instant lastSeenAt, String agentKeyPrefix, boolean controllerManaged, Instant createdAt, Map<String, Object> hardware, MetricView latest
     ) {}
 

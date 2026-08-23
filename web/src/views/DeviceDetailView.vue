@@ -12,6 +12,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { bytes, dateTime, percent, rate, rateScale, relativeTime } from '@/lib/format'
+import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
 import type { Device, DeviceCredential, Metric } from '@/types'
 
@@ -115,6 +116,7 @@ onMounted(() => {
   load()
   window.addEventListener('guanlan:realtime', onRealtime)
 })
+useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
   window.removeEventListener('guanlan:realtime', onRealtime)

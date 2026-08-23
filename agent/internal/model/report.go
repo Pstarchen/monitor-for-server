@@ -67,6 +67,8 @@ type DiskStats struct {
 type NetworkStats struct {
 	BytesSentPerSec float64 `json:"bytesSentPerSec"`
 	BytesRecvPerSec float64 `json:"bytesRecvPerSec"`
+	BytesSent       uint64  `json:"bytesSent"`
+	BytesRecv       uint64  `json:"bytesRecv"`
 	TCPConnections  int     `json:"tcpConnections"`
 }
 

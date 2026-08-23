@@ -60,6 +60,12 @@ public class MetricSnapshot {
     @Column(name = "network_recv_bps", nullable = false)
     private double networkRecvBps;
 
+    @Column(name = "network_sent_bytes", nullable = false)
+    private long networkSentBytes;
+
+    @Column(name = "network_recv_bytes", nullable = false)
+    private long networkRecvBytes;
+
     @Column(name = "tcp_connections", nullable = false)
     private int tcpConnections;
 

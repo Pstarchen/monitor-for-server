@@ -18,6 +18,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
+import com.guanlan.monitor.service.UserService;
 
 import java.util.Map;
 
@@ -28,6 +29,7 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final LoginRateLimiter rateLimiter;
     private final UserAccountRepository users;
+    private final UserService userService;
 
     @GetMapping("/csrf")
     Map<String, String> csrf(CsrfToken token) {
@@ -60,6 +62,16 @@ public class AuthController {
     @GetMapping("/me")
     UserDtos.View me(Authentication authentication) {
         return current(authentication);
+    }
+
+    @PutMapping("/profile")
+    UserDtos.View profile(@Valid @RequestBody UserDtos.ProfileUpdateRequest body,
+                          Authentication authentication, HttpServletRequest request) {
+        UserDtos.View updated = userService.updateProfile(authentication.getName(), body);
+        if (body.newPassword() != null && !body.newPassword().isBlank()) {
+            request.changeSessionId();
+        }
+        return updated;
     }
 
     private UserDtos.View current(Authentication authentication) {

@@ -12,6 +12,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { dateTime, percent, rate, relativeTime, uptime } from '@/lib/format'
+import { useVisibilityPolling } from '@/lib/visibility-polling'
 import type { Dashboard, Device, DeviceStatus } from '@/types'
 
 type SortKey = 'attention' | 'cpu' | 'memory' | 'disk' | 'name'
@@ -88,6 +89,7 @@ onMounted(() => {
   load()
   window.addEventListener('guanlan:realtime', scheduleRefresh)
 })
+useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
   window.removeEventListener('guanlan:realtime', scheduleRefresh)

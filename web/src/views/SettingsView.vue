@@ -3,21 +3,25 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Activity, CheckCircle2, ChevronRight, Database, Globe2, KeyRound, LockKeyhole,
+  Activity, CheckCircle2, ChevronRight, Copy, Database, Globe2, KeyRound, LockKeyhole,
   Clock3, Download, GitCommit, Mail, MessageSquareText, RefreshCw, RotateCcw,
-  Save, Send, ServerCog, Settings2, ShieldCheck, Upload,
+  Plus, Save, Send, ServerCog, Settings2, ShieldCheck, Trash2, Upload,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
+import { dateTime } from '@/lib/format'
 import { loadBranding } from '@/lib/branding'
+import { visibleApiTokenScopes } from '@/lib/api-token-scopes'
 import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controller-update'
-import type { ControllerServiceStatus, ControllerUpdateStatus, Settings, WebhookSettings } from '@/types'
+import { useAuthStore } from '@/stores/auth'
+import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, Settings, WebhookSettings } from '@/types'
 
 type ChannelKey = 'email' | 'dingtalk' | 'wecom'
-type SectionKey = 'general' | 'monitoring' | ChannelKey | 'security' | 'updates'
+type SectionKey = 'general' | 'monitoring' | ChannelKey | 'security' | 'tokens' | 'updates'
 
 const sections = [
   {
@@ -39,6 +43,7 @@ const sections = [
     label: '系统状态',
     items: [
       { key: 'security' as const, label: '安全与存储', description: '凭据和数据边界', icon: ShieldCheck },
+      { key: 'tokens' as const, label: 'API Token', description: '移动端与自动化访问', icon: KeyRound },
       { key: 'updates' as const, label: '系统更新', description: '版本检查与升级策略', icon: RefreshCw },
     ],
   },
@@ -55,6 +60,7 @@ const form = reactive({
   siteIconUrl: '/favicon.svg',
   publicBaseUrl: '',
   timezone: 'Asia/Shanghai',
+  enableMcp: false,
   email: {
     enabled: false, host: '', port: 587, username: '', password: '', clearPassword: false,
     from: '', recipients: '', auth: true, startTls: true,
@@ -74,6 +80,15 @@ const updateLoading = ref(false)
 const updateAction = ref<'check' | 'apply' | 'auto' | ''>('')
 const updateError = ref('')
 const waitingForRestart = ref(false)
+const apiTokens = ref<ApiToken[]>([])
+const tokenLoading = ref(false)
+const tokenDialog = ref(false)
+const tokenSaving = ref(false)
+const createdToken = ref<CreatedApiToken | null>(null)
+const tokenForm = reactive({ name: '', scopes: ['nezha:inventory:read'], serverIds: '', expiresInDays: 90 })
+const auth = useAuthStore()
+const canAdmin = computed(() => auth.user?.role === 'ADMIN')
+const scopes = computed(() => visibleApiTokenScopes(canAdmin.value))
 let updatePollTimer: ReturnType<typeof setTimeout> | undefined
 const hasChanges = computed(() => baseline.value !== '' && baseline.value !== snapshot())
 
@@ -90,6 +105,7 @@ function apply(value: Settings) {
     siteIconUrl: value.siteIconUrl,
     publicBaseUrl: value.publicBaseUrl,
     timezone: value.timezone,
+    enableMcp: value.enableMcp,
   })
   Object.assign(form.email, {
     enabled: value.email.enabled,
@@ -118,6 +134,66 @@ async function load() {
     error.value = errorMessage(cause)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadApiTokens() {
+  tokenLoading.value = true
+  try {
+    apiTokens.value = (await api.get<ApiToken[]>('/api-tokens')).data
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    tokenLoading.value = false
+  }
+}
+
+function openTokenDialog() {
+  Object.assign(tokenForm, { name: '', scopes: ['nezha:inventory:read'], serverIds: '', expiresInDays: 90 })
+  tokenDialog.value = true
+}
+
+async function createApiToken() {
+  if (!tokenForm.name.trim() || !tokenForm.scopes.length) {
+    ElMessage.warning('请输入 Token 名称并至少选择一个权限')
+    return
+  }
+  tokenSaving.value = true
+  try {
+    createdToken.value = (await api.post<CreatedApiToken>('/api-tokens', {
+      name: tokenForm.name.trim(),
+      scopes: tokenForm.scopes,
+      serverIds: tokenForm.serverIds.split(',').map((value) => value.trim()).filter(Boolean),
+      expiresInDays: Number(tokenForm.expiresInDays) || 0,
+    })).data
+    tokenDialog.value = false
+    await loadApiTokens()
+    ElMessage.success('API Token 已创建，请立即复制明文')
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    tokenSaving.value = false
+  }
+}
+
+async function copyApiToken() {
+  if (!createdToken.value) return
+  try {
+    await copyText(createdToken.value.secret)
+    ElMessage.success('Token 已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择 Token')
+  }
+}
+
+async function revokeApiToken(token: ApiToken) {
+  try {
+    await ElMessageBox.confirm(`吊销“${token.name}”后，使用它的客户端会立即失去访问权限。`, '吊销 API Token', { type: 'warning', confirmButtonText: '确认吊销', cancelButtonText: '取消' })
+    await api.delete(`/api-tokens/${token.id}`)
+    ElMessage.success('API Token 已吊销')
+    await loadApiTokens()
+  } catch (cause) {
+    if (cause !== 'cancel' && cause !== 'close') ElMessage.error(errorMessage(cause))
   }
 }
 
@@ -331,10 +407,12 @@ onBeforeRouteLeave(async () => {
 
 watch(activeSection, (section) => {
   if (section === 'updates' && !controllerUpdate.value && !updateLoading.value) loadControllerUpdate()
+  if (section === 'tokens' && !apiTokens.value.length && !tokenLoading.value) loadApiTokens()
 })
 
 onMounted(() => {
   load()
+  loadApiTokens()
   loadControllerUpdate()
 })
 onBeforeUnmount(() => {
@@ -415,6 +493,10 @@ onBeforeUnmount(() => {
                   <div class="setting-copy"><label for="timezone">服务时区</label><p>应用于后台任务和界面时间显示。</p></div>
                   <div class="setting-control"><el-input id="timezone" v-model="form.timezone" placeholder="Asia/Shanghai" /></div>
                 </div>
+                <div class="setting-row">
+                  <div class="setting-copy"><label>MCP HTTP 接口</label><p>开启后允许带有 API Token 的 MCP 客户端访问服务器工具；默认关闭。</p></div>
+                  <div class="setting-control"><el-switch v-model="form.enableMcp" aria-label="启用 MCP HTTP 接口" /></div>
+                </div>
               </div>
             </el-form>
           </template>
@@ -476,6 +558,22 @@ onBeforeUnmount(() => {
               </div>
               <div class="settings-section-actions"><p>{{ hasChanges ? '保存当前修改后可测试通道。' : '测试将发送一条验证消息。' }}</p><el-button :disabled="!canTest(activeSection)" :loading="testing[activeSection]" @click="testChannel(activeSection)"><Send :size="15" />发送测试消息</el-button></div>
             </el-form>
+          </template>
+
+          <template v-else-if="activeSection === 'tokens'">
+            <header class="settings-editor-head token-editor-head"><span><KeyRound :size="18" /></span><div><h2>API Token</h2><p>为移动端、脚本或自动化工具签发受限访问凭据。</p></div><el-button type="primary" class="button-press" @click="openTokenDialog"><Plus :size="15" />创建 Token</el-button></header>
+            <div class="settings-editor-body token-settings">
+              <div class="settings-notice token-notice" role="note"><ShieldCheck :size="17" /><p>明文 Token 只会在创建成功后显示一次。请按最小权限选择 scope，并在需要时填写服务器 ID 白名单。</p></div>
+              <LoadingState v-if="tokenLoading" />
+              <div v-else-if="apiTokens.length" class="token-list">
+                <article v-for="token in apiTokens" :key="token.id" class="token-row" :data-revoked="Boolean(token.revokedAt)">
+                  <div class="token-row-main"><div><strong>{{ token.name }}</strong><small class="mono-value">{{ token.tokenPrefix }}…</small></div><StatusBadge :status="token.revokedAt ? 'OFFLINE' : 'ONLINE'" /></div>
+                  <div class="token-row-meta"><span>{{ token.scopes.join('、') }}</span><span>{{ token.serverIds.length ? `${token.serverIds.length} 台服务器白名单` : '不限制服务器白名单' }}</span><span>{{ token.expiresAt ? `到期 ${dateTime(token.expiresAt)}` : '永不过期' }}</span><span>{{ token.lastUsedAt ? `最后使用 ${dateTime(token.lastUsedAt)}` : '尚未使用' }}</span></div>
+                  <button v-if="!token.revokedAt" class="table-icon-button danger-command" type="button" title="吊销 Token" aria-label="吊销 Token" @click="revokeApiToken(token)"><Trash2 :size="16" /></button>
+                </article>
+              </div>
+              <EmptyState v-else title="暂无 API Token" description="创建一个只读 Token，即可让移动端或自动化工具访问监控数据。"><el-button type="primary" @click="openTokenDialog"><Plus :size="15" />创建 Token</el-button></EmptyState>
+            </div>
           </template>
 
           <template v-else-if="activeSection === 'security'">
@@ -558,6 +656,23 @@ onBeforeUnmount(() => {
           </template>
         </main>
       </div>
+
+      <el-dialog v-model="tokenDialog" title="创建 API Token" width="min(620px, calc(100vw - 28px))" destroy-on-close>
+        <el-form label-position="top">
+          <el-form-item label="Token 名称" required><el-input v-model="tokenForm.name" maxlength="128" placeholder="例如：鸿蒙移动端只读" /></el-form-item>
+          <el-form-item label="权限范围" required><el-checkbox-group v-model="tokenForm.scopes" class="token-scope-grid">
+            <el-checkbox v-for="[value, label] in scopes" :key="value" :value="value">{{ label }}</el-checkbox>
+          </el-checkbox-group></el-form-item>
+          <el-form-item label="服务器 ID 白名单"><el-input v-model="tokenForm.serverIds" placeholder="多个 ID 使用英文逗号分隔，留空表示不额外限制" /></el-form-item>
+          <el-form-item label="有效期"><el-input-number v-model="tokenForm.expiresInDays" :min="0" :max="3650" /><span class="field-suffix">天，0 表示永不过期</span></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="tokenDialog = false">取消</el-button><el-button type="primary" :loading="tokenSaving" @click="createApiToken">创建并显示 Token</el-button></template>
+      </el-dialog>
+
+      <el-dialog :model-value="Boolean(createdToken)" title="保存 API Token 明文" width="min(620px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) createdToken = null }">
+        <div v-if="createdToken" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>关闭窗口后无法再次查看，请立即复制并保存到安全的密钥管理器。</span></p></div><dl><div><dt>Token</dt><dd class="mono-value">{{ createdToken.secret }}</dd></div><div><dt>权限</dt><dd>{{ createdToken.token.scopes.join('、') }}</dd></div></dl></div>
+        <template #footer><el-button @click="createdToken = null">我已保存</el-button><el-button type="primary" @click="copyApiToken"><Copy :size="16" />复制 Token</el-button></template>
+      </el-dialog>
     </template>
   </section>
 </template>

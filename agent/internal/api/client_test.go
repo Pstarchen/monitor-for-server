@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"guanlan-monitor/agent/internal/model"
 )
 
 func TestClientSendsDeviceCredentialsAndPayload(t *testing.T) {
@@ -24,6 +26,33 @@ func TestClientSendsDeviceCredentialsAndPayload(t *testing.T) {
 
 	client := NewClient(server.URL, "device-1", "agent-key", time.Second)
 	if err := client.Send(context.Background(), []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientPollsAndSubmitsTaskResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/agent/v1/tasks/next" {
+			if request.Header.Get("X-Device-Id") != "device-1" || request.Header.Get("X-Agent-Key") != "agent-key" {
+				t.Error("missing task credentials")
+			}
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{"id":7,"command":"printf","args":["ok"],"timeoutSeconds":2,"maxOutputBytes":1024}`))
+			return
+		}
+		if request.URL.Path != "/api/agent/v1/tasks/7/result" || request.Method != http.MethodPost {
+			t.Errorf("unexpected request %s %s", request.Method, request.URL.Path)
+		}
+		response.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "device-1", "agent-key", time.Second)
+	task, err := client.PollTask(context.Background())
+	if err != nil || task == nil || task.ID != 7 {
+		t.Fatalf("poll task = %#v, err = %v", task, err)
+	}
+	if err := client.SendTaskResult(context.Background(), task.ID, model.TaskResult{Status: "SUCCEEDED"}); err != nil {
 		t.Fatal(err)
 	}
 }

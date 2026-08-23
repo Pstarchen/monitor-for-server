@@ -59,6 +59,8 @@ public class MetricService {
         metric.setDiskWriteBps(disks.stream().mapToDouble(disk -> nonNegativeFinite(disk.writeBytesPerSec())).max().orElse(0));
         metric.setNetworkSentBps(nonNegativeFinite(report.network().bytesSentPerSec()));
         metric.setNetworkRecvBps(nonNegativeFinite(report.network().bytesRecvPerSec()));
+        metric.setNetworkSentBytes(Math.max(0, report.network().bytesSent()));
+        metric.setNetworkRecvBytes(Math.max(0, report.network().bytesRecv()));
         metric.setTcpConnections(Math.max(0, report.network().tcpConnections()));
         metric.setDisksJson(json(disks));
         metric.setProcessesJson(json(report.processes() == null ? List.of() : report.processes()));
@@ -95,7 +97,7 @@ public class MetricService {
         catch (JsonProcessingException exception) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "监控数据序列化失败"); }
     }
 
-    private double clampPercent(double value) { return Math.min(100, Math.max(0, value)); }
+    private double clampPercent(double value) { return Double.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0; }
     private double nonNegativeFinite(double value) { return Double.isFinite(value) ? Math.max(0, value) : 0; }
     private String join(String first, String second) { return ((first == null ? "" : first) + " " + (second == null ? "" : second)).trim(); }
 }

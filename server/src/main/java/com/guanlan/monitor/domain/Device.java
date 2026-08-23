@@ -44,6 +44,18 @@ public class Device {
     @Column(name = "group_name", length = 80)
     private String groupName;
 
+    @Column(name = "ddns_enabled", nullable = false)
+    private boolean ddnsEnabled;
+
+    @Column(name = "ddns_config_id")
+    private Long ddnsConfigId;
+
+    @Column(name = "last_ddns_ipv4", length = 64)
+    private String lastDdnsIpv4;
+
+    @Column(name = "last_ddns_ipv6", length = 64)
+    private String lastDdnsIpv6;
+
     @Column(name = "agent_key_hash", nullable = false, length = 100)
     private String agentKeyHash;
 
@@ -52,6 +64,9 @@ public class Device {
 
     @Column(name = "controller_managed", nullable = false)
     private boolean controllerManaged;
+
+    @Column(name = "public_visible", nullable = false)
+    private boolean publicVisible = true;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

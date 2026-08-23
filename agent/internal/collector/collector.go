@@ -219,10 +219,17 @@ func collectNetwork(ctx context.Context, skipConnectionCount bool) (model.Networ
 		connections, _ := netstat.ConnectionsWithContext(ctx, "tcp")
 		result.TCPConnections = len(connections)
 	}
-	if len(counters) == 0 {
-		return result, 0, 0
+	result.BytesSent, result.BytesRecv = aggregateNetworkCounters(counters)
+	return result, result.BytesSent, result.BytesRecv
+}
+
+func aggregateNetworkCounters(counters []netstat.IOCountersStat) (uint64, uint64) {
+	var sent, received uint64
+	for _, counter := range counters {
+		sent += counter.BytesSent
+		received += counter.BytesRecv
 	}
-	return result, counters[0].BytesSent, counters[0].BytesRecv
+	return sent, received
 }
 
 func allowedMountpoint(mountpoint string, allowlist []string) bool {
