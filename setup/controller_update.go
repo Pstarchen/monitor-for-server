@@ -23,6 +23,7 @@ const (
 	controllerUpdateCheckTimeout       = 15 * time.Minute
 	controllerUpdateApplyTimeout       = 45 * time.Minute
 	controllerUpdateRunnerStartTimeout = 30 * time.Second
+	controllerUpdateRunnerGracePeriod  = 2 * time.Minute
 	controllerUpdateInspectTimeout     = 2 * time.Second
 	controllerUpdateInspectionCache    = 2 * time.Second
 	controllerUpdateCheckStaleAfter    = 20 * time.Minute
@@ -261,15 +262,49 @@ func (s *controllerUpdateService) launchUpdateRunner() {
 	command := exec.CommandContext(ctx, "docker", args...)
 	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
 	output, err := command.CombinedOutput()
-	if err == nil {
+	if err == nil && s.waitForUpdateRunner() {
+		return
+	}
+	state := s.readState()
+	// A detached Docker run can succeed even when the container exits before
+	// the update-runner entrypoint starts. Do not leave the durable state stuck
+	// in UPDATING in that case.
+	if state.State != "UPDATING" {
 		return
 	}
 	log.Printf("controller update runner start failed: %v (%d bytes)", err, len(output))
-	state := s.readState()
 	state.State = "ERROR"
 	state.StartedAt = ""
 	state.Message = "更新任务启动失败，请检查 Docker 状态"
 	_ = writeControllerUpdateState(state)
+}
+
+func (s *controllerUpdateService) waitForUpdateRunner() bool {
+	deadline := time.Now().Add(controllerUpdateRunnerStartTimeout)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		status, known := controllerUpdateRunnerStatus()
+		if !known {
+			if time.Now().After(deadline) {
+				return false
+			}
+			<-ticker.C
+			continue
+		}
+		switch status {
+		case "":
+			return false
+		case "created", "running", "restarting", "paused":
+			return true
+		case "exited", "dead", "removing":
+			return false
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		<-ticker.C
+	}
 }
 
 func (s *controllerUpdateService) runUpdate() error {
@@ -310,11 +345,12 @@ func (s *controllerUpdateService) snapshot() controllerUpdateState {
 	s.mu.Lock()
 	running := s.running
 	s.mu.Unlock()
-	if !running && s.isStale(state) {
+	runnerMissing := !running && s.updateRunnerMissing(state)
+	if !running && (s.isStale(state) || runnerMissing) {
 		state.State = "ERROR"
 		state.StartedAt = ""
 		state.UpdateAvailable = false
-		state.Message = "上次更新任务已超时，状态已恢复，请重新检查"
+		state.Message = updateRecoveryMessage(runnerMissing)
 		if err := writeControllerUpdateState(state); err != nil {
 			log.Printf("controller stale update state write failed: %v", err)
 		}
@@ -325,16 +361,43 @@ func (s *controllerUpdateService) snapshot() controllerUpdateState {
 
 func (s *controllerUpdateService) recoverStaleState() {
 	state := s.readState()
-	if !s.isStale(state) {
+	runnerMissing := s.updateRunnerMissing(state)
+	if !s.isStale(state) && !runnerMissing {
 		return
 	}
 	state.State = "ERROR"
 	state.StartedAt = ""
 	state.UpdateAvailable = false
-	state.Message = "上次更新任务已超时，状态已恢复，请重新检查"
+	state.Message = updateRecoveryMessage(runnerMissing)
 	if err := writeControllerUpdateState(state); err != nil {
 		log.Printf("controller startup state recovery failed: %v", err)
 	}
+}
+
+func updateRecoveryMessage(runnerMissing bool) string {
+	if runnerMissing {
+		return "上次更新任务已中断，状态已恢复，请重新检查"
+	}
+	return "上次更新任务已超时，状态已恢复，请重新检查"
+}
+
+func (s *controllerUpdateService) updateRunnerMissing(state controllerUpdateState) bool {
+	if state.State != "UPDATING" || !s.updateRunnerStartExpired(state) {
+		return false
+	}
+	status, known := controllerUpdateRunnerStatus()
+	return known && (status == "" || status == "created" || status == "exited" || status == "dead" || status == "removing")
+}
+
+func (s *controllerUpdateService) updateRunnerStartExpired(state controllerUpdateState) bool {
+	if state.State != "UPDATING" || state.StartedAt == "" {
+		return false
+	}
+	started, err := time.Parse(time.RFC3339, state.StartedAt)
+	if err != nil {
+		return false
+	}
+	return s.currentTime().UTC().Sub(started) > controllerUpdateRunnerGracePeriod
 }
 
 func (s *controllerUpdateService) isStale(state controllerUpdateState) bool {
@@ -515,6 +578,22 @@ func updateControllerCommand(ctx context.Context, mode string) *exec.Cmd {
 
 func controllerUpdateRunnerArgs() []string {
 	return []string{"run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "--name", controllerUpdateRunnerName, "setup", "update-runner"}
+}
+
+func controllerUpdateRunnerStatus() (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateInspectTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, "docker", "ps", "-aq", "--filter", "name="+controllerUpdateRunnerName, "--format", "{{.ID}}")
+	output, err := command.Output()
+	if err != nil {
+		return "", false
+	}
+	containerID := strings.TrimSpace(string(output))
+	if containerID == "" {
+		return "", true
+	}
+	status := commandOutput("docker", "inspect", "--format", "{{.State.Status}}", containerID)
+	return status, status != ""
 }
 
 func composeBaseArgs() []string {

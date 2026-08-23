@@ -100,6 +100,21 @@ func TestControllerUpdateStateExpiryIsRecoverable(t *testing.T) {
 	}
 }
 
+func TestControllerUpdateRunnerStartExpiry(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	service := &controllerUpdateService{now: func() time.Time { return now }}
+
+	if service.updateRunnerStartExpired(controllerUpdateState{State: "UPDATING", StartedAt: now.Add(-controllerUpdateRunnerGracePeriod + time.Second).Format(time.RFC3339)}) {
+		t.Fatal("runner start grace period expired too early")
+	}
+	if !service.updateRunnerStartExpired(controllerUpdateState{State: "UPDATING", StartedAt: now.Add(-controllerUpdateRunnerGracePeriod - time.Second).Format(time.RFC3339)}) {
+		t.Fatal("missing runner was not eligible for recovery")
+	}
+	if service.updateRunnerStartExpired(controllerUpdateState{State: "CHECKING", StartedAt: now.Add(-controllerUpdateRunnerGracePeriod - time.Second).Format(time.RFC3339)}) {
+		t.Fatal("checking state was treated as a runner update")
+	}
+}
+
 func TestControllerUpdateSnapshotClearsExpiredState(t *testing.T) {
 	originalWorkspace, originalEnvPath, originalStatePath := workspace, envPath, controllerUpdateStatePath
 	workspace = t.TempDir()
