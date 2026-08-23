@@ -177,6 +177,21 @@ Agent 端配置：
 
 常用 scope 为 `nezha:inventory:read`（设备清单）、`nezha:server:read`（设备指标）、`nezha:service:read`（服务监控）、`nezha:alert:read`（告警读取）和对应的 `write` / `delete` / `exec` 权限。`nezha:admin:*` 与 `nezha:*` 仅管理员可以签发。
 
+#### 鸿蒙扫码绑定
+
+创建 Token 后，控制台可生成鸿蒙 App 扫码绑定二维码。二维码内容是 UTF-8 JSON，不会写入服务端；其中的 `token` 与创建响应中仅展示一次的明文相同：
+
+```json
+{
+  "type": "xingchenyunxun-bind",
+  "baseUrl": "https://monitor.example.com",
+  "token": "nzp_...",
+  "scopes": ["nezha:inventory:read", "nezha:server:read", "nezha:alert:read"]
+}
+```
+
+鸿蒙 App 应只接受 `type` 为 `xingchenyunxun-bind` 的数据，保存前确认 `baseUrl`，并将 Token 存入系统安全存储。二维码和 Token 明文具有相同权限，不应转发、截图或长期保留；建议移动端 Token 保持最小只读 scope 并设置有效期。
+
 ### MCP HTTP
 
 MCP 默认关闭。设置 `ENABLE_MCP=true` 并重启服务后，使用 `Authorization: Bearer nzp_...` 向 `POST /mcp` 发送 Streamable HTTP JSON-RPC 请求；网页登录会话不会被接受。当前入口支持 `initialize`、`notifications/initialized`、`ping`、`tools/list`，以及 `meta.whoami`、`server.list`、`server.get`、`server.exec`、`fs.list`、`fs.read`、`fs.write`、`fs.delete` 工具。命令和文件操作会复用任务队列，返回任务 ID；MCP 会短暂等待快速完成的任务，超时仍返回任务状态，之后可通过任务 API 查询输出。

@@ -65,7 +65,7 @@ export const apiTokenScopeGroups: readonly ApiTokenScopeGroup[] = [
 
 export const apiTokenScopeOptions: readonly ApiTokenScopeOption[] = apiTokenScopeGroups.flatMap((group) => group.options)
 
-export const defaultApiTokenScopes = ['nezha:inventory:read'] as const
+export const defaultApiTokenScopes = ['nezha:inventory:read', 'nezha:server:read', 'nezha:alert:read'] as const
 
 export function visibleApiTokenScopes(isAdmin: boolean): readonly ApiTokenScopeOption[] {
   return isAdmin ? apiTokenScopeOptions : apiTokenScopeOptions.filter(([value]) => value !== ADMIN_SCOPE)

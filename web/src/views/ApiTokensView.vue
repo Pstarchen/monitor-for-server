@@ -5,12 +5,14 @@ import { CheckCircle2, Copy, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-
 import PageHeader from '@/components/PageHeader.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import LoadingState from '@/components/LoadingState.vue'
+import MobileBindingPanel from '@/components/MobileBindingPanel.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { dateTime } from '@/lib/format'
 import { apiTokenScopeLabel, visibleApiTokenScopeGroups } from '@/lib/api-token-scopes'
 import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
+import { createMobileBindingQrCode, resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiToken, CreatedApiToken } from '@/types'
 
@@ -20,11 +22,14 @@ const loading = ref(true)
 const saving = ref(false)
 const dialog = ref(false)
 const created = ref<CreatedApiToken | null>(null)
+const qrCode = ref('')
+const qrCodeError = ref('')
 const form = reactive(createDefaultApiTokenForm())
 const copied = ref(false)
 const canAdmin = computed(() => auth.user?.role === 'ADMIN')
 const scopeGroups = computed(() => visibleApiTokenScopeGroups(canAdmin.value))
 const selectedScopeCount = computed(() => form.scopes.length)
+const mobileBindingBaseUrl = computed(() => resolveMobileBindingBaseUrl(undefined, window.location.origin))
 
 async function load() {
   loading.value = true
@@ -39,12 +44,16 @@ async function load() {
 
 function openCreate() {
   Object.assign(form, createDefaultApiTokenForm())
+  qrCode.value = ''
+  qrCodeError.value = ''
   dialog.value = true
 }
 
 function closeCreated() {
   created.value = null
   copied.value = false
+  qrCode.value = ''
+  qrCodeError.value = ''
 }
 
 async function createToken() {
@@ -54,21 +63,31 @@ async function createToken() {
   }
   saving.value = true
   try {
-    created.value = (await api.post<CreatedApiToken>('/api-tokens', {
+    const result = (await api.post<CreatedApiToken>('/api-tokens', {
       name: form.name.trim(),
       scopes: [...form.scopes],
       serverIds: parseServerIds(form.serverIds),
       expiresInDays: Number(form.expiresInDays) || 0,
     })).data
+    created.value = result
     copied.value = false
     dialog.value = false
     await load()
-    ElMessage.success('API Token 已创建，请立即复制明文')
   } catch (cause) {
     ElMessage.error(errorMessage(cause))
+    return
   } finally {
     saving.value = false
   }
+
+  try {
+    qrCode.value = await createMobileBindingQrCode(mobileBindingBaseUrl.value, created.value.secret, created.value.token.scopes)
+    qrCodeError.value = ''
+  } catch {
+    qrCode.value = ''
+    qrCodeError.value = '二维码生成失败，请复制下方 Token 后在 App 中手动绑定。'
+  }
+  ElMessage.success('API Token 已创建，请立即完成绑定或复制明文')
 }
 
 async function copyCreated() {
@@ -105,7 +124,7 @@ onMounted(load)
     <article class="panel token-settings">
       <div class="token-security-grid" role="list" aria-label="Token 安全策略">
         <div class="token-security-item" role="listitem"><span><KeyRound :size="16" /></span><div><strong>明文只出现一次</strong><p>创建成功后立即复制，关闭窗口后无法恢复。</p></div></div>
-        <div class="token-security-item" role="listitem"><span><CheckCircle2 :size="16" /></span><div><strong>默认只读</strong><p>新 Token 仅预选设备清单读取权限。</p></div></div>
+        <div class="token-security-item" role="listitem"><span><CheckCircle2 :size="16" /></span><div><strong>默认只读</strong><p>新 Token 预选移动端查看所需的设备、指标和告警读取权限。</p></div></div>
         <div class="token-security-item" role="listitem"><span><ShieldCheck :size="16" /></span><div><strong>可限制服务器</strong><p>填写白名单后，Token 只能访问这些服务器。</p></div></div>
       </div>
       <LoadingState v-if="loading" />
@@ -138,11 +157,11 @@ onMounted(load)
         <el-form-item label="服务器 ID 白名单"><el-input v-model="form.serverIds" type="textarea" :rows="3" resize="vertical" placeholder="每行或使用英文逗号分隔，例如：node-a, node-b" /><p class="token-field-help">留空表示不限制服务器；填写后，Token 只能访问列出的设备 ID。</p></el-form-item>
         <el-form-item label="有效期"><div class="token-expiry-control"><el-input-number v-model="form.expiresInDays" :min="0" :max="3650" /><span class="field-suffix">天，0 表示永不过期</span></div></el-form-item>
       </el-form>
-      <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="createToken">创建并显示一次性 Token</el-button></template>
+      <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="createToken">创建并显示 Token</el-button></template>
     </el-dialog>
 
     <el-dialog :model-value="Boolean(created)" title="立即保存 API Token" width="min(620px, calc(100vw - 28px))" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
-      <div v-if="created" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>请复制并保存到安全的密钥管理器。点击“我已保存”后，页面不会再次提供明文。</span></p></div><div class="credential-secret"><span>Token 明文</span><code>{{ created.secret }}</code></div><dl><div><dt>Token 名称</dt><dd>{{ created.token.name }}</dd></div><div><dt>权限范围</dt><dd><span v-for="scope in created.token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></dd></div><div><dt>服务器范围</dt><dd>{{ created.token.serverIds.length ? `${created.token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</dd></div></dl></div>
+      <div v-if="created" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>请立即完成鸿蒙 App 绑定，或复制并保存到安全的密钥管理器。二维码与 Token 拥有相同权限，关闭窗口后无法恢复。</span></p></div><MobileBindingPanel :base-url="mobileBindingBaseUrl" :qr-code="qrCode" :scopes="created.token.scopes" :error="qrCodeError" /><div class="credential-secret"><span>Token 明文</span><code>{{ created.secret }}</code></div><dl><div><dt>Token 名称</dt><dd>{{ created.token.name }}</dd></div><div><dt>权限范围</dt><dd><span v-for="scope in created.token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></dd></div><div><dt>服务器范围</dt><dd>{{ created.token.serverIds.length ? `${created.token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</dd></div></dl></div>
       <template #footer><el-button @click="closeCreated">我已保存</el-button><el-button type="primary" @click="copyCreated"><CheckCircle2 v-if="copied" :size="16" /><Copy v-else :size="16" />{{ copied ? '已复制 Token' : '复制 Token' }}</el-button></template>
     </el-dialog>
   </section>
