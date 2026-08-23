@@ -45,12 +45,13 @@ run_with_timeout() {
   if command -v timeout >/dev/null 2>&1; then
     if timeout "${seconds}s" "$@"; then
       return 0
+    else
+      status=$?
+      if [[ "${status}" -eq 124 ]]; then
+        echo "Docker 命令超过 ${seconds} 秒，已终止：$*" >&2
+      fi
+      return "${status}"
     fi
-    status=$?
-    if [[ "${status}" -eq 124 ]]; then
-      echo "Docker 命令超过 ${seconds} 秒，已终止：$*" >&2
-    fi
-    return "${status}"
   fi
   "$@"
 }
