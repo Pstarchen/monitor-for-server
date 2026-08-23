@@ -84,3 +84,46 @@ func TestNextAutoUpdateUsesConfiguredLocalTime(t *testing.T) {
 		t.Fatalf("nextAutoUpdate() = %q", got)
 	}
 }
+
+func TestControllerUpdateStateExpiryIsRecoverable(t *testing.T) {
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	service := &controllerUpdateService{now: func() time.Time { return now }}
+
+	if !service.isStale(controllerUpdateState{State: "UPDATING", StartedAt: now.Add(-controllerUpdateApplyStaleAfter - time.Minute).Format(time.RFC3339)}) {
+		t.Fatal("expired update state was not considered stale")
+	}
+	if service.isStale(controllerUpdateState{State: "UPDATING", StartedAt: now.Add(-time.Minute).Format(time.RFC3339)}) {
+		t.Fatal("active update state was incorrectly considered stale")
+	}
+	if !service.isStale(controllerUpdateState{State: "UPDATING"}) {
+		t.Fatal("legacy update state without a start time was not recoverable")
+	}
+}
+
+func TestControllerUpdateSnapshotClearsExpiredState(t *testing.T) {
+	originalWorkspace, originalEnvPath, originalStatePath := workspace, envPath, controllerUpdateStatePath
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+	t.Cleanup(func() {
+		workspace, envPath, controllerUpdateStatePath = originalWorkspace, originalEnvPath, originalStatePath
+		invalidateControllerInspectionCache()
+	})
+	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
+	if err := writeControllerUpdateState(controllerUpdateState{State: "UPDATING", StartedAt: now.Add(-controllerUpdateApplyStaleAfter - time.Minute).Format(time.RFC3339), Services: []controllerServiceStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	controllerInspectionCache.Lock()
+	controllerInspectionCache.at = time.Now()
+	controllerInspectionCache.value = controllerInspection{services: []controllerServiceStatus{}}
+	controllerInspectionCache.Unlock()
+
+	state := (&controllerUpdateService{now: func() time.Time { return now }}).snapshot()
+	if state.State != "ERROR" || state.StartedAt != "" {
+		t.Fatalf("expired snapshot = %+v, want recoverable error", state)
+	}
+	persisted := (&controllerUpdateService{now: func() time.Time { return now }}).readState()
+	if persisted.State != "ERROR" {
+		t.Fatalf("persisted state = %+v, want ERROR", persisted)
+	}
+}

@@ -6,6 +6,7 @@ Thumbs.db
 .env
 .setup-complete
 .controller-update-state.json
+.controller-update.lock
 *.log
 
 agent/bin/

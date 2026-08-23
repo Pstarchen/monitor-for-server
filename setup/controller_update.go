@@ -19,6 +19,16 @@ import (
 
 const controllerUpdateRunnerName = "guanlan-controller-update-run"
 
+const (
+	controllerUpdateCheckTimeout       = 15 * time.Minute
+	controllerUpdateApplyTimeout       = 45 * time.Minute
+	controllerUpdateRunnerStartTimeout = 30 * time.Second
+	controllerUpdateInspectTimeout     = 2 * time.Second
+	controllerUpdateInspectionCache    = 2 * time.Second
+	controllerUpdateCheckStaleAfter    = 20 * time.Minute
+	controllerUpdateApplyStaleAfter    = 75 * time.Minute
+)
+
 type controllerUpdateService struct {
 	mu      sync.Mutex
 	running bool
@@ -34,10 +44,23 @@ type controllerUpdateState struct {
 	Message          string                    `json:"message,omitempty"`
 	CheckedAt        string                    `json:"checkedAt,omitempty"`
 	UpdatedAt        string                    `json:"updatedAt,omitempty"`
+	StartedAt        string                    `json:"startedAt,omitempty"`
 	AutoUpdate       bool                      `json:"autoUpdate"`
 	NextAutoUpdateAt string                    `json:"nextAutoUpdateAt,omitempty"`
 	LastAutoRunDate  string                    `json:"lastAutoRunDate,omitempty"`
 	Services         []controllerServiceStatus `json:"services"`
+}
+
+type controllerInspection struct {
+	current  string
+	latest   string
+	services []controllerServiceStatus
+}
+
+var controllerInspectionCache struct {
+	sync.Mutex
+	at    time.Time
+	value controllerInspection
 }
 
 type controllerServiceStatus struct {
@@ -164,11 +187,12 @@ func (s *controllerUpdateService) begin(stateName, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.readState()
-	if s.running || state.State == "CHECKING" || state.State == "UPDATING" {
+	if s.running || ((state.State == "CHECKING" || state.State == "UPDATING") && !s.isStale(state)) {
 		return errUpdateRunning
 	}
 	s.running = true
 	state.State = stateName
+	state.StartedAt = s.currentTime().UTC().Format(time.RFC3339)
 	state.Message = message
 	state.UpdateAvailable = false
 	s.decorate(&state)
@@ -187,19 +211,22 @@ func (s *controllerUpdateService) finish() {
 
 func (s *controllerUpdateService) runCheck() {
 	defer s.finish()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateCheckTimeout)
 	defer cancel()
 	command := updateControllerCommand(ctx, "--check")
 	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
 	output, err := command.CombinedOutput()
 	state := s.readState()
-	state.CheckedAt = s.now().UTC().Format(time.RFC3339)
+	state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
 	if err != nil {
 		log.Printf("controller update check failed: %v (%d bytes)", err, len(output))
 		state.State = "ERROR"
+		state.StartedAt = ""
 		state.Message = "检查更新失败，请检查镜像源与 Docker 状态"
 	} else {
 		state.State = "IDLE"
+		state.StartedAt = ""
+		invalidateControllerInspectionCache()
 		s.decorate(&state)
 		state.Message = map[bool]string{true: "发现可用的总控更新", false: "当前已经是最新版本"}[state.UpdateAvailable]
 	}
@@ -220,23 +247,28 @@ func (s *controllerUpdateService) startUpdate(automatic bool) error {
 			return fmt.Errorf("save automatic update state: %w", err)
 		}
 	}
+	go s.launchUpdateRunner()
+	return nil
+}
+
+func (s *controllerUpdateService) launchUpdateRunner() {
+	defer s.finish()
 	args := composeBaseArgs()
 	args = append(args, controllerUpdateRunnerArgs()...)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateRunnerStartTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "docker", args...)
 	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
 	output, err := command.CombinedOutput()
-	s.finish()
 	if err == nil {
-		return nil
+		return
 	}
 	log.Printf("controller update runner start failed: %v (%d bytes)", err, len(output))
-	state = s.readState()
+	state := s.readState()
 	state.State = "ERROR"
+	state.StartedAt = ""
 	state.Message = "更新任务启动失败，请检查 Docker 状态"
 	_ = writeControllerUpdateState(state)
-	return errors.New(state.Message)
 }
 
 func (s *controllerUpdateService) runUpdate() error {
@@ -246,7 +278,7 @@ func (s *controllerUpdateService) runUpdate() error {
 	s.decorate(&state)
 	_ = writeControllerUpdateState(state)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateApplyTimeout)
 	defer cancel()
 	command := updateControllerCommand(ctx, "--apply")
 	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
@@ -255,14 +287,17 @@ func (s *controllerUpdateService) runUpdate() error {
 	if err != nil {
 		log.Printf("controller update failed: %v (%d bytes)", err, len(output))
 		state.State = "ERROR"
+		state.StartedAt = ""
 		state.Message = "总控更新失败，现有数据未被删除"
 		_ = writeControllerUpdateState(state)
 		return errors.New(state.Message)
 	}
 	state.State = "IDLE"
+	state.StartedAt = ""
 	state.Message = "总控服务已更新"
-	state.UpdatedAt = s.now().UTC().Format(time.RFC3339)
+	state.UpdatedAt = s.currentTime().UTC().Format(time.RFC3339)
 	state.CheckedAt = state.UpdatedAt
+	invalidateControllerInspectionCache()
 	s.decorate(&state)
 	state.LatestRevision = state.CurrentRevision
 	state.UpdateAvailable = false
@@ -271,8 +306,45 @@ func (s *controllerUpdateService) runUpdate() error {
 
 func (s *controllerUpdateService) snapshot() controllerUpdateState {
 	state := s.readState()
+	s.mu.Lock()
+	running := s.running
+	s.mu.Unlock()
+	if !running && s.isStale(state) {
+		state.State = "ERROR"
+		state.StartedAt = ""
+		state.UpdateAvailable = false
+		state.Message = "上次更新任务已超时，状态已恢复，请重新检查"
+		if err := writeControllerUpdateState(state); err != nil {
+			log.Printf("controller stale update state write failed: %v", err)
+		}
+	}
 	s.decorate(&state)
 	return state
+}
+
+func (s *controllerUpdateService) isStale(state controllerUpdateState) bool {
+	if state.State != "CHECKING" && state.State != "UPDATING" {
+		return false
+	}
+	if state.StartedAt == "" {
+		return true
+	}
+	started, err := time.Parse(time.RFC3339, state.StartedAt)
+	if err != nil {
+		return true
+	}
+	limit := controllerUpdateCheckStaleAfter
+	if state.State == "UPDATING" {
+		limit = controllerUpdateApplyStaleAfter
+	}
+	return s.currentTime().UTC().Sub(started) > limit
+}
+
+func (s *controllerUpdateService) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 func (s *controllerUpdateService) decorate(state *controllerUpdateState) {
@@ -322,36 +394,72 @@ func writeControllerUpdateState(state controllerUpdateState) error {
 }
 
 func inspectControllerImages() (string, string, []controllerServiceStatus) {
+	controllerInspectionCache.Lock()
+	if !controllerInspectionCache.at.IsZero() && time.Since(controllerInspectionCache.at) < controllerUpdateInspectionCache {
+		value := controllerInspectionCache.value
+		controllerInspectionCache.Unlock()
+		return value.current, value.latest, append([]controllerServiceStatus(nil), value.services...)
+	}
+	controllerInspectionCache.Unlock()
+
 	values, _ := readEnv()
 	statuses := make([]controllerServiceStatus, 0, len(controllerImages))
+	results := make([]struct {
+		status  controllerServiceStatus
+		current string
+		latest  string
+	}, len(controllerImages))
+	var wait sync.WaitGroup
+	for index, image := range controllerImages {
+		wait.Add(1)
+		go func(index int, image controllerImage) {
+			defer wait.Done()
+			composeArgs := append(composeBaseArgs(), "ps", "-q", image.service)
+			containerID := commandOutput("docker", composeArgs...)
+			current := ""
+			health := "not_found"
+			if containerID != "" {
+				current = inspectReference(containerID, false)
+				health = commandOutput("docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", containerID)
+			}
+			imageReference := strings.TrimSpace(os.Getenv(image.environment))
+			if imageReference == "" {
+				imageReference = strings.TrimSpace(values[image.environment])
+			}
+			if imageReference == "" {
+				imageReference = image.defaultImage
+			}
+			results[index] = struct {
+				status  controllerServiceStatus
+				current string
+				latest  string
+			}{controllerServiceStatus{Name: image.service, Revision: current, Health: health}, current, inspectReference(imageReference, true)}
+		}(index, image)
+	}
+	wait.Wait()
 	currentRevision := ""
 	latestRevision := ""
-	for _, image := range controllerImages {
-		composeArgs := append(composeBaseArgs(), "ps", "-q", image.service)
-		containerID := commandOutput("docker", composeArgs...)
-		current := ""
-		health := "not_found"
-		if containerID != "" {
-			current = inspectReference(containerID, false)
-			health = commandOutput("docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", containerID)
+	for _, result := range results {
+		statuses = append(statuses, result.status)
+		if result.status.Name == "server" || currentRevision == "" {
+			currentRevision = result.current
 		}
-		imageReference := strings.TrimSpace(os.Getenv(image.environment))
-		if imageReference == "" {
-			imageReference = strings.TrimSpace(values[image.environment])
-		}
-		if imageReference == "" {
-			imageReference = image.defaultImage
-		}
-		latest := inspectReference(imageReference, true)
-		statuses = append(statuses, controllerServiceStatus{Name: image.service, Revision: current, Health: health})
-		if image.service == "server" || currentRevision == "" {
-			currentRevision = current
-		}
-		if image.service == "server" || latestRevision == "" {
-			latestRevision = latest
+		if result.status.Name == "server" || latestRevision == "" {
+			latestRevision = result.latest
 		}
 	}
+	value := controllerInspection{current: currentRevision, latest: latestRevision, services: append([]controllerServiceStatus(nil), statuses...)}
+	controllerInspectionCache.Lock()
+	controllerInspectionCache.at = time.Now()
+	controllerInspectionCache.value = value
+	controllerInspectionCache.Unlock()
 	return currentRevision, latestRevision, statuses
+}
+
+func invalidateControllerInspectionCache() {
+	controllerInspectionCache.Lock()
+	controllerInspectionCache.at = time.Time{}
+	controllerInspectionCache.Unlock()
 }
 
 func inspectReference(reference string, image bool) string {
@@ -376,7 +484,7 @@ func inspectReference(reference string, image bool) string {
 }
 
 func commandOutput(name string, args ...string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateInspectTimeout)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, name, args...).Output()
 	if err != nil {
@@ -474,7 +582,7 @@ func (s *controllerUpdateService) localNow() time.Time {
 	if err != nil {
 		location = time.Local
 	}
-	return s.now().In(location)
+	return s.currentTime().In(location)
 }
 
 func (s *controllerUpdateService) nextAutoUpdate() time.Time {

@@ -32,9 +32,41 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
 cd "${project_root}"
 
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
+compose_timeout_seconds="${GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-360}"
+if [[ ! "${pull_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${compose_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "更新超时必须是正整数秒数。" >&2
+  exit 2
+fi
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    if timeout "${seconds}s" "$@"; then
+      return 0
+    fi
+    status=$?
+    if [[ "${status}" -eq 124 ]]; then
+      echo "Docker 命令超过 ${seconds} 秒，已终止：$*" >&2
+    fi
+    return "${status}"
+  fi
+  "$@"
+}
+
+if ! run_with_timeout "${pull_timeout_seconds}" docker compose version >/dev/null 2>&1; then
   echo "Docker Engine and Docker Compose v2 are required." >&2
   exit 1
+fi
+
+lock_file="${project_root}/.controller-update.lock"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"${lock_file}"
+  if ! flock -n 9; then
+    echo "已有总控更新任务正在执行，请稍后重试。" >&2
+    exit 75
+  fi
 fi
 
 read_env_value() {
@@ -80,13 +112,13 @@ pull_one() {
       [[ -z "${prefix}" ]] && continue
       candidate="${prefix}/${suffix}"
       echo "尝试国内镜像源：${candidate}"
-      if docker pull "${candidate}" >/dev/null && docker tag "${candidate}" "${image}"; then
+      if run_with_timeout "${pull_timeout_seconds}" docker pull "${candidate}" >/dev/null && run_with_timeout "${pull_timeout_seconds}" docker tag "${candidate}" "${image}"; then
         return 0
       fi
     done
   fi
   echo "尝试官方镜像源：${image}"
-  docker pull "${image}"
+  run_with_timeout "${pull_timeout_seconds}" docker pull "${image}"
 }
 
 pull_images() {
@@ -121,7 +153,7 @@ configure_auto_update() {
   if [[ "$(uname -s)" == "Linux" && "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl disable --now guanlan-controller-update.timer >/dev/null 2>&1 || true
   fi
-  docker compose "${compose_args[@]}" up -d --no-deps setup
+  run_with_timeout "${compose_timeout_seconds}" docker compose "${compose_args[@]}" up -d --no-deps --wait --wait-timeout 300 setup
   echo "总控自动更新已启用：每天 04:00 按 APP_TIMEZONE 执行。"
 }
 
@@ -132,7 +164,7 @@ fi
 
 if [[ "${build}" == true ]]; then
   echo "使用本地源码构建总控镜像..."
-  docker compose "${compose_args[@]}" build --pull "${services[@]}"
+  run_with_timeout "${compose_timeout_seconds}" docker compose "${compose_args[@]}" build --pull "${services[@]}"
 else
   pull_images
 fi
@@ -142,9 +174,9 @@ if [[ "${mode}" == check ]]; then
   exit 0
 fi
 
-compose_up_args=(up -d)
+compose_up_args=(up -d --wait --wait-timeout 300)
 if [[ "${CONTROLLER_UPDATE_RUNNER:-false}" != true ]]; then
   compose_up_args+=(--remove-orphans)
 fi
-docker compose "${compose_args[@]}" "${compose_up_args[@]}" "${services[@]}"
+run_with_timeout "${compose_timeout_seconds}" docker compose "${compose_args[@]}" "${compose_up_args[@]}" "${services[@]}"
 echo "总控服务已更新并重启。"

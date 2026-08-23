@@ -14,8 +14,21 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安�
 if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
 
 if (-not $Check -and -not $Apply) { $Check = $true }
+$pullTimeoutSeconds = if ($env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS } else { 120 }
+$composeTimeoutSeconds = if ($env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS } else { 360 }
+if ($pullTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
+$env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
+$env:COMPOSE_HTTP_TIMEOUT = [string]$composeTimeoutSeconds
 Push-Location $projectRoot
+$lockPath = Join-Path $projectRoot '.controller-update.lock'
+$lockStream = $null
 try {
+    try {
+        $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    }
+    catch [System.IO.IOException] {
+        throw '已有总控更新任务正在执行，请稍后重试。'
+    }
     $composeArgs = @()
     $envFile = Join-Path $projectRoot '.env'
     if (Test-Path -LiteralPath $envFile) { $composeArgs += @('--env-file', $envFile) }
@@ -42,7 +55,7 @@ try {
         if (Get-ScheduledTask -TaskName 'GuanlanControllerUpdate' -ErrorAction SilentlyContinue) {
             Unregister-ScheduledTask -TaskName 'GuanlanControllerUpdate' -Confirm:$false
         }
-        & docker compose @composeArgs up -d --no-deps setup
+        & docker compose @composeArgs up -d --no-deps --wait --wait-timeout 300 setup
         if ($LASTEXITCODE -ne 0) { throw '自动更新设置已保存，但 setup 服务启动失败。' }
         Write-Host '总控自动更新已启用：每天 04:00 按 APP_TIMEZONE 执行。'
         exit 0
@@ -93,7 +106,7 @@ try {
         }
     }
     if ($Apply) {
-        & docker compose @composeArgs up -d --remove-orphans $services
+        & docker compose @composeArgs up -d --remove-orphans --wait --wait-timeout 300 $services
         if ($LASTEXITCODE -ne 0) { throw '总控服务更新失败。' }
         Write-Host '总控服务已更新并重启。'
     }
@@ -101,4 +114,7 @@ try {
         Write-Host '总控镜像检查完成；如需使新镜像生效，请运行：.\deploy\update-controller.ps1 -Apply'
     }
 }
-finally { Pop-Location }
+finally {
+    if ($lockStream) { $lockStream.Dispose() }
+    Pop-Location
+}

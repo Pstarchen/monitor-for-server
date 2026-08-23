@@ -282,6 +282,11 @@ install_agent_updater() {
     printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
     printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.m.daocloud.io,ghcr.1ms.run}")"
     printf '%s\n' \
+      'if command -v flock >/dev/null 2>&1; then lock_path="/run/lock/guanlan-agent-update.lock"; mkdir -p "$(dirname "${lock_path}")"; exec 9>"${lock_path}"; flock -n 9 || { echo "Agent 更新任务正在执行。" >&2; exit 75; }; fi' \
+      'run_with_timeout() {' \
+      '  local seconds="$1"; shift' \
+      '  if command -v timeout >/dev/null 2>&1; then timeout "${seconds}s" "$@"; else "$@"; fi' \
+      '}' \
       'pull_image() {' \
       '  local suffix prefix candidate' \
       '  if [[ "${image}" == ghcr.io/* ]]; then' \
@@ -290,20 +295,39 @@ install_agent_updater() {
       '    for prefix in "${prefixes[@]}"; do' \
       '      prefix="${prefix%/}"; [[ -z "${prefix}" ]] && continue' \
       '      candidate="${prefix}/${suffix}"' \
-      '      if docker pull "${candidate}" >/dev/null && docker tag "${candidate}" "${image}"; then return 0; fi' \
+      '      if run_with_timeout 120 docker pull "${candidate}" >/dev/null && run_with_timeout 30 docker tag "${candidate}" "${image}"; then return 0; fi' \
       '    done' \
       '  fi' \
-      '  docker pull "${image}"' \
+      '  run_with_timeout 120 docker pull "${image}"' \
       '}' \
       'before="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
       'pull_image' \
       'after="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
       '[[ -n "${before}" && "${before}" == "${after}" ]] && exit 0' \
-      'docker rm -f "${container_name}" >/dev/null 2>&1 || true' \
-      'docker run -d --name "${container_name}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=/etc/guanlan-agent/agent.json,dst=/etc/guanlan-agent/agent.json,readonly" --mount "type=volume,src=${spool_volume},dst=/var/lib/guanlan-agent/spool" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${image}" -config /etc/guanlan-agent/agent.json >/dev/null'
+      'new_container="${container_name}.update"' \
+      'old_container="${container_name}.previous"' \
+      'docker rm -f "${new_container}" "${old_container}" >/dev/null 2>&1 || true' \
+      'old_exists=false' \
+      'if docker container inspect "${container_name}" >/dev/null 2>&1; then' \
+      '  docker rename "${container_name}" "${old_container}"' \
+      '  docker stop "${old_container}" >/dev/null 2>&1 || true' \
+      '  old_exists=true' \
+      'fi' \
+      'restore_old() {' \
+      '  docker rm -f "${new_container}" >/dev/null 2>&1 || true' \
+      '  if [[ "${old_exists}" == true ]]; then' \
+      '    docker rename "${old_container}" "${container_name}" >/dev/null 2>&1 || true' \
+      '    docker start "${container_name}" >/dev/null 2>&1 || true' \
+      '  fi' \
+      '}' \
+      'if ! run_with_timeout 30 docker run -d --name "${new_container}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=/etc/guanlan-agent/agent.json,dst=/etc/guanlan-agent/agent.json,readonly" --mount "type=volume,src=${spool_volume},dst=/var/lib/guanlan-agent/spool" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${image}" -config /etc/guanlan-agent/agent.json >/dev/null; then restore_old; exit 1; fi' \
+      'sleep 2' \
+      'if [[ "$(docker inspect --format "{{.State.Running}}" "${new_container}" 2>/dev/null || true)" != true ]]; then docker logs --tail 100 "${new_container}" >&2 || true; restore_old; exit 1; fi' \
+      'docker rm -f "${old_container}" >/dev/null 2>&1 || true' \
+      'docker rename "${new_container}" "${container_name}"'
   } > "${updater}"
   chmod 0755 "${updater}"
-  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent image' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' "ExecStart=${updater}" > "${service}"
+  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent image' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=10min' "ExecStart=${updater}" > "${service}"
   printf '%s\n' '[Unit]' 'Description=Periodic Guanlan Agent image update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
   systemctl daemon-reload
   systemctl enable --now guanlan-agent-update.timer >/dev/null
@@ -323,6 +347,7 @@ install_local_agent_updater() {
     printf 'service_name=%s\n' "$(shell_quote "guanlan-agent.service")"
     printf '%s\n' \
       'temp_dir="$(mktemp -d)"' \
+      'if command -v flock >/dev/null 2>&1; then lock_path="/run/lock/guanlan-agent-update.lock"; mkdir -p "$(dirname "${lock_path}")"; exec 9>"${lock_path}"; flock -n 9 || exit 75; fi' \
       'trap '\''rm -rf "${temp_dir}"'\'' EXIT' \
       'command -v git >/dev/null 2>&1 || exit 0' \
       'command -v go >/dev/null 2>&1 || exit 0' \
@@ -334,7 +359,7 @@ install_local_agent_updater() {
       'systemctl restart "${service_name}"'
   } > "${updater}"
   chmod 0755 "${updater}"
-  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent binary' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' "ExecStart=${updater}" > "${service}"
+  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent binary' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=15min' "ExecStart=${updater}" > "${service}"
   printf '%s\n' '[Unit]' 'Description=Periodic Guanlan Agent binary update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
   systemctl daemon-reload
   systemctl enable --now guanlan-agent-update.timer >/dev/null
