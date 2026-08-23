@@ -62,6 +62,7 @@ func main() {
 		controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
 	}
 	updater := newControllerUpdateService()
+	updater.recoverStaleState()
 	if len(os.Args) > 1 && os.Args[1] == "update-runner" {
 		if err := updater.runUpdate(); err != nil {
 			log.Fatal(err)

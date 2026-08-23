@@ -240,12 +240,13 @@ func (s *controllerUpdateService) startUpdate(automatic bool) error {
 		return err
 	}
 	state := s.readState()
-	if automatic {
-		state.LastAutoRunDate = s.localNow().Format("2006-01-02")
-		if err := writeControllerUpdateState(state); err != nil {
-			s.finish()
+	state.LastAutoRunDate = s.localNow().Format("2006-01-02")
+	if err := writeControllerUpdateState(state); err != nil {
+		s.finish()
+		if automatic {
 			return fmt.Errorf("save automatic update state: %w", err)
 		}
+		return fmt.Errorf("save update state: %w", err)
 	}
 	go s.launchUpdateRunner()
 	return nil
@@ -320,6 +321,20 @@ func (s *controllerUpdateService) snapshot() controllerUpdateState {
 	}
 	s.decorate(&state)
 	return state
+}
+
+func (s *controllerUpdateService) recoverStaleState() {
+	state := s.readState()
+	if !s.isStale(state) {
+		return
+	}
+	state.State = "ERROR"
+	state.StartedAt = ""
+	state.UpdateAvailable = false
+	state.Message = "上次更新任务已超时，状态已恢复，请重新检查"
+	if err := writeControllerUpdateState(state); err != nil {
+		log.Printf("controller startup state recovery failed: %v", err)
+	}
 }
 
 func (s *controllerUpdateService) isStale(state controllerUpdateState) bool {
@@ -565,7 +580,7 @@ func (s *controllerUpdateService) maybeRunAutomaticUpdate() {
 	}
 	now := s.localNow()
 	state := s.readState()
-	if now.Hour() < 4 || state.LastAutoRunDate == now.Format("2006-01-02") {
+	if now.Hour() != 4 || state.LastAutoRunDate == now.Format("2006-01-02") {
 		return
 	}
 	if err := s.startUpdate(true); err != nil && !errors.Is(err, errUpdateRunning) {
