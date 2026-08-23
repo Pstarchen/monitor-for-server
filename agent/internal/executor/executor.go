@@ -504,6 +504,26 @@ type limitedBuffer struct {
 	truncated bool
 }
 
+// bytes.Buffer exposes ReadFrom through embedding. os/exec may use that
+// optimized path and bypass Write, so keep the output cap enforced there too.
+func (b *limitedBuffer) ReadFrom(reader io.Reader) (int64, error) {
+	var total int64
+	chunk := make([]byte, 32*1024)
+	for {
+		count, err := reader.Read(chunk)
+		if count > 0 {
+			_, _ = b.Write(chunk[:count])
+			total += int64(count)
+		}
+		if err == io.EOF {
+			return total, nil
+		}
+		if err != nil {
+			return total, err
+		}
+	}
+}
+
 func (b *limitedBuffer) Write(value []byte) (int, error) {
 	remaining := b.limit - b.Len()
 	if remaining <= 0 {
@@ -516,4 +536,18 @@ func (b *limitedBuffer) Write(value []byte) (int, error) {
 		return len(value), nil
 	}
 	return b.Buffer.Write(value)
+}
+
+func (b *limitedBuffer) WriteString(value string) (int, error) {
+	remaining := b.limit - b.Len()
+	if remaining <= 0 {
+		b.truncated = true
+		return len(value), nil
+	}
+	if len(value) > remaining {
+		_, _ = b.Buffer.WriteString(value[:remaining])
+		b.truncated = true
+		return len(value), nil
+	}
+	return b.Buffer.WriteString(value)
 }

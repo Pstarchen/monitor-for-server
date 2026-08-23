@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,6 +23,17 @@ func TestRunUsesCommandArgumentsWithoutShell(t *testing.T) {
 	}, 1024, true, false, "")
 	if result.Status != "SUCCEEDED" || result.Stdout != "hello; touch /tmp/should-not-exist" {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestLimitedBufferCapsReadFromOutput(t *testing.T) {
+	var buffer limitedBuffer
+	buffer.limit = 5
+	if _, err := io.Copy(&buffer, strings.NewReader("1234567890")); err != nil {
+		t.Fatal(err)
+	}
+	if got := buffer.String(); got != "12345" {
+		t.Fatalf("buffer = %q, want 12345", got)
 	}
 }
 
