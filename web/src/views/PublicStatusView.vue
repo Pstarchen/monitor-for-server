@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Activity, ArrowDown, ArrowUp, CheckCircle2, Clock3, Gauge, LogIn, Moon, RefreshCw, Server, Sun, WifiOff, XCircle } from 'lucide-vue-next'
+import { Activity, ArrowDown, ArrowUp, CheckCircle2, Clock3, Gauge, Github, LogIn, Moon, RefreshCw, Server, Sun, WifiOff, XCircle } from 'lucide-vue-next'
 import { api, errorMessage } from '@/lib/api'
 import { bytes, percent, rate, relativeTime, uptime } from '@/lib/format'
 import { loadBranding, siteName } from '@/lib/branding'
@@ -13,6 +13,7 @@ const error = ref('')
 const sort = ref<SortKey>('default')
 const search = ref('')
 const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
+const githubUrl = 'https://github.com/Pstarchen/monitor-for-server'
 let timer = 0
 let pollTimer = 0
 
@@ -108,7 +109,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="public-status-page">
-    <header class="public-status-header"><RouterLink class="public-status-brand" to="/"><span class="brand-mark"><Activity :size="19" /></span><span><strong>{{ overview?.siteName || siteName }}</strong><small>PUBLIC STATUS</small></span></RouterLink><div class="public-status-actions"><RouterLink class="public-status-login" to="/login"><LogIn :size="15" />登录控制台</RouterLink><button class="icon-button" type="button" :aria-label="dark ? '切换浅色模式' : '切换深色模式'" :title="dark ? '浅色模式' : '深色模式'" @click="toggleTheme"><Sun v-if="dark" :size="18" /><Moon v-else :size="18" /></button></div></header>
+    <header class="public-status-header"><RouterLink class="public-status-brand" to="/"><span class="brand-mark"><Activity :size="19" /></span><span><strong>{{ overview?.siteName || siteName }}</strong><small>PUBLIC STATUS</small></span></RouterLink><div class="public-status-actions"><a class="icon-button" :href="githubUrl" target="_blank" rel="noopener noreferrer" aria-label="访问 GitHub 仓库" title="访问 GitHub 仓库"><Github :size="18" /></a><RouterLink class="public-status-login" to="/login"><LogIn :size="15" />登录控制台</RouterLink><button class="icon-button" type="button" :aria-label="dark ? '切换浅色模式' : '切换深色模式'" :title="dark ? '浅色模式' : '深色模式'" @click="toggleTheme"><Sun v-if="dark" :size="18" /><Moon v-else :size="18" /></button></div></header>
 
     <div class="public-status-content">
       <div v-if="loading" class="public-status-state"><RefreshCw :size="22" class="spinning" /><span>正在读取状态</span></div>
