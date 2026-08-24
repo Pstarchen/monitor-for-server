@@ -18,6 +18,7 @@ import (
 )
 
 const controllerUpdateRunnerName = "guanlan-controller-update-run"
+const controllerUpdateRunnerProjectSuffix = "-update-runner"
 
 const (
 	controllerUpdateCheckTimeout       = 15 * time.Minute
@@ -577,7 +578,8 @@ func updateControllerCommand(ctx context.Context, mode string) *exec.Cmd {
 }
 
 func controllerUpdateRunnerArgs() []string {
-	return []string{"run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "--name", controllerUpdateRunnerName, "setup", "update-runner"}
+	projectName := environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor")
+	return []string{"--project-name", projectName + controllerUpdateRunnerProjectSuffix, "run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "--name", controllerUpdateRunnerName, "setup", "update-runner"}
 }
 
 func controllerUpdateRunnerStatus() (string, bool) {
