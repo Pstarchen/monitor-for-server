@@ -201,7 +201,7 @@ func (s *setupService) applyCompose() {
 }
 
 func composeApplyArgs() []string {
-	args := []string{"compose", "--project-directory", hostWorkspace, "--env-file", filepath.Join(hostWorkspace, ".env")}
+	args := []string{"compose", "-f", filepath.Join(workspace, "docker-compose.yml"), "--project-directory", hostWorkspace, "--env-file", envPath}
 	if strings.EqualFold(environmentValue("CONTROLLER_AGENT_ENABLED", "false"), "true") {
 		args = append(args, "--profile", "host-monitoring")
 	}

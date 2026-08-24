@@ -599,7 +599,7 @@ func controllerUpdateRunnerStatus() (string, bool) {
 }
 
 func composeBaseArgs() []string {
-	return []string{"compose", "--project-directory", hostWorkspace, "--env-file", filepath.Join(hostWorkspace, ".env")}
+	return []string{"compose", "-f", filepath.Join(workspace, "docker-compose.yml"), "--project-directory", hostWorkspace, "--env-file", envPath}
 }
 
 func controllerUpdateEnvironment() []string {

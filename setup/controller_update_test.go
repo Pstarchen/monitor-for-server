@@ -51,7 +51,7 @@ func TestComposeBaseArgsUseHostWorkspace(t *testing.T) {
 
 	args := composeBaseArgs()
 	joined := strings.Join(args, " ")
-	expected := "--project-directory /host/project --env-file " + filepath.Join("/host/project", ".env")
+	expected := "-f " + filepath.Join("/container/workspace", "docker-compose.yml") + " --project-directory /host/project --env-file " + filepath.Join("/container/workspace", ".env")
 	if !strings.Contains(joined, expected) {
 		t.Fatalf("composeBaseArgs() = %q, does not use host project paths", joined)
 	}

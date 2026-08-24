@@ -84,7 +84,7 @@ if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; 
   compose_args+=(--profile host-monitoring)
 fi
 compose_project_root="${GUANLAN_HOST_PROJECT_ROOT:-${project_root}}"
-compose_args+=(--project-directory "${compose_project_root}" --env-file "${compose_project_root}/.env")
+compose_args+=(-f "${project_root}/docker-compose.yml" --project-directory "${compose_project_root}" --env-file "${project_root}/.env")
 services=(setup server web)
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   services+=(controller-agent)
