@@ -24,6 +24,7 @@ import (
 )
 
 var workspace = "/workspace"
+var hostWorkspace = workspace
 var envPath = "/workspace/.env"
 var completionMarkerPath = "/workspace/.setup-complete"
 var controllerUpdateStatePath = "/workspace/.controller-update-state.json"
@@ -61,6 +62,7 @@ func main() {
 		completionMarkerPath = filepath.Join(workspace, ".setup-complete")
 		controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
 	}
+	hostWorkspace = detectHostWorkspace()
 	updater := newControllerUpdateService()
 	updater.recoverStaleState()
 	if len(os.Args) > 1 && os.Args[1] == "update-runner" {
@@ -175,7 +177,7 @@ func (s *setupService) applyCompose() {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, "docker", composeApplyArgs()...)
-	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
+	command.Env = controllerUpdateEnvironment()
 	if output, err := command.CombinedOutput(); err != nil {
 		log.Printf("compose apply failed: %v (%d bytes)", err, len(output))
 		s.mu.Lock()
@@ -199,7 +201,7 @@ func (s *setupService) applyCompose() {
 }
 
 func composeApplyArgs() []string {
-	args := []string{"compose", "--project-directory", workspace, "--env-file", envPath}
+	args := []string{"compose", "--project-directory", hostWorkspace, "--env-file", filepath.Join(hostWorkspace, ".env")}
 	if strings.EqualFold(environmentValue("CONTROLLER_AGENT_ENABLED", "false"), "true") {
 		args = append(args, "--profile", "host-monitoring")
 	}
@@ -293,6 +295,26 @@ func environmentValue(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func detectHostWorkspace() string {
+	if configured := strings.TrimSpace(os.Getenv("GUANLAN_HOST_PROJECT_ROOT")); configured != "" {
+		return filepath.Clean(configured)
+	}
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		return workspace
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "docker", "inspect", "--format", `{{range .Mounts}}{{if eq .Destination "/workspace"}}{{.Source}}{{end}}{{end}}`, hostname).Output()
+	if err != nil {
+		return workspace
+	}
+	if detected := strings.TrimSpace(string(output)); detected != "" {
+		return filepath.Clean(detected)
+	}
+	return workspace
 }
 
 func configuredEnvironmentValue(name string) string {

@@ -83,7 +83,8 @@ fi
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   compose_args+=(--profile host-monitoring)
 fi
-compose_args+=(--project-directory "${project_root}" --env-file "${project_root}/.env")
+compose_project_root="${GUANLAN_HOST_PROJECT_ROOT:-${project_root}}"
+compose_args+=(--project-directory "${compose_project_root}" --env-file "${compose_project_root}/.env")
 services=(setup server web)
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   services+=(controller-agent)
@@ -175,7 +176,7 @@ if [[ "${mode}" == check ]]; then
   exit 0
 fi
 
-compose_up_args=(up -d --wait --wait-timeout 300)
+compose_up_args=(up -d --force-recreate --wait --wait-timeout 300)
 if [[ "${CONTROLLER_UPDATE_RUNNER:-false}" != true ]]; then
   compose_up_args+=(--remove-orphans)
 fi

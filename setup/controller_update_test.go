@@ -42,6 +42,21 @@ func TestUpdateControllerCommandUsesBash(t *testing.T) {
 	}
 }
 
+func TestComposeBaseArgsUseHostWorkspace(t *testing.T) {
+	originalWorkspace, originalHostWorkspace, originalEnvPath := workspace, hostWorkspace, envPath
+	workspace = "/container/workspace"
+	hostWorkspace = "/host/project"
+	envPath = filepath.Join(workspace, ".env")
+	t.Cleanup(func() { workspace, hostWorkspace, envPath = originalWorkspace, originalHostWorkspace, originalEnvPath })
+
+	args := composeBaseArgs()
+	joined := strings.Join(args, " ")
+	expected := "--project-directory /host/project --env-file " + filepath.Join("/host/project", ".env")
+	if !strings.Contains(joined, expected) {
+		t.Fatalf("composeBaseArgs() = %q, does not use host project paths", joined)
+	}
+}
+
 func TestControllerUpdateRunnerPassesRunnerEnvironment(t *testing.T) {
 	t.Setenv("COMPOSE_PROJECT_NAME", "custom-monitor")
 	args := controllerUpdateRunnerArgs()

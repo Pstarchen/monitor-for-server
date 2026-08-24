@@ -46,7 +46,7 @@ fi
 : > "${log_file}"
 run_update --apply --no-mirror
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:latest' "${log_file}" >/dev/null
-grep -q 'docker compose .* up -d --wait --wait-timeout 300 --remove-orphans' "${log_file}"
+grep -q 'docker compose .* up -d --force-recreate --wait --wait-timeout 300 --remove-orphans' "${log_file}"
 if grep -q 'controller-agent' "${log_file}"; then
   echo 'Update unexpectedly enabled controller Agent.' >&2
   exit 1
@@ -54,11 +54,11 @@ fi
 
 : > "${log_file}"
 TEST_CONTROLLER_AGENT_ENABLED=true run_update --apply --no-mirror
-grep -q 'docker compose --profile host-monitoring .* up -d --wait --wait-timeout 300 --remove-orphans setup server web controller-agent' "${log_file}"
+grep -q 'docker compose --profile host-monitoring .* up -d --force-recreate --wait --wait-timeout 300 --remove-orphans setup server web controller-agent' "${log_file}"
 
 : > "${log_file}"
 CONTROLLER_UPDATE_RUNNER=true run_update --apply --no-mirror
-grep -q 'docker compose .* up -d --wait --wait-timeout 300 setup server web' "${log_file}"
+grep -q 'docker compose .* up -d --force-recreate --wait --wait-timeout 300 setup server web' "${log_file}"
 if grep -q 'remove-orphans' "${log_file}"; then
   echo 'Update runner unexpectedly removed orphan containers.' >&2
   exit 1

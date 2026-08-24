@@ -216,7 +216,7 @@ func (s *controllerUpdateService) runCheck() {
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateCheckTimeout)
 	defer cancel()
 	command := updateControllerCommand(ctx, "--check")
-	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
+	command.Env = controllerUpdateEnvironment()
 	output, err := command.CombinedOutput()
 	state := s.readState()
 	state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
@@ -261,7 +261,7 @@ func (s *controllerUpdateService) launchUpdateRunner() {
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateRunnerStartTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "docker", args...)
-	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
+	command.Env = controllerUpdateEnvironment()
 	output, err := command.CombinedOutput()
 	if err == nil && s.waitForUpdateRunner() {
 		return
@@ -318,7 +318,7 @@ func (s *controllerUpdateService) runUpdate() error {
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateApplyTimeout)
 	defer cancel()
 	command := updateControllerCommand(ctx, "--apply")
-	command.Env = append(os.Environ(), "COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"))
+	command.Env = controllerUpdateEnvironment()
 	output, err := command.CombinedOutput()
 	state = s.readState()
 	if err != nil {
@@ -599,7 +599,14 @@ func controllerUpdateRunnerStatus() (string, bool) {
 }
 
 func composeBaseArgs() []string {
-	return []string{"compose", "--project-directory", workspace, "--env-file", envPath}
+	return []string{"compose", "--project-directory", hostWorkspace, "--env-file", filepath.Join(hostWorkspace, ".env")}
+}
+
+func controllerUpdateEnvironment() []string {
+	return append(os.Environ(),
+		"COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"),
+		"GUANLAN_HOST_PROJECT_ROOT="+hostWorkspace,
+	)
 }
 
 func updateEnvironmentSetting(key, value string) error {
