@@ -579,7 +579,7 @@ func updateControllerCommand(ctx context.Context, mode string) *exec.Cmd {
 
 func controllerUpdateRunnerArgs() []string {
 	projectName := environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor")
-	return []string{"--project-name", projectName + controllerUpdateRunnerProjectSuffix, "run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "--name", controllerUpdateRunnerName, "setup", "update-runner"}
+	return []string{"--project-name", projectName + controllerUpdateRunnerProjectSuffix, "run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "-e", "COMPOSE_PROJECT_NAME=" + projectName, "--name", controllerUpdateRunnerName, "setup", "update-runner"}
 }
 
 func controllerUpdateRunnerStatus() (string, bool) {

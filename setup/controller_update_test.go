@@ -52,6 +52,9 @@ func TestControllerUpdateRunnerPassesRunnerEnvironment(t *testing.T) {
 	if !strings.Contains(joined, "--project-name custom-monitor-update-runner run") {
 		t.Fatalf("controllerUpdateRunnerArgs() = %q, runner is not isolated from the controller project", joined)
 	}
+	if !strings.Contains(joined, "-e COMPOSE_PROJECT_NAME=custom-monitor") {
+		t.Fatalf("controllerUpdateRunnerArgs() = %q, inner updater target project was not preserved", joined)
+	}
 }
 
 func TestUpdateEnvironmentSettingAddsAndReplacesValue(t *testing.T) {
