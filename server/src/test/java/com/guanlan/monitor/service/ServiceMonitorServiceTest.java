@@ -34,6 +34,7 @@ class ServiceMonitorServiceTest {
         check.setIntervalSeconds(60);
         check.setFailureThreshold(2);
         check.setCertificateThresholdDays(14);
+        when(checks.findAllByOrderBySortOrderDescNameAsc()).thenReturn(List.of(check));
         when(checks.findByEnabledTrueOrderBySortOrderDescNameAsc()).thenReturn(List.of(check));
         when(results.findTopByServiceCheckIdOrderByCheckedAtDesc(42L)).thenReturn(Optional.empty());
         when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("星辰云巡", "/favicon.svg"));
