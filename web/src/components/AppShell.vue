@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity, BellRing, ChevronDown, CircleGauge, ClipboardList, Globe2, LogOut,
+  Activity, BellRing, ChevronDown, CircleGauge, ClipboardList, Globe2, Github, LogOut,
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
@@ -18,6 +18,7 @@ const profileDialog = ref(false)
 const profileSaving = ref(false)
 const profileError = ref('')
 const profileForm = reactive({ displayName: '', currentPassword: '', newPassword: '' })
+const githubUrl = 'https://github.com/Pstarchen/monitor-for-server'
 const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
 let socket: WebSocket | null = null
 let reconnectTimer = 0
@@ -176,6 +177,9 @@ onBeforeUnmount(() => {
           <div><p>运维控制台</p><strong>{{ pageTitle }}</strong></div>
         </div>
         <div class="topbar-actions">
+          <a class="icon-button" :href="githubUrl" target="_blank" rel="noopener noreferrer" aria-label="访问 GitHub 仓库" title="访问 GitHub 仓库">
+            <Github :size="18" />
+          </a>
           <button class="icon-button" type="button" :aria-label="dark ? '切换浅色模式' : '切换深色模式'" :title="dark ? '浅色模式' : '深色模式'" @click="toggleTheme">
             <Sun v-if="dark" :size="18" /><Moon v-else :size="18" />
           </button>
