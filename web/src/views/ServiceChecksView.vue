@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Activity, Clock3, Globe2, Pencil, Plus, RefreshCw, Trash2, Wifi } from 'lucide-vue-next'
+import { Activity, CheckCircle2, Clock3, Pencil, Plus, RefreshCw, Trash2, Wifi, XCircle } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import LoadingState from '@/components/LoadingState.vue'
+import ServiceAvailabilityCard from '@/components/ServiceAvailabilityCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
@@ -131,21 +132,26 @@ useVisibilityPolling(() => load(true))
 
     <LoadingState v-if="loading" />
     <div v-else-if="error" class="panel state-panel"><EmptyState title="服务监控加载失败" :description="error"><el-button @click="load">重新加载</el-button></EmptyState></div>
-    <article v-else class="panel">
-      <div v-if="checks.length" class="table-wrap"><table class="data-table"><thead><tr><th>监控</th><th>类型 / 目标</th><th>最近结果</th><th>间隔</th><th>公开</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead><tbody>
-        <tr v-for="check in checks" :key="check.id">
-          <td><div class="service-name-cell"><span><Globe2 :size="16" /></span><strong>{{ check.name }}</strong></div></td>
-          <td><strong>{{ labels[check.type] }}</strong><small class="cell-subtext mono-value">{{ check.target }}</small></td>
-          <td><template v-if="check.latest"><StatusBadge :status="check.latest.success ? 'ONLINE' : 'OFFLINE'" /><small class="cell-subtext">{{ check.latest.latencyMs }} ms{{ check.latest.statusCode ? ` · ${check.latest.statusCode}` : '' }}</small><small v-if="check.latest.certificateExpiresAt" class="cell-subtext">证书到期 {{ dateTime(check.latest.certificateExpiresAt) }}</small></template><span v-else class="muted-cell">尚未探测</span></td>
-          <td>{{ check.intervalSeconds }} 秒<small class="cell-subtext">失败 {{ check.failureThreshold }} 次 / 延迟 {{ check.latencyThresholdMs ? `${check.latencyThresholdMs} ms` : '关闭' }} / 证书 {{ check.certificateThresholdDays ? `${check.certificateThresholdDays} 天` : '关闭' }}</small></td>
-          <td><StatusBadge :status="check.publicVisible ? 'ONLINE' : 'OFFLINE'" /></td>
-          <td><StatusBadge :status="check.enabled ? 'ONLINE' : 'OFFLINE'" /></td>
-          <td>{{ dateTime(check.latest?.checkedAt || check.updatedAt) }}</td>
-          <td class="row-actions"><button class="table-icon-button" type="button" title="查看历史" aria-label="查看历史" @click="openHistory(check)"><Clock3 :size="16" /></button><button v-if="canEdit" class="table-icon-button" type="button" title="立即探测" aria-label="立即探测" :disabled="runningId === check.id" @click="runNow(check)"><Activity :size="16" :class="{ spinning: runningId === check.id }" /></button><button v-if="canEdit" class="table-icon-button" type="button" title="编辑监控" aria-label="编辑监控" @click="openEdit(check)"><Pencil :size="16" /></button><button v-if="canEdit" class="table-icon-button danger-command" type="button" title="删除监控" aria-label="删除监控" @click="remove(check)"><Trash2 :size="16" /></button></td>
-        </tr>
-      </tbody></table></div>
-      <EmptyState v-else title="暂无服务监控" description="添加一个 HTTP、Ping 或 TCP 目标，开始记录可用性和延迟。"><el-button v-if="canEdit" type="primary" @click="openCreate"><Plus :size="16" />新建监控</el-button></EmptyState>
-    </article>
+    <div v-else-if="checks.length" class="service-availability-grid">
+      <ServiceAvailabilityCard v-for="check in checks" :key="check.id" :name="check.name" :type-label="labels[check.type]" :subtitle="check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs">
+        <template #actions>
+          <span class="availability-actions">
+            <button class="table-icon-button" type="button" title="查看历史" aria-label="查看历史" @click="openHistory(check)"><Clock3 :size="15" /></button>
+            <button v-if="canEdit" class="table-icon-button" type="button" title="立即探测" aria-label="立即探测" :disabled="runningId === check.id" @click="runNow(check)"><Activity :size="15" :class="{ spinning: runningId === check.id }" /></button>
+            <button v-if="canEdit" class="table-icon-button" type="button" title="编辑监控" aria-label="编辑监控" @click="openEdit(check)"><Pencil :size="15" /></button>
+            <button v-if="canEdit" class="table-icon-button danger-command" type="button" title="删除监控" aria-label="删除监控" @click="remove(check)"><Trash2 :size="15" /></button>
+          </span>
+        </template>
+        <template #details>
+          <span class="availability-detail"><Clock3 :size="12" />每 {{ check.intervalSeconds }} 秒</span>
+          <span class="availability-detail" :data-state="check.publicVisible ? 'success' : 'empty'"><CheckCircle2 v-if="check.publicVisible" :size="12" /><XCircle v-else :size="12" />{{ check.publicVisible ? '公开展示' : '仅控制台' }}</span>
+          <span class="availability-detail" :data-state="check.enabled ? 'success' : 'warning'"><CheckCircle2 v-if="check.enabled" :size="12" /><XCircle v-else :size="12" />{{ check.enabled ? '自动探测中' : '已暂停' }}</span>
+          <span class="availability-detail">失败 {{ check.failureThreshold }} 次</span>
+          <span v-if="check.latencyThresholdMs" class="availability-detail">延迟 ≥ {{ check.latencyThresholdMs }} ms</span>
+        </template>
+      </ServiceAvailabilityCard>
+    </div>
+    <article v-else class="panel"><EmptyState title="暂无服务监控" description="添加一个 HTTP、Ping 或 TCP 目标，开始记录可用性和延迟。"><el-button v-if="canEdit" type="primary" @click="openCreate"><Plus :size="16" />新建监控</el-button></EmptyState></article>
 
     <el-dialog v-model="dialog" :title="editingId ? '编辑服务监控' : '新建服务监控'" width="min(560px, calc(100vw - 28px))" destroy-on-close>
       <el-form label-position="top">

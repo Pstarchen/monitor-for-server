@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Activity, ArrowDown, ArrowUp, CheckCircle2, Clock3, Gauge, Github, LogIn, Moon, RefreshCw, Server, Sun, WifiOff, XCircle } from 'lucide-vue-next'
+import { Activity, ArrowDown, ArrowUp, CheckCircle2, Clock3, Gauge, Github, LogIn, Moon, RefreshCw, Server, Sun, WifiOff } from 'lucide-vue-next'
+import ServiceAvailabilityCard from '@/components/ServiceAvailabilityCard.vue'
 import { api, errorMessage } from '@/lib/api'
 import { bytes, percent, rate, relativeTime, uptime } from '@/lib/format'
 import { loadBranding, siteName } from '@/lib/branding'
@@ -76,11 +77,6 @@ function serviceLabel(service: PublicServiceCheck) {
   return service.type === 'HTTP_GET' ? 'HTTP' : service.type === 'TCPING' ? 'TCP' : 'PING'
 }
 
-function certificateDays(expiresAt: string | null | undefined) {
-  if (!expiresAt) return null
-  return Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000)
-}
-
 function metricValue(value: number | null | undefined) {
   const numeric = Number(value ?? 0)
   return Number.isFinite(numeric) ? Math.min(100, Math.max(0, numeric)) : 0
@@ -121,7 +117,7 @@ onBeforeUnmount(() => {
         <div class="public-filter-strip"><label class="public-search"><span>搜索服务器</span><input v-model="search" type="search" placeholder="名称、系统或分组" /></label></div>
         <section class="public-status-section"><div class="public-section-head"><div><p class="eyebrow">SERVERS</p><h2>服务器状态</h2></div><label class="public-sort"><span>排序</span><select v-model="sort"><option value="default">默认</option><option value="name">名称</option><option value="os">系统</option><option value="uptime">运行时间</option><option value="cpu">CPU</option><option value="memory">内存</option><option value="disk">磁盘</option><option value="up">实时上行</option><option value="down">实时下行</option><option value="totalUp">累计上行</option><option value="totalDown">累计下行</option></select></label></div><div v-if="sortedDevices.length" class="public-server-grid"><article v-for="device in sortedDevices" :key="device.id" class="public-server-card" :data-status="device.status"><header><div><strong>{{ device.name }}</strong><small>{{ device.groupName || device.os || '未分组' }}</small></div><span class="public-dot" :data-status="device.status"><i />{{ device.status === 'ONLINE' ? '在线' : device.status === 'OFFLINE' ? '离线' : '待接入' }}</span></header><div class="public-server-metrics"><div><span>CPU</span><strong>{{ percent(device.cpuUsage) }}</strong><i role="progressbar" :aria-valuenow="metricValue(device.cpuUsage)" aria-valuemin="0" aria-valuemax="100"><b :data-level="metricLevel(device.cpuUsage)" :style="{ width: `${metricValue(device.cpuUsage)}%` }" /></i></div><div><span>内存</span><strong>{{ percent(device.memoryUsage) }}</strong><i role="progressbar" :aria-valuenow="metricValue(device.memoryUsage)" aria-valuemin="0" aria-valuemax="100"><b :data-level="metricLevel(device.memoryUsage)" :style="{ width: `${metricValue(device.memoryUsage)}%` }" /></i></div><div><span>磁盘</span><strong>{{ percent(device.diskUsage) }}</strong><i role="progressbar" :aria-valuenow="metricValue(device.diskUsage)" aria-valuemin="0" aria-valuemax="100"><b :data-level="metricLevel(device.diskUsage)" :style="{ width: `${metricValue(device.diskUsage)}%` }" /></i></div></div><footer><span><ArrowUp :size="13" />{{ rate(device.networkSentBps) }}</span><span><ArrowDown :size="13" />{{ rate(device.networkRecvBps) }}</span><small>{{ device.status === 'ONLINE' ? uptime(device.uptimeSeconds) : relativeTime(device.lastSeenAt) }}</small></footer></article></div><div v-else class="public-empty"><Server :size="20" /><span>暂无公开服务器</span></div></section>
 
-        <section class="public-status-section"><div class="public-section-head"><div><p class="eyebrow">SERVICES</p><h2>服务可用性</h2></div><span class="public-section-count"><CheckCircle2 :size="15" />{{ onlineServices }} / {{ overview.services.length }} 正常</span></div><div v-if="overview.services.length" class="public-service-list"><article v-for="service in overview.services" :key="service.id"><div><strong>{{ service.name }}</strong><small>{{ serviceLabel(service) }}</small></div><span class="public-service-result" :data-success="service.latest?.success === true"><CheckCircle2 v-if="service.latest?.success" :size="16" /><XCircle v-else :size="16" /><b>{{ service.latest ? (service.latest.success ? '正常' : '异常') : '等待探测' }}</b><small v-if="service.latest">{{ service.latest.latencyMs }} ms</small><small v-if="service.latest?.certificateExpiresAt">证书剩余 {{ certificateDays(service.latest.certificateExpiresAt) }} 天</small></span></article></div><div v-else class="public-empty"><Gauge :size="20" /><span>暂无公开服务监控</span></div></section>
+        <section class="public-status-section"><div class="public-section-head"><div><p class="eyebrow">SERVICES</p><h2>服务可用性</h2></div><span class="public-section-count"><CheckCircle2 :size="15" />{{ onlineServices }} / {{ overview.services.length }} 正常</span></div><div v-if="overview.services.length" class="public-availability-grid"><ServiceAvailabilityCard v-for="service in overview.services" :key="service.id" :name="service.name" :type-label="serviceLabel(service)" :latest="service.latest" :history="service.history" :availability-percent="service.availabilityPercent" /></div><div v-else class="public-empty"><Gauge :size="20" /><span>暂无公开服务监控</span></div></section>
       </template>
     </div>
     <footer class="public-status-footer"><span>自托管监控状态页</span><span>·</span><span>{{ overview?.generatedAt ? new Date(overview.generatedAt).getFullYear() : new Date().getFullYear() }} {{ overview?.siteName || siteName }}</span></footer>

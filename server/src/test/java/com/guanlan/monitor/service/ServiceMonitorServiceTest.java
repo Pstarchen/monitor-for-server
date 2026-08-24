@@ -1,11 +1,13 @@
 package com.guanlan.monitor.service;
 
 import com.guanlan.monitor.domain.ServiceCheck;
+import com.guanlan.monitor.domain.ServiceCheckResult;
 import com.guanlan.monitor.repository.ServiceCheckRepository;
 import com.guanlan.monitor.repository.ServiceCheckResultRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -66,5 +68,25 @@ class ServiceMonitorServiceTest {
         assertThat(check.getConsecutiveFailures()).isZero();
         assertThat(check.isAlertActive()).isFalse();
         verify(notifications).sendMessage(contains("服务“官网健康检查”已恢复"));
+    }
+
+    @Test
+    void includesRecentHistoryAndSevenDayAvailabilityInTheServiceView() {
+        ServiceCheckResult result = new ServiceCheckResult();
+        result.setCheckedAt(Instant.now().minusSeconds(10));
+        result.setSuccess(true);
+        result.setLatencyMs(91);
+        result.setStatusCode(200);
+        result.setServiceCheck(check);
+        when(results.findTopByServiceCheckIdOrderByCheckedAtDesc(42L)).thenReturn(Optional.of(result));
+        when(results.findTop60ByServiceCheckIdOrderByCheckedAtDesc(42L)).thenReturn(List.of(result));
+        when(results.countByServiceCheckIdAndCheckedAtBetween(eq(42L), any(), any())).thenReturn(100L);
+        when(results.countByServiceCheckIdAndSuccessTrueAndCheckedAtBetween(eq(42L), any(), any())).thenReturn(91L);
+
+        var view = service.list().get(0);
+
+        assertThat(view.availabilityPercent()).isEqualTo(91.0);
+        assertThat(view.history()).hasSize(1);
+        assertThat(view.history().get(0).latencyMs()).isEqualTo(91);
     }
 }

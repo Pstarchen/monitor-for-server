@@ -311,6 +311,16 @@ export interface ServiceCheck {
   createdAt: string
   updatedAt: string
   latest: ServiceCheckResult | null
+  availabilityPercent: number | null
+  history: ServiceCheckResult[]
+}
+
+export interface PublicServiceCheckResult {
+  checkedAt: string
+  success: boolean
+  latencyMs: number
+  statusCode: number | null
+  certificateExpiresAt: string | null
 }
 
 export interface PublicServiceCheck {
@@ -318,7 +328,9 @@ export interface PublicServiceCheck {
   name: string
   type: ServiceCheckType
   sortOrder: number
-  latest: { checkedAt: string; success: boolean; latencyMs: number; statusCode: number | null; certificateExpiresAt: string | null } | null
+  latest: PublicServiceCheckResult | null
+  availabilityPercent: number | null
+  history: PublicServiceCheckResult[]
 }
 
 export interface PublicDevice {

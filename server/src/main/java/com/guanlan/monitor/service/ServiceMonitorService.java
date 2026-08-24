@@ -11,6 +11,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -18,6 +20,8 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class ServiceMonitorService {
+    private static final Duration AVAILABILITY_WINDOW = Duration.ofDays(7);
+
     private final ServiceCheckRepository checks;
     private final ServiceCheckResultRepository results;
     private final ServiceProbe probe;
@@ -155,11 +159,11 @@ public class ServiceMonitorService {
     }
 
     private ServiceDtos.View view(ServiceCheck check) {
-        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check));
+        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check), availabilityPercent(check), historyViews(check));
     }
 
     private ServiceDtos.PublicView publicView(ServiceCheck check) {
-        return new ServiceDtos.PublicView(check.getId(), check.getName(), check.getType(), check.getSortOrder(), publicResultView(check));
+        return new ServiceDtos.PublicView(check.getId(), check.getName(), check.getType(), check.getSortOrder(), publicResultView(check), availabilityPercent(check), publicHistoryViews(check));
     }
 
     private ServiceDtos.ResultView resultView(ServiceCheck check) {
@@ -168,6 +172,26 @@ public class ServiceMonitorService {
 
     private ServiceDtos.PublicResultView publicResultView(ServiceCheck check) {
         return results.findTopByServiceCheckIdOrderByCheckedAtDesc(check.getId()).map(result -> new ServiceDtos.PublicResultView(result.getCheckedAt(), result.isSuccess(), result.getLatencyMs(), result.getStatusCode(), result.getCertificateExpiresAt())).orElse(null);
+    }
+
+    private List<ServiceDtos.ResultView> historyViews(ServiceCheck check) {
+        var recent = new ArrayList<>(results.findTop60ByServiceCheckIdOrderByCheckedAtDesc(check.getId()));
+        Collections.reverse(recent);
+        return recent.stream().map(result -> new ServiceDtos.ResultView(result.getCheckedAt(), result.isSuccess(), result.getLatencyMs(), result.getStatusCode(), result.getCertificateExpiresAt(), result.getError())).toList();
+    }
+
+    private List<ServiceDtos.PublicResultView> publicHistoryViews(ServiceCheck check) {
+        var recent = new ArrayList<>(results.findTop60ByServiceCheckIdOrderByCheckedAtDesc(check.getId()));
+        Collections.reverse(recent);
+        return recent.stream().map(result -> new ServiceDtos.PublicResultView(result.getCheckedAt(), result.isSuccess(), result.getLatencyMs(), result.getStatusCode(), result.getCertificateExpiresAt())).toList();
+    }
+
+    private Double availabilityPercent(ServiceCheck check) {
+        Instant from = Instant.now().minus(AVAILABILITY_WINDOW);
+        long total = results.countByServiceCheckIdAndCheckedAtBetween(check.getId(), from, Instant.now());
+        if (total == 0) return null;
+        long successful = results.countByServiceCheckIdAndSuccessTrueAndCheckedAtBetween(check.getId(), from, Instant.now());
+        return Math.round(successful * 10000d / total) / 100d;
     }
 
     private void evaluateAlert(ServiceCheck check, ServiceProbe.Result measured) {

@@ -9,7 +9,10 @@ import java.util.Optional;
 
 public interface ServiceCheckResultRepository extends JpaRepository<ServiceCheckResult, Long> {
     Optional<ServiceCheckResult> findTopByServiceCheckIdOrderByCheckedAtDesc(Long serviceCheckId);
+    List<ServiceCheckResult> findTop60ByServiceCheckIdOrderByCheckedAtDesc(Long serviceCheckId);
     List<ServiceCheckResult> findByServiceCheckIdAndCheckedAtBetweenOrderByCheckedAtAsc(Long serviceCheckId, Instant from, Instant to);
+    long countByServiceCheckIdAndCheckedAtBetween(Long serviceCheckId, Instant from, Instant to);
+    long countByServiceCheckIdAndSuccessTrueAndCheckedAtBetween(Long serviceCheckId, Instant from, Instant to);
     long deleteByCheckedAtBefore(Instant cutoff);
     long deleteByServiceCheckId(Long serviceCheckId);
 }

@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 
 public final class ServiceDtos {
     private ServiceDtos() {}
@@ -59,7 +60,9 @@ public final class ServiceDtos {
             boolean alertActive,
             Instant createdAt,
             Instant updatedAt,
-            ResultView latest
+            ResultView latest,
+            Double availabilityPercent,
+            List<ResultView> history
     ) {}
 
     public record PublicView(
@@ -67,6 +70,8 @@ public final class ServiceDtos {
             String name,
             ServiceCheck.Type type,
             int sortOrder,
-            PublicResultView latest
+            PublicResultView latest,
+            Double availabilityPercent,
+            List<PublicResultView> history
     ) {}
 }
