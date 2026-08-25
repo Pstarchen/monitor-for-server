@@ -2,7 +2,6 @@ package com.guanlan.monitor.service;
 
 import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.domain.AlertEvent;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -18,12 +17,17 @@ import java.util.Properties;
 import java.time.Duration;
 
 @Service
-@RequiredArgsConstructor
 public class NotificationService {
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
     private final SettingService settings;
     private final AuditService audit;
-    private final RestClient restClient = RestClient.builder().requestFactory(requestFactory()).build();
+    private final RestClient restClient;
+
+    public NotificationService(SettingService settings, AuditService audit, RestClient.Builder builder) {
+        this.settings = settings;
+        this.audit = audit;
+        this.restClient = builder.requestFactory(requestFactory()).build();
+    }
 
     @Async
     public void send(AlertEvent event) {
@@ -34,8 +38,8 @@ public class NotificationService {
     public void sendMessage(String text) {
         SettingService.NotificationRuntime config = settings.notificationRuntime();
         runSafely("邮件", () -> sendEmail(config.email(), text));
-        runSafely("钉钉", () -> sendWebhook(config.dingtalk(), text));
-        runSafely("企业微信", () -> sendWebhook(config.wecom(), text));
+        runSafely("钉钉", () -> sendWebhook(config.dingtalk(), text, "钉钉"));
+        runSafely("企业微信", () -> sendWebhook(config.wecom(), text, "企业微信"));
     }
 
     public TestResult test(String channel) {
@@ -50,11 +54,11 @@ public class NotificationService {
                 }
                 case "dingtalk" -> {
                     requireEnabled(config.dingtalk().enabled());
-                    sendWebhook(config.dingtalk(), text);
+                    sendWebhook(config.dingtalk(), text, "钉钉");
                 }
                 case "wecom" -> {
                     requireEnabled(config.wecom().enabled());
-                    sendWebhook(config.wecom(), text);
+                    sendWebhook(config.wecom(), text, "企业微信");
                 }
                 default -> throw new ApiException(HttpStatus.NOT_FOUND, "通知通道不存在");
             }
@@ -93,17 +97,39 @@ public class NotificationService {
         sender.send(message);
     }
 
-    private void sendWebhook(SettingService.WebhookRuntime config, String text) {
+    private void sendWebhook(SettingService.WebhookRuntime config, String text, String channel) {
         if (!config.enabled()) return;
         if (blank(config.url())) throw new ApiException(HttpStatus.BAD_REQUEST, "Webhook 通知配置不完整");
-        restClient.post().uri(config.url())
+        WebhookResponse response = restClient.post().uri(config.url())
                 .body(Map.of("msgtype", "text", "text", Map.of("content", text)))
-                .retrieve().toBodilessEntity();
+                .retrieve().body(WebhookResponse.class);
+        validateWebhookResponse(channel, response);
+    }
+
+    private void validateWebhookResponse(String channel, WebhookResponse response) {
+        if (response == null || response.errcode() == null) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, channel + "返回了无法识别的响应");
+        }
+        if (response.errcode() == 0) return;
+        if ("钉钉".equals(channel) && response.errcode() == 90030) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "钉钉 Webhook 调用额度已用尽，请到钉钉开发者后台查看用量");
+        }
+        String detail = safeProviderMessage(response.errmsg());
+        throw new ApiException(HttpStatus.BAD_GATEWAY,
+                channel + "拒绝了消息（错误码 " + response.errcode() + "）" + (detail.isEmpty() ? "" : "：" + detail));
+    }
+
+    private String safeProviderMessage(String value) {
+        if (blank(value)) return "";
+        String normalized = value.replaceAll("[\\r\\n\\t]+", " ").trim();
+        return normalized.length() > 160 ? normalized.substring(0, 160) : normalized;
     }
 
     private void runSafely(String channel, Runnable action) {
         try {
             action.run();
+        } catch (ApiException exception) {
+            log.warn("{} notification failed: {}", channel, exception.getMessage());
         } catch (Exception exception) {
             log.warn("{} notification failed: {}", channel, exception.getClass().getSimpleName());
         }
@@ -128,4 +154,5 @@ public class NotificationService {
     }
 
     public record TestResult(String channel, String message) {}
+    private record WebhookResponse(Integer errcode, String errmsg) {}
 }
