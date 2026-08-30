@@ -44,6 +44,8 @@ public class DashboardController {
                 measured.stream().mapToDouble(device -> device.latest().networkSentBps()).sum(),
                 measured.stream().mapToDouble(device -> device.latest().networkRecvBps()).sum(),
                 measured.stream().mapToInt(device -> device.latest().smartFailed()).sum(),
+                measured.stream().mapToInt(device -> device.latest().integrityChanges()).sum(),
+                measured.stream().mapToInt(device -> device.latest().firewallInactive() == null ? 0 : device.latest().firewallInactive()).sum(),
                 devices, top, recentAlerts(authentication)
         );
     }
@@ -83,7 +85,7 @@ public class DashboardController {
             long totalDevices, long onlineDevices, long offlineDevices, long pendingDevices, long activeAlerts,
             double averageCpu, double averageMemory, double averageDisk,
             double networkSentBps, double networkRecvBps,
-            long smartFailures,
+            long smartFailures, long integrityChanges, long firewallInactive,
             List<DeviceDtos.View> devices, List<DeviceDtos.View> topDevices, List<AlertDtos.EventView> recentAlerts
     ) {}
 }

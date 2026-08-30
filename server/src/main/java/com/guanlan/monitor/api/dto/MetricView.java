@@ -33,6 +33,8 @@ public record MetricView(
         int smartPassed,
         int smartFailed,
         int smartUnknown,
+        int integrityChanges,
+        Integer firewallInactive,
         List<AgentReportRequest.NetworkInterface> networkInterfaces,
         List<AgentReportRequest.PortStats> ports,
         List<AgentReportRequest.ContainerStats> containers,
@@ -41,7 +43,11 @@ public record MetricView(
         List<AgentReportRequest.ServiceStatus> services,
         List<AgentReportRequest.Fan> fans,
         List<AgentReportRequest.Battery> batteries,
-        List<AgentReportRequest.Gpu> gpus
+        List<AgentReportRequest.Gpu> gpus,
+        AgentReportRequest.FirewallStatus firewall,
+        List<AgentReportRequest.CronJob> cronJobs,
+        List<AgentReportRequest.LogFile> logs,
+        List<AgentReportRequest.IntegrityItem> integrity
 ) {
     public static MetricView from(MetricSnapshot metric, ObjectMapper mapper) {
         return new MetricView(
@@ -52,6 +58,7 @@ public record MetricView(
                 metric.getNetworkRecvBps(), metric.getNetworkSentBytes(), metric.getNetworkRecvBytes(), metric.getTcpConnections(), metric.getTemperatureMax(),
                 metric.getGpuUsage(), metric.getBatteryPercent(), metric.getContainerCpuUsage(), metric.getContainerMemoryUsage(),
                 metric.getSmartPassed(), metric.getSmartFailed(), metric.getSmartUnknown(),
+                metric.getIntegrityChanges(), metric.getFirewallInactive(),
                 readList(mapper, metric.getNetworkInterfacesJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getPortsJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getContainersJson(), new TypeReference<>() {}),
@@ -60,8 +67,18 @@ public record MetricView(
                 readList(mapper, metric.getServicesJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getFansJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getBatteriesJson(), new TypeReference<>() {}),
-                readList(mapper, metric.getGpusJson(), new TypeReference<>() {})
+                readList(mapper, metric.getGpusJson(), new TypeReference<>() {}),
+                readObject(mapper, metric.getFirewallJson(), AgentReportRequest.FirewallStatus.class),
+                readList(mapper, metric.getCronJobsJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getLogsJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getIntegrityJson(), new TypeReference<>() {})
         );
+    }
+
+    private static <T> T readObject(ObjectMapper mapper, String json, Class<T> type) {
+        if (json == null || json.isBlank()) return null;
+        try { return mapper.readValue(json, type); }
+        catch (Exception ignored) { return null; }
     }
 
     private static <T> List<T> readList(ObjectMapper mapper, String json, TypeReference<List<T>> type) {

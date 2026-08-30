@@ -1,6 +1,7 @@
 package com.guanlan.monitor.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.api.dto.AgentReportRequest;
@@ -18,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -49,6 +51,10 @@ public class MetricService {
         List<AgentReportRequest.Fan> fans = report.host().fans() == null ? List.of() : report.host().fans();
         List<AgentReportRequest.Battery> batteries = report.host().batteries() == null ? List.of() : report.host().batteries();
         List<AgentReportRequest.Gpu> gpus = report.host().gpus() == null ? List.of() : report.host().gpus();
+        List<AgentReportRequest.CronJob> cronJobs = report.cronJobs() == null ? List.of() : report.cronJobs();
+        List<AgentReportRequest.LogFile> logs = report.logs() == null ? List.of() : report.logs();
+        List<AgentReportRequest.IntegrityItem> integrity = report.integrity() == null ? List.of() : report.integrity();
+        MetricSnapshot previous = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).orElse(null);
         MetricSnapshot metric = new MetricSnapshot();
         metric.setDevice(device);
         metric.setCollectedAt(report.collectedAt());
@@ -76,6 +82,8 @@ public class MetricService {
         metric.setSmartPassed(smartCount(disks, "PASSED"));
         metric.setSmartFailed(smartCount(disks, "FAILED"));
         metric.setSmartUnknown(smartCount(disks, "UNKNOWN"));
+        metric.setIntegrityChanges(integrityChanges(previous, integrity));
+        metric.setFirewallInactive(firewallInactive(report.firewall()));
         metric.setDisksJson(json(disks));
         metric.setProcessesJson(json(report.processes() == null ? List.of() : report.processes()));
         metric.setServicesJson(json(report.services() == null ? List.of() : report.services()));
@@ -85,6 +93,10 @@ public class MetricService {
         metric.setFansJson(json(fans));
         metric.setBatteriesJson(json(batteries));
         metric.setGpusJson(json(gpus));
+        metric.setFirewallJson(json(report.firewall()));
+        metric.setCronJobsJson(json(cronJobs));
+        metric.setLogsJson(json(logs));
+        metric.setIntegrityJson(json(integrity));
         metrics.save(metric);
 
         MetricView view = MetricView.from(metric, mapper);
@@ -133,6 +145,35 @@ public class MetricService {
                 .filter(disk -> disk != null && disk.smart() != null)
                 .filter(disk -> status.equalsIgnoreCase(disk.smart().status()))
                 .count();
+    }
+
+    private Integer firewallInactive(AgentReportRequest.FirewallStatus firewall) {
+        if (firewall == null || firewall.state() == null) return null;
+        if ("INACTIVE".equalsIgnoreCase(firewall.state())) return 1;
+        if ("ACTIVE".equalsIgnoreCase(firewall.state())) return 0;
+        return null;
+    }
+
+    private int integrityChanges(MetricSnapshot previous, List<AgentReportRequest.IntegrityItem> current) {
+        if (previous == null || current.isEmpty() || previous.getIntegrityJson() == null || previous.getIntegrityJson().isBlank()) return 0;
+        List<AgentReportRequest.IntegrityItem> old = readIntegrity(previous.getIntegrityJson());
+        if (old.isEmpty()) return 0;
+        Map<String, String> oldHashes = new HashMap<>();
+        for (AgentReportRequest.IntegrityItem item : old) {
+            if (item != null && item.path() != null && item.sha256() != null) oldHashes.put(item.path(), item.sha256());
+        }
+        int changes = 0;
+        for (AgentReportRequest.IntegrityItem item : current) {
+            if (item == null || item.path() == null || item.sha256() == null) continue;
+            String previousHash = oldHashes.get(item.path());
+            if (previousHash != null && !previousHash.equalsIgnoreCase(item.sha256())) changes++;
+        }
+        return changes;
+    }
+
+    private List<AgentReportRequest.IntegrityItem> readIntegrity(String json) {
+        try { return mapper.readValue(json, new TypeReference<List<AgentReportRequest.IntegrityItem>>() {}); }
+        catch (Exception ignored) { return List.of(); }
     }
     private String join(String first, String second) { return ((first == null ? "" : first) + " " + (second == null ? "" : second)).trim(); }
 }

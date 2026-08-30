@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity, ArrowDown, ArrowUp, BellRing, CheckCircle2, Clock3, Cpu, HardDrive,
-  MapPin, MemoryStick, RefreshCw, Search, Server, ShieldCheck, WifiOff,
+  FileWarning, MapPin, MemoryStick, RefreshCw, Search, Server, ShieldAlert, ShieldCheck, WifiOff,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
@@ -202,6 +202,8 @@ onBeforeUnmount(() => {
         <MetricCard label="活动告警" :value="dashboard.activeAlerts" hint="待处理与已确认" :tone="dashboard.activeAlerts ? 'danger' : 'success'"><template #icon><BellRing :size="17" /></template></MetricCard>
         <MetricCard label="实时下行" :value="rate(dashboard.networkRecvBps)" :hint="`上行 ${rate(dashboard.networkSentBps)}`" tone="neutral"><template #icon><ArrowDown :size="17" /></template></MetricCard>
         <MetricCard label="SMART 异常" :value="dashboard.smartFailures" :hint="dashboard.smartFailures ? '磁盘健康需要关注' : '未发现失败磁盘'" :tone="dashboard.smartFailures ? 'danger' : 'success'"><template #icon><ShieldCheck :size="17" /></template></MetricCard>
+        <MetricCard label="完整性变更" :value="dashboard.integrityChanges" :hint="dashboard.integrityChanges ? '最近采集发现文件变化' : '未发现基线文件变化'" :tone="dashboard.integrityChanges ? 'warning' : 'success'"><template #icon><FileWarning :size="17" /></template></MetricCard>
+        <MetricCard label="防火墙未启用" :value="dashboard.firewallInactive" :hint="dashboard.firewallInactive ? '请检查主机安全策略' : '已启用或暂无数据'" :tone="dashboard.firewallInactive ? 'danger' : 'success'"><template #icon><ShieldAlert :size="17" /></template></MetricCard>
       </div>
 
       <div class="resource-overview fade-in-up">

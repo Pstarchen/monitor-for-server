@@ -28,6 +28,8 @@ type Config struct {
 	DiskMountpoints       []string
 	HostRoot              string
 	DockerSocket          string
+	LogPaths              []string
+	IntegrityPaths        []string
 	AllowCommandExecution bool
 	AllowFileOperations   bool
 	CommandPollInterval   time.Duration
@@ -49,6 +51,8 @@ type fileConfig struct {
 	DiskMountpoints       []string `json:"disk_mountpoints"`
 	HostRoot              string   `json:"host_root"`
 	DockerSocket          string   `json:"docker_socket"`
+	LogPaths              []string `json:"log_paths"`
+	IntegrityPaths        []string `json:"integrity_paths"`
 	AllowCommandExecution bool     `json:"allow_command_execution"`
 	AllowFileOperations   bool     `json:"allow_file_operations"`
 	CommandPollInterval   string   `json:"command_poll_interval"`
@@ -112,6 +116,8 @@ func Load(args []string) (Config, error) {
 		DiskMountpoints:       cleanList(file.DiskMountpoints),
 		HostRoot:              strings.TrimSpace(file.HostRoot),
 		DockerSocket:          strings.TrimSpace(file.DockerSocket),
+		LogPaths:              cleanList(file.LogPaths),
+		IntegrityPaths:        cleanList(file.IntegrityPaths),
 		AllowCommandExecution: file.AllowCommandExecution,
 		AllowFileOperations:   file.AllowFileOperations,
 		CommandPollInterval:   pollInterval,

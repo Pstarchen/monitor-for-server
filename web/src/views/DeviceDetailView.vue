@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, Copy, Cpu, Fan, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, ShieldCheck, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, Network, RefreshCw, ServerCog, ShieldAlert, ShieldCheck, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -65,6 +65,10 @@ const containers = computed(() => latest.value?.containers ?? [])
 const fans = computed(() => latest.value?.fans ?? [])
 const batteries = computed(() => latest.value?.batteries ?? [])
 const gpus = computed(() => latest.value?.gpus ?? [])
+const firewall = computed(() => latest.value?.firewall ?? null)
+const cronJobs = computed(() => latest.value?.cronJobs ?? [])
+const logs = computed(() => latest.value?.logs ?? [])
+const integrity = computed(() => latest.value?.integrity ?? [])
 const smartSummary = computed(() => ({
   passed: latest.value?.smartPassed ?? 0,
   failed: latest.value?.smartFailed ?? 0,
@@ -77,6 +81,14 @@ function smartTone(status: string | undefined) {
 
 function smartLabel(status: string | undefined) {
   return status === 'FAILED' ? '异常' : status === 'PASSED' ? '通过' : '未知'
+}
+
+function firewallTone(state: string | undefined) {
+  return state === 'ACTIVE' ? 'normal' : state === 'INACTIVE' ? 'critical' : 'warning'
+}
+
+function firewallLabel(state: string | undefined) {
+  return state === 'ACTIVE' ? '已启用' : state === 'INACTIVE' ? '未启用' : '未知'
 }
 
 function section(name: string): Record<string, unknown> {
@@ -263,6 +275,32 @@ onBeforeUnmount(() => {
 
         <el-tab-pane :label="`网卡 (${networkInterfaces.length})`" name="network">
           <article class="panel"><div class="panel-head"><div><h2>网络接口</h2><p>接口地址、链路状态与 MTU</p></div><Network :size="17" /></div><div v-if="networkInterfaces.length" class="table-wrap"><table class="data-table"><thead><tr><th>接口</th><th>地址</th><th>MAC</th><th>MTU</th><th>状态</th></tr></thead><tbody><tr v-for="item in networkInterfaces" :key="item.name"><td><strong>{{ item.name }}</strong></td><td><span v-if="item.addresses.length" class="interface-addresses">{{ item.addresses.join('、') }}</span><span v-else>--</span></td><td class="mono-value">{{ item.hardwareAddr || '--' }}</td><td>{{ item.mtu || '--' }}</td><td><StatusBadge :status="item.flags.includes('up') ? 'ONLINE' : 'OFFLINE'" /></td></tr></tbody></table></div><EmptyState v-else title="暂无网卡数据" description="Agent 首次上报后会展示接口地址、MAC 和链路状态。" /></article>
+        </el-tab-pane>
+
+        <el-tab-pane :label="`安全巡检 (${cronJobs.length + logs.length + integrity.length})`" name="security">
+          <div class="security-inspection-grid">
+            <article class="panel security-status-panel">
+              <div class="panel-head"><div><h2>防火墙状态</h2><p>Agent 自动识别主机上的防火墙服务</p></div><ShieldAlert :size="17" /></div>
+              <div v-if="firewall" class="security-status-value" :data-level="firewallTone(firewall.state)"><span><ShieldCheck :size="18" />{{ firewallLabel(firewall.state) }}</span><strong>{{ firewall.provider || '未知提供方' }}</strong><small>{{ firewall.message || '最近一次采集结果' }}</small></div>
+              <EmptyState v-else title="暂无防火墙数据" description="Agent 尚未完成安全巡检。" />
+            </article>
+            <article class="panel security-status-panel">
+              <div class="panel-head"><div><h2>完整性基线</h2><p>仅统计已配置路径中发生变化的文件</p></div><FileWarning :size="17" /></div>
+              <div class="security-status-value" :data-level="(latest?.integrityChanges ?? 0) ? 'critical' : 'normal'"><span><FileWarning :size="18" />{{ latest?.integrityChanges ?? 0 }} 个变更</span><strong>{{ integrity.length ? `${integrity.length} 个文件` : '未配置路径' }}</strong><small>{{ integrity.length ? '当前快照已建立' : '通过 --integrity-path 开启' }}</small></div>
+            </article>
+          </div>
+          <article class="panel security-list-panel">
+            <div class="panel-head"><div><h2>计划任务</h2><p>Linux Crontab 或 Windows Task Scheduler 摘要</p></div><ListChecks :size="17" /></div>
+            <div v-if="cronJobs.length" class="table-wrap"><table class="data-table"><thead><tr><th>来源</th><th>用户</th><th>计划</th><th>命令</th></tr></thead><tbody><tr v-for="job in cronJobs" :key="`${job.source}-${job.user}-${job.schedule}-${job.command}`"><td class="mono-value">{{ job.source }}</td><td>{{ job.user || '--' }}</td><td>{{ job.schedule }}</td><td class="mono-value security-command">{{ job.command }}</td></tr></tbody></table></div><EmptyState v-else title="暂无计划任务" description="未发现可读取的系统计划任务，或 Agent 没有足够权限。" />
+          </article>
+          <article class="panel security-list-panel">
+            <div class="panel-head"><div><h2>日志尾部</h2><p>仅显示配置白名单文件的最后 20 行</p></div><FileWarning :size="17" /></div>
+            <div v-if="logs.length" class="security-log-list"><div v-for="log in logs" :key="log.path" class="security-log-item"><header><strong class="mono-value">{{ log.path }}</strong><span>{{ bytes(log.sizeBytes) }} · {{ dateTime(log.modifiedAt) }}</span></header><pre><code v-for="(line, index) in log.lines" :key="index">{{ line }}{{ index < log.lines.length - 1 ? '\n' : '' }}</code></pre></div></div><EmptyState v-else title="未配置日志采集" description="出于隐私和性能考虑，日志默认不读取。通过 --log-path 指定需要巡检的文件。" />
+          </article>
+          <article class="panel security-list-panel">
+            <div class="panel-head"><div><h2>完整性文件</h2><p>SHA-256、大小和修改时间</p></div><ShieldCheck :size="17" /></div>
+            <div v-if="integrity.length" class="table-wrap"><table class="data-table"><thead><tr><th>路径</th><th>SHA-256</th><th>大小</th><th>修改时间</th></tr></thead><tbody><tr v-for="item in integrity" :key="item.path"><td class="mono-value">{{ item.path }}</td><td class="mono-value security-hash">{{ item.sha256 }}</td><td>{{ bytes(item.sizeBytes) }}</td><td>{{ dateTime(item.modifiedAt) }}</td></tr></tbody></table></div><EmptyState v-else title="未配置完整性路径" description="通过 --integrity-path 指定文件或目录后，Agent 会建立基线并检测后续变更。" />
+          </article>
         </el-tab-pane>
       </el-tabs>
 

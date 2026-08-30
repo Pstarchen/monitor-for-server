@@ -24,7 +24,11 @@ public record AgentReportRequest(
         @Size(max = 512) List<@Valid PortStats> ports,
         @Size(max = 100) List<@Valid ContainerStats> containers,
         @Size(max = 256) List<@Valid ProcessStats> processes,
-        @Size(max = 128) List<@Valid ServiceStatus> services
+        @Size(max = 128) List<@Valid ServiceStatus> services,
+        @Valid FirewallStatus firewall,
+        @Size(max = 256) List<@Valid CronJob> cronJobs,
+        @Size(max = 64) List<@Valid LogFile> logs,
+        @Size(max = 512) List<@Valid IntegrityItem> integrity
 ) {
     public record HostInfo(
             @NotBlank @Size(max = 255) String hostname, @Size(max = 80) String os, @Size(max = 80) String platform,
@@ -100,4 +104,17 @@ public record AgentReportRequest(
                                @Size(max = 80) String status) {}
 
     public record ServiceStatus(@NotBlank @Size(max = 255) String name, @Size(max = 80) String status) {}
+
+    public record FirewallStatus(@Size(max = 40) String provider, @Size(max = 20) String state,
+                                 @Size(max = 255) String message) {}
+
+    public record CronJob(@Size(max = 255) String source, @Size(max = 120) String user,
+                          @Size(max = 255) String schedule, @Size(max = 500) String command) {}
+
+    public record LogFile(@NotBlank @Size(max = 1024) String path, @PositiveOrZero long sizeBytes,
+                          @Size(max = 40) String modifiedAt,
+                          @Size(max = 20) List<@Size(max = 500) String> lines) {}
+
+    public record IntegrityItem(@NotBlank @Size(max = 1024) String path, @Size(max = 64) String sha256,
+                                @PositiveOrZero long sizeBytes, @Size(max = 40) String modifiedAt) {}
 }

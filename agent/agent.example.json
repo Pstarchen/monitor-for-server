@@ -13,6 +13,8 @@
   "disk_mountpoints": ["/", "/data"],
   "host_root": "",
   "docker_socket": "",
+  "log_paths": [],
+  "integrity_paths": [],
   "allow_command_execution": false,
   "allow_file_operations": false,
   "command_poll_interval": "1s",

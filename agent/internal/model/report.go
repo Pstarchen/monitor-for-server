@@ -14,6 +14,10 @@ type Report struct {
 	Containers        []ContainerStats   `json:"containers"`
 	Processes         []ProcessStats     `json:"processes"`
 	Services          []ServiceStatus    `json:"services"`
+	Firewall          FirewallStatus     `json:"firewall"`
+	CronJobs          []CronJob          `json:"cronJobs"`
+	Logs              []LogFile          `json:"logs"`
+	Integrity         []IntegrityItem    `json:"integrity"`
 }
 
 type HostInfo struct {
@@ -153,4 +157,31 @@ type ProcessStats struct {
 type ServiceStatus struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
+}
+
+type FirewallStatus struct {
+	Provider string `json:"provider"`
+	State    string `json:"state"`
+	Message  string `json:"message,omitempty"`
+}
+
+type CronJob struct {
+	Source   string `json:"source"`
+	User     string `json:"user,omitempty"`
+	Schedule string `json:"schedule"`
+	Command  string `json:"command"`
+}
+
+type LogFile struct {
+	Path       string   `json:"path"`
+	SizeBytes  int64    `json:"sizeBytes"`
+	ModifiedAt string   `json:"modifiedAt"`
+	Lines      []string `json:"lines"`
+}
+
+type IntegrityItem struct {
+	Path       string `json:"path"`
+	SHA256     string `json:"sha256"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	ModifiedAt string `json:"modifiedAt"`
 }

@@ -93,6 +93,12 @@ public class MetricSnapshot {
     @Column(name = "smart_unknown", nullable = false)
     private int smartUnknown;
 
+    @Column(name = "integrity_changes", nullable = false)
+    private int integrityChanges;
+
+    @Column(name = "firewall_inactive")
+    private Integer firewallInactive;
+
     @Column(name = "disks_json", columnDefinition = "TEXT")
     private String disksJson;
 
@@ -119,4 +125,16 @@ public class MetricSnapshot {
 
     @Column(name = "gpus_json", columnDefinition = "TEXT")
     private String gpusJson;
+
+    @Column(name = "firewall_json", columnDefinition = "TEXT")
+    private String firewallJson;
+
+    @Column(name = "cron_jobs_json", columnDefinition = "TEXT")
+    private String cronJobsJson;
+
+    @Column(name = "logs_json", columnDefinition = "TEXT")
+    private String logsJson;
+
+    @Column(name = "integrity_json", columnDefinition = "TEXT")
+    private String integrityJson;
 }

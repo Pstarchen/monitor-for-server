@@ -7,6 +7,8 @@ param(
     [string] $RepositoryUrl = 'https://github.com/Pstarchen/monitor-for-server.git',
     [string[]] $MonitoredService = @(),
     [string[]] $DiskMountpoint = @(),
+    [string[]] $LogPath = @(),
+    [string[]] $IntegrityPath = @(),
     [switch] $AllowInsecureHttp,
     [switch] $AllowCommandExecution,
     [switch] $AllowFileOperations,
@@ -173,6 +175,8 @@ try {
         skip_process_collection = $SkipProcesses.IsPresent
         skip_connection_count = $SkipConnections.IsPresent
         disk_mountpoints = $DiskMountpoint
+        log_paths = $LogPath
+        integrity_paths = $IntegrityPath
     }
     # Windows PowerShell 5 writes a BOM for -Encoding UTF8; Go's JSON decoder rejects it.
     $configJson = $config | ConvertTo-Json -Depth 4

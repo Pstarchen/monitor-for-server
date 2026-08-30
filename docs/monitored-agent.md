@@ -14,12 +14,16 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
   --device-id '<设备ID>' \
   --interval 3s \
   --disk / \
+  --log-path /var/log/nginx/error.log \
+  --integrity-path /etc/nginx \
   --service nginx
 ```
 
 `--server-url` 只填写域名或 `域名:端口` 即可。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 HTTP 并在配置中启用明文连接。也支持直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS；HTTP 仅适合没有证书的临时或内网部署。安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
 
 如果主机存在 `/var/run/docker.sock` 或 Docker 兼容的 Podman socket，Agent 会额外读取容器状态、CPU、内存和累计网络流量；受管 Docker Agent 也会尝试 `/host` 对应路径。没有 socket 或权限不足时自动跳过，不影响其他主机指标。运行时 socket 具备高权限，只应在受信任主机上挂载。
+
+安全巡检默认启用防火墙状态和计划任务摘要，但不会读取日志或文件内容。需要日志尾部或文件完整性检测时，显式添加一个或多个 `--log-path`、`--integrity-path`；路径必须为绝对路径，且只读取白名单范围。Windows 安装器对应参数为 `-LogPath` 和 `-IntegrityPath`。
 
 安装器会自动探测这两个标准路径；使用非标准 Docker/Podman socket 时，显式传入 `--docker-socket /path/to/runtime.sock`（或设置 `GUANLAN_DOCKER_SOCKET`）。Docker 模式会把它以只读方式映射到 Agent 容器的固定路径，自动更新时也会保留映射；本机 systemd 模式会将 Agent 服务加入 socket 所属组，避免常见的 `root:docker 0660` 权限导致容器列表为空。若指定路径不存在或不是 Unix socket，安装器会直接报错并停止。
 
@@ -58,6 +62,8 @@ $env:GUANLAN_AGENT_KEY = '<一次性密钥>'
   -BinaryPath 'C:\staging\guanlan-agent.exe' `
   -Interval '3s' `
   -DiskMountpoint 'C:\','D:' `
+  -LogPath 'C:\inetpub\logs\LogFiles\W3SVC1\u_ex240831.log' `
+  -IntegrityPath 'C:\inetpub\wwwroot' `
   -MonitoredService 'W3SVC','MSSQLSERVER'
 ```
 

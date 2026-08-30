@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
 
 export interface User {
   id: number
@@ -80,6 +80,10 @@ export interface ContainerMetric {
 export interface FanMetric { name: string; rpm: number }
 export interface BatteryMetric { name: string; percent: number; status: string }
 export interface GpuMetric { index: number; name: string; usagePercent: number; memoryUsedBytes: number; memoryTotalBytes: number; temperature: number }
+export interface FirewallMetric { provider: string; state: 'ACTIVE' | 'INACTIVE' | 'UNKNOWN' | string; message?: string }
+export interface CronJobMetric { source: string; user: string; schedule: string; command: string }
+export interface LogFileMetric { path: string; sizeBytes: number; modifiedAt: string; lines: string[] }
+export interface IntegrityMetric { path: string; sha256: string; sizeBytes: number; modifiedAt: string }
 
 export interface Metric {
   id: number
@@ -107,6 +111,8 @@ export interface Metric {
   smartPassed: number
   smartFailed: number
   smartUnknown: number
+  integrityChanges: number
+  firewallInactive: number | null
   networkInterfaces: NetworkInterfaceMetric[]
   ports: PortMetric[]
   containers: ContainerMetric[]
@@ -116,6 +122,10 @@ export interface Metric {
   fans: FanMetric[]
   batteries: BatteryMetric[]
   gpus: GpuMetric[]
+  firewall: FirewallMetric | null
+  cronJobs: CronJobMetric[]
+  logs: LogFileMetric[]
+  integrity: IntegrityMetric[]
 }
 
 export interface Device {
@@ -204,6 +214,8 @@ export interface Dashboard {
   networkSentBps: number
   networkRecvBps: number
   smartFailures: number
+  integrityChanges: number
+  firewallInactive: number
   devices: Device[]
   topDevices: Device[]
   recentAlerts: AlertEvent[]

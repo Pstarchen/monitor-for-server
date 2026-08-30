@@ -39,6 +39,8 @@ func main() {
 		DiskMountpoints:     cfg.DiskMountpoints,
 		HostRoot:            cfg.HostRoot,
 		DockerSocket:        cfg.DockerSocket,
+		LogPaths:            cfg.LogPaths,
+		IntegrityPaths:      cfg.IntegrityPaths,
 	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

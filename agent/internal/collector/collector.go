@@ -43,11 +43,15 @@ type Options struct {
 	DiskMountpoints     []string
 	HostRoot            string
 	DockerSocket        string
+	LogPaths            []string
+	IntegrityPaths      []string
 }
 
 func New(options Options) *Collector {
 	options.MonitoredServices = append([]string(nil), options.MonitoredServices...)
 	options.DiskMountpoints = append([]string(nil), options.DiskMountpoints...)
+	options.LogPaths = append([]string(nil), options.LogPaths...)
+	options.IntegrityPaths = append([]string(nil), options.IntegrityPaths...)
 	return &Collector{options: options}
 }
 
@@ -107,6 +111,10 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		Containers:        containers,
 		Processes:         processes,
 		Services:          collectServices(ctx, c.options.MonitoredServices, c.options.HostRoot),
+		Firewall:          collectFirewall(ctx, c.options.HostRoot),
+		CronJobs:          collectCronJobs(ctx, c.options.HostRoot),
+		Logs:              collectLogs(ctx, c.options.LogPaths, c.options.HostRoot),
+		Integrity:         collectIntegrity(ctx, c.options.IntegrityPaths, c.options.HostRoot),
 	}, nil
 }
 

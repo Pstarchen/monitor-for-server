@@ -111,6 +111,8 @@ public class AlertService {
                 case GPU_USAGE -> metric.getGpuUsage();
                 case BATTERY_PERCENT -> metric.getBatteryPercent();
                 case SMART_FAILURES -> (double) metric.getSmartFailed();
+                case INTEGRITY_CHANGES -> (double) metric.getIntegrityChanges();
+                case FIREWALL_INACTIVE -> metric.getFirewallInactive() == null ? null : metric.getFirewallInactive().doubleValue();
                 case TCP_CONNECTIONS -> (double) metric.getTcpConnections();
                 case NETWORK_RECV_BPS -> metric.getNetworkRecvBps();
                 case NETWORK_SENT_BPS -> metric.getNetworkSentBps();
@@ -177,6 +179,9 @@ public class AlertService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "资源使用率阈值必须在 0-100 之间");
             }
         }
+        if (request.metric() == AlertRule.Metric.FIREWALL_INACTIVE && request.threshold() > 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "防火墙状态阈值必须为 0 或 1");
+        }
     }
 
     private String message(AlertRule rule, Device device, double value) {
@@ -192,6 +197,8 @@ public class AlertService {
             case GPU_USAGE -> "GPU 使用率";
             case BATTERY_PERCENT -> "电池电量";
             case SMART_FAILURES -> "SMART 失败磁盘数";
+            case INTEGRITY_CHANGES -> "完整性变更文件数";
+            case FIREWALL_INACTIVE -> "防火墙未启用";
             case TCP_CONNECTIONS -> "TCP 连接数";
             case NETWORK_RECV_BPS -> "网络接收速率";
             case NETWORK_SENT_BPS -> "网络发送速率";
@@ -200,7 +207,8 @@ public class AlertService {
         };
         String unit = switch (rule.getMetric()) {
             case DEVICE_OFFLINE -> " 秒";
-            case TCP_CONNECTIONS, SMART_FAILURES -> " 个";
+            case TCP_CONNECTIONS, SMART_FAILURES, INTEGRITY_CHANGES -> " 个";
+            case FIREWALL_INACTIVE -> "";
             case NETWORK_RECV_BPS, NETWORK_SENT_BPS -> " B/s";
             case DISK_READ_BPS, DISK_WRITE_BPS -> " B/s";
             case LOAD_1 -> "";

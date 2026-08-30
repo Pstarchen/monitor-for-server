@@ -272,6 +272,24 @@ p, h1, h2, h3 { margin: 0; }
 .host-health-grid strong[data-level="warning"] { color: var(--warning); }
 .host-health-grid strong[data-level="critical"] { color: var(--danger); }
 .host-health-grid small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.security-inspection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.security-status-panel, .security-list-panel { min-width: 0; overflow: hidden; }
+.security-status-value { min-height: 132px; display: grid; align-content: center; gap: 7px; padding: 18px; background: var(--surface-subtle); }
+.security-status-value > span { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.security-status-value > strong { font-size: 19px; font-weight: 700; }
+.security-status-value > small { color: var(--muted); font-size: 10px; }
+.security-status-value[data-level="normal"] > span, .security-status-value[data-level="normal"] > strong { color: var(--success); }
+.security-status-value[data-level="warning"] > span, .security-status-value[data-level="warning"] > strong { color: var(--warning); }
+.security-status-value[data-level="critical"] > span, .security-status-value[data-level="critical"] > strong { color: var(--danger); }
+.security-list-panel { margin-top: 14px; }
+.security-command { max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.security-hash { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.security-log-list { display: grid; gap: 12px; padding: 14px; }
+.security-log-item { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-subtle); }
+.security-log-item > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.security-log-item > header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.security-log-item > header span { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+.security-log-item pre { max-height: 220px; margin: 0; overflow: auto; padding: 12px; color: var(--foreground); font: 11px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
 .hardware-health-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 0; }
 .hardware-health-list > span { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; }
 .hardware-health-list small { margin-left: 2px; color: var(--muted); }
@@ -910,6 +928,8 @@ p, h1, h2, h3 { margin: 0; }
   .trend-chart-grid > article:last-child { border-bottom: 0; }
   .host-health-grid { grid-template-columns: 1fr 1fr; }
   .host-health-grid > div { padding: 12px; }
+  .security-inspection-grid { grid-template-columns: 1fr; }
+  .security-log-item > header { align-items: flex-start; flex-direction: column; gap: 5px; }
   .interface-addresses { max-width: 180px; }
   .detail-summary-grid { grid-template-columns: 1fr; }
   .role-summary { grid-template-columns: 1fr; }
