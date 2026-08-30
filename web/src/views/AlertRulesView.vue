@@ -21,7 +21,7 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive<{ name: string; deviceId: string; metric: AlertMetric; threshold: number; severity: AlertSeverity; enabled: boolean }>({ name: '', deviceId: '', metric: 'CPU_USAGE', threshold: 80, severity: 'WARNING', enabled: true })
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
-const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', LOAD_1: '1 分钟负载', DISK_READ_BPS: '磁盘读取速率', DISK_WRITE_BPS: '磁盘写入速率', CONTAINER_CPU_USAGE: '容器 CPU 使用率', CONTAINER_MEMORY_USAGE: '容器内存使用率', GPU_USAGE: 'GPU 使用率', BATTERY_PERCENT: '电池电量', TCP_CONNECTIONS: 'TCP 连接数', NETWORK_RECV_BPS: '网络接收速率', NETWORK_SENT_BPS: '网络发送速率', TEMPERATURE: '最高温度', DEVICE_OFFLINE: '设备离线' }
+const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', LOAD_1: '1 分钟负载', DISK_READ_BPS: '磁盘读取速率', DISK_WRITE_BPS: '磁盘写入速率', CONTAINER_CPU_USAGE: '容器 CPU 使用率', CONTAINER_MEMORY_USAGE: '容器内存使用率', GPU_USAGE: 'GPU 使用率', BATTERY_PERCENT: '电池电量', SMART_FAILURES: 'SMART 失败磁盘数', TCP_CONNECTIONS: 'TCP 连接数', NETWORK_RECV_BPS: '网络接收速率', NETWORK_SENT_BPS: '网络发送速率', TEMPERATURE: '最高温度', DEVICE_OFFLINE: '设备离线' }
 
 async function load() {
   loading.value = true
@@ -47,6 +47,7 @@ function defaultThreshold(metric: AlertMetric) {
   if (metric === 'CONTAINER_CPU_USAGE') return 90
   if (metric === 'GPU_USAGE') return 90
   if (metric === 'BATTERY_PERCENT') return 20
+  if (metric === 'SMART_FAILURES') return 1
   if (metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS') return 10 * 1024 * 1024
   return 80
 }
@@ -54,6 +55,7 @@ function defaultThreshold(metric: AlertMetric) {
 function thresholdText(rule: AlertRule) {
   if (rule.metric === 'DEVICE_OFFLINE') return `${rule.threshold.toFixed(0)} 秒`
   if (rule.metric === 'TCP_CONNECTIONS') return `${rule.threshold.toFixed(0)} 个`
+  if (rule.metric === 'SMART_FAILURES') return `${rule.threshold.toFixed(0)} 个`
   if (rule.metric === 'TEMPERATURE') return `${rule.threshold.toFixed(1)} °C`
   if (rule.metric === 'LOAD_1') return rule.threshold.toFixed(2)
   if (rule.metric === 'DISK_READ_BPS' || rule.metric === 'DISK_WRITE_BPS') return rate(rule.threshold)
@@ -65,17 +67,19 @@ function metricMax(metric: AlertMetric) {
   if (metric === 'DEVICE_OFFLINE') return 86400
   if (metric === 'TEMPERATURE') return 200
   if (metric === 'LOAD_1') return 1024
+  if (metric === 'SMART_FAILURES') return 100
   if (metric === 'CPU_USAGE' || metric === 'MEMORY_USAGE' || metric === 'DISK_USAGE' || metric === 'CONTAINER_CPU_USAGE' || metric === 'CONTAINER_MEMORY_USAGE' || metric === 'GPU_USAGE' || metric === 'BATTERY_PERCENT') return 100
   return 1_000_000_000_000
 }
 
 function metricPrecision(metric: AlertMetric) {
-  return metric === 'DEVICE_OFFLINE' || metric === 'TCP_CONNECTIONS' || metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS' || metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS' ? 0 : metric === 'LOAD_1' ? 2 : 1
+  return metric === 'DEVICE_OFFLINE' || metric === 'TCP_CONNECTIONS' || metric === 'SMART_FAILURES' || metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS' || metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS' ? 0 : metric === 'LOAD_1' ? 2 : 1
 }
 
 function metricUnit(metric: AlertMetric) {
   if (metric === 'DEVICE_OFFLINE') return '秒'
   if (metric === 'TCP_CONNECTIONS') return '个'
+  if (metric === 'SMART_FAILURES') return '个'
   if (metric === 'TEMPERATURE') return '°C'
   if (metric === 'LOAD_1') return ''
   if (metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS') return 'B/s'

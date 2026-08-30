@@ -110,6 +110,7 @@ public class AlertService {
                 case CONTAINER_MEMORY_USAGE -> metric.getContainerMemoryUsage();
                 case GPU_USAGE -> metric.getGpuUsage();
                 case BATTERY_PERCENT -> metric.getBatteryPercent();
+                case SMART_FAILURES -> (double) metric.getSmartFailed();
                 case TCP_CONNECTIONS -> (double) metric.getTcpConnections();
                 case NETWORK_RECV_BPS -> metric.getNetworkRecvBps();
                 case NETWORK_SENT_BPS -> metric.getNetworkSentBps();
@@ -190,6 +191,7 @@ public class AlertService {
             case CONTAINER_MEMORY_USAGE -> "容器内存使用率";
             case GPU_USAGE -> "GPU 使用率";
             case BATTERY_PERCENT -> "电池电量";
+            case SMART_FAILURES -> "SMART 失败磁盘数";
             case TCP_CONNECTIONS -> "TCP 连接数";
             case NETWORK_RECV_BPS -> "网络接收速率";
             case NETWORK_SENT_BPS -> "网络发送速率";
@@ -198,7 +200,7 @@ public class AlertService {
         };
         String unit = switch (rule.getMetric()) {
             case DEVICE_OFFLINE -> " 秒";
-            case TCP_CONNECTIONS -> " 个";
+            case TCP_CONNECTIONS, SMART_FAILURES -> " 个";
             case NETWORK_RECV_BPS, NETWORK_SENT_BPS -> " B/s";
             case DISK_READ_BPS, DISK_WRITE_BPS -> " B/s";
             case LOAD_1 -> "";

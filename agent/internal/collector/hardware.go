@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -14,6 +15,34 @@ import (
 
 	"guanlan-monitor/agent/internal/model"
 )
+
+type smartctlPayload struct {
+	SmartStatus *struct {
+		Passed *bool `json:"passed"`
+	} `json:"smart_status"`
+	Temperature *struct {
+		Current float64 `json:"current"`
+	} `json:"temperature"`
+	PowerOnTime *struct {
+		Hours uint64 `json:"hours"`
+	} `json:"power_on_time"`
+	NVMeLog *struct {
+		CriticalWarning uint64  `json:"critical_warning"`
+		Temperature     float64 `json:"temperature"`
+		PercentageUsed  uint64  `json:"percentage_used"`
+		PowerOnHours    uint64  `json:"power_on_hours"`
+		MediaErrors     uint64  `json:"media_errors"`
+		UnsafeShutdowns uint64  `json:"unsafe_shutdowns"`
+	} `json:"nvme_smart_health_information_log"`
+	ATAAttributes *struct {
+		Table []struct {
+			Name string `json:"name"`
+			Raw  struct {
+				Value uint64 `json:"value"`
+			} `json:"raw"`
+		} `json:"table"`
+	} `json:"ata_smart_attributes"`
+}
 
 // collectFans reads the standard Linux hwmon interface. Missing sensors are
 // expected on VMs and most cloud hosts, so this function always degrades to an
@@ -112,6 +141,108 @@ func collectGPUs(ctx context.Context) []model.GPU {
 		result = append(result, gpu)
 	}
 	return result
+}
+
+// collectDiskHealth uses smartctl when the host exposes it. SMART is a
+// best-effort signal: cloud volumes, virtual disks and unprivileged agents
+// legitimately return UNKNOWN and must not make the report fail.
+func collectDiskHealth(ctx context.Context, disks []model.DiskStats, hostRoot string) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if _, err := exec.LookPath("smartctl"); err != nil {
+		return
+	}
+	results := make(map[string]*model.SmartHealth)
+	for index := range disks {
+		device := smartDevicePath(disks[index].Device, hostRoot)
+		if device == "" {
+			continue
+		}
+		if health, ok := results[device]; ok {
+			disks[index].Smart = health
+			continue
+		}
+		commandCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		output, err := exec.CommandContext(commandCtx, "smartctl", "-j", "-H", "-A", device).Output()
+		cancel()
+		health := parseSmartctlReport(output, err)
+		results[device] = health
+		disks[index].Smart = health
+	}
+}
+
+func smartDevicePath(device, hostRoot string) string {
+	device = strings.TrimSpace(device)
+	if !strings.HasPrefix(device, "/dev/") {
+		return ""
+	}
+	if hostRoot == "" {
+		return device
+	}
+	return hostPath(hostRoot, device)
+}
+
+func parseSmartctlReport(output []byte, commandErr error) *model.SmartHealth {
+	health := &model.SmartHealth{Status: "UNKNOWN", Message: "SMART 数据不可用"}
+	var payload smartctlPayload
+	if len(output) == 0 || json.Unmarshal(output, &payload) != nil {
+		if commandErr != nil {
+			health.Message = "smartctl 无法访问设备"
+		}
+		return health
+	}
+	if payload.Temperature != nil && payload.Temperature.Current >= -273 && payload.Temperature.Current <= 1000 {
+		health.Temperature = int64(payload.Temperature.Current)
+	}
+	if payload.PowerOnTime != nil {
+		health.PowerOnHours = payload.PowerOnTime.Hours
+	}
+	if payload.NVMeLog != nil {
+		health.Temperature = int64(payload.NVMeLog.Temperature)
+		health.PercentageUsed = minInt64(int64(payload.NVMeLog.PercentageUsed), 100)
+		health.PowerOnHours = payload.NVMeLog.PowerOnHours
+		health.MediaErrors = payload.NVMeLog.MediaErrors
+		health.UnsafeShutdowns = payload.NVMeLog.UnsafeShutdowns
+		if payload.NVMeLog.CriticalWarning > 0 {
+			health.Status = "FAILED"
+			health.Message = "NVMe 报告关键警告"
+			return health
+		}
+	}
+	if payload.ATAAttributes != nil {
+		for _, attribute := range payload.ATAAttributes.Table {
+			switch strings.ToLower(strings.TrimSpace(attribute.Name)) {
+			case "percentage used", "percent lifetime used":
+				health.PercentageUsed = minInt64(int64(attribute.Raw.Value), 100)
+			case "media and data integrity errors", "reported uncorrectable errors":
+				health.MediaErrors = attribute.Raw.Value
+			}
+		}
+	}
+	if payload.SmartStatus != nil && payload.SmartStatus.Passed != nil {
+		if *payload.SmartStatus.Passed {
+			health.Status = "PASSED"
+			health.Message = "SMART 自检通过"
+		} else {
+			health.Status = "FAILED"
+			health.Message = "SMART 自检未通过"
+		}
+	}
+	if health.Status == "UNKNOWN" && commandErr == nil {
+		health.Message = "设备未提供可判定的 SMART 状态"
+	}
+	return health
+}
+
+func minInt64(value, maximum int64) int64 {
+	if value < 0 {
+		return 0
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
 }
 
 func parseHardwareFloat(value string, minimum, maximum float64) float64 {

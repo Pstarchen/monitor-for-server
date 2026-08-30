@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, Copy, Cpu, Fan, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, Thermometer, Waypoints, Zap } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, Copy, Cpu, Fan, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, ShieldCheck, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -65,6 +65,19 @@ const containers = computed(() => latest.value?.containers ?? [])
 const fans = computed(() => latest.value?.fans ?? [])
 const batteries = computed(() => latest.value?.batteries ?? [])
 const gpus = computed(() => latest.value?.gpus ?? [])
+const smartSummary = computed(() => ({
+  passed: latest.value?.smartPassed ?? 0,
+  failed: latest.value?.smartFailed ?? 0,
+  unknown: latest.value?.smartUnknown ?? 0,
+}))
+
+function smartTone(status: string | undefined) {
+  return status === 'FAILED' ? 'critical' : status === 'PASSED' ? 'normal' : 'warning'
+}
+
+function smartLabel(status: string | undefined) {
+  return status === 'FAILED' ? '异常' : status === 'PASSED' ? '通过' : '未知'
+}
 
 function section(name: string): Record<string, unknown> {
   const value = device.value?.hardware?.[name]
@@ -180,7 +193,7 @@ onBeforeUnmount(() => {
           <article v-else class="panel"><EmptyState title="暂无趋势数据" description="Agent 首次上报后即可查看所选时间范围内的指标曲线。" /></article>
 
           <article class="panel host-health-panel">
-            <div class="panel-head"><div><h2>主机健康</h2><p>温度、每核负载与交换分区状态</p></div><Gauge :size="17" /></div>
+            <div class="panel-head"><div><h2>主机健康</h2><p>温度、SMART、每核负载与交换分区状态</p></div><Gauge :size="17" /></div>
             <div class="host-health-grid">
               <div><span><Thermometer :size="14" />最高温度</span><strong :data-level="temperatureTone(maxTemperature)">{{ temperatures.length ? `${maxTemperature.toFixed(1)} °C` : '--' }}</strong><small>{{ temperatures.length ? `${temperatures.length} 个传感器` : 'Agent 未返回温度传感器' }}</small></div>
               <div><span><Cpu :size="14" />每核 CPU 峰值</span><strong>{{ perCoreUsage.length ? percent(Math.max(...perCoreUsage)) : '--' }}</strong><small>{{ perCoreUsage.length ? `${perCoreUsage.length} 个逻辑核心` : '暂无每核数据' }}</small></div>
@@ -189,6 +202,7 @@ onBeforeUnmount(() => {
               <div><span><Fan :size="14" />风扇转速</span><strong>{{ fans.length ? `${Math.round(Math.max(...fans.map((fan) => fan.rpm)))} RPM` : '--' }}</strong><small>{{ fans.length ? `${fans.length} 个风扇` : '未检测到风扇传感器' }}</small></div>
               <div><span><BatteryCharging :size="14" />电池电量</span><strong>{{ latest?.batteryPercent == null ? '--' : percent(latest.batteryPercent) }}</strong><small>{{ batteries.length ? batteries.map((battery) => battery.status || '未知').join(' · ') : '未检测到电池' }}</small></div>
               <div><span><Zap :size="14" />GPU 使用率</span><strong>{{ latest?.gpuUsage == null ? '--' : percent(latest.gpuUsage) }}</strong><small>{{ gpus.length ? `${gpus.length} 个 GPU` : '未检测到 NVIDIA GPU' }}</small></div>
+              <div><span><ShieldCheck :size="14" />磁盘 SMART</span><strong :data-level="smartSummary.failed ? 'critical' : smartSummary.unknown ? 'warning' : 'normal'">{{ smartSummary.failed ? `${smartSummary.failed} 个异常` : smartSummary.passed ? `${smartSummary.passed} 个通过` : '--' }}</strong><small>{{ smartSummary.unknown ? `${smartSummary.unknown} 个未知` : '健康自检状态' }}</small></div>
             </div>
             <div v-if="temperatures.length" class="temperature-list"><span v-for="item in temperatures" :key="item.sensor" :data-level="temperatureTone(item.value)"><Thermometer :size="12" />{{ item.sensor }} {{ item.value.toFixed(1) }} °C</span></div>
             <div v-if="perCoreUsage.length" class="core-usage-list" aria-label="每核 CPU 使用率"><span v-for="(value, index) in perCoreUsage" :key="index" :title="`核心 ${index + 1}: ${percent(value)}`"><i><b :data-level="temperatureTone(value)" :style="{ height: `${Math.min(100, value)}%` }" /></i><small>{{ index + 1 }}</small></span></div>
@@ -228,7 +242,7 @@ onBeforeUnmount(() => {
         </el-tab-pane>
 
         <el-tab-pane :label="`磁盘 (${latest?.disks.length ?? 0})`" name="disks">
-          <article class="panel"><div v-if="latest?.disks.length" class="table-wrap"><table class="data-table"><thead><tr><th>挂载点</th><th>设备</th><th>文件系统</th><th>使用率</th><th>已用 / 总量</th><th>读取</th><th>写入</th></tr></thead><tbody><tr v-for="disk in latest.disks" :key="`${disk.device}-${disk.mountpoint}`"><td><strong>{{ disk.mountpoint }}</strong></td><td>{{ disk.device }}</td><td>{{ disk.fileSystem || '--' }}</td><td>{{ percent(disk.usagePercent) }}</td><td>{{ bytes(disk.usedBytes) }} / {{ bytes(disk.totalBytes) }}</td><td>{{ rate(disk.readBytesPerSec) }}</td><td>{{ rate(disk.writeBytesPerSec) }}</td></tr></tbody></table></div><EmptyState v-else title="暂无磁盘数据" /></article>
+          <article class="panel"><div v-if="latest?.disks.length" class="table-wrap"><table class="data-table"><thead><tr><th>挂载点</th><th>设备</th><th>文件系统</th><th>使用率</th><th>已用 / 总量</th><th>读取</th><th>写入</th><th>SMART</th></tr></thead><tbody><tr v-for="disk in latest.disks" :key="`${disk.device}-${disk.mountpoint}`"><td><strong>{{ disk.mountpoint }}</strong></td><td>{{ disk.device }}</td><td>{{ disk.fileSystem || '--' }}</td><td>{{ percent(disk.usagePercent) }}</td><td>{{ bytes(disk.usedBytes) }} / {{ bytes(disk.totalBytes) }}</td><td>{{ rate(disk.readBytesPerSec) }}</td><td>{{ rate(disk.writeBytesPerSec) }}</td><td><span v-if="disk.smart" class="smart-status" :data-level="smartTone(disk.smart.status)" :title="disk.smart.message"><TriangleAlert v-if="disk.smart.status === 'FAILED'" :size="13" /><ShieldCheck v-else :size="13" />{{ smartLabel(disk.smart.status) }}<small v-if="disk.smart.temperature">{{ disk.smart.temperature }} °C</small></span><span v-else class="muted-value">未采集</span></td></tr></tbody></table></div><EmptyState v-else title="暂无磁盘数据" /></article>
         </el-tab-pane>
 
         <el-tab-pane :label="`进程 (${latest?.processes.length ?? 0})`" name="processes">

@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
 
 export interface User {
   id: number
@@ -23,6 +23,17 @@ export interface DiskMetric {
   usagePercent: number
   readBytesPerSec: number
   writeBytesPerSec: number
+  smart?: SmartHealthMetric | null
+}
+
+export interface SmartHealthMetric {
+  status: 'PASSED' | 'FAILED' | 'UNKNOWN' | string
+  message: string
+  temperature: number
+  powerOnHours: number
+  percentageUsed: number
+  mediaErrors: number
+  unsafeShutdowns: number
 }
 
 export interface ProcessMetric {
@@ -93,6 +104,9 @@ export interface Metric {
   batteryPercent: number | null
   containerCpuUsage: number | null
   containerMemoryUsage: number | null
+  smartPassed: number
+  smartFailed: number
+  smartUnknown: number
   networkInterfaces: NetworkInterfaceMetric[]
   ports: PortMetric[]
   containers: ContainerMetric[]
@@ -189,6 +203,7 @@ export interface Dashboard {
   averageDisk: number
   networkSentBps: number
   networkRecvBps: number
+  smartFailures: number
   devices: Device[]
   topDevices: Device[]
   recentAlerts: AlertEvent[]

@@ -66,7 +66,15 @@ public record AgentReportRequest(
             @Size(max = 255) String device, @Size(max = 255) String mountpoint, @Size(max = 80) String fileSystem,
             @PositiveOrZero long totalBytes, @PositiveOrZero long usedBytes, @PositiveOrZero long freeBytes,
             @Min(0) @Max(100) double usagePercent,
-            @PositiveOrZero double readBytesPerSec, @PositiveOrZero double writeBytesPerSec
+            @PositiveOrZero double readBytesPerSec, @PositiveOrZero double writeBytesPerSec,
+            @Valid SmartHealth smart
+    ) {}
+
+    public record SmartHealth(
+            @Size(max = 16) String status, @Size(max = 255) String message,
+            @PositiveOrZero long temperature, @PositiveOrZero long powerOnHours,
+            @Min(0) @Max(100) long percentageUsed, @PositiveOrZero long mediaErrors,
+            @PositiveOrZero long unsafeShutdowns
     ) {}
 
     public record NetworkStats(@PositiveOrZero double bytesSentPerSec, @PositiveOrZero double bytesRecvPerSec,

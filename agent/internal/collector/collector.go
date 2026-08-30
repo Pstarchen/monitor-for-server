@@ -66,6 +66,7 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		return model.Report{}, err
 	}
 	disks, diskRead, diskWrite := collectDisks(ctx, c.options.DiskMountpoints, c.options.HostRoot)
+	collectDiskHealth(ctx, disks, c.options.HostRoot)
 	network, netSent, netRecv := collectNetwork(ctx, c.options.SkipConnectionCount)
 	interfaces := collectNetworkInterfaces(ctx)
 	ports := collectListeningPorts(ctx, c.options.SkipConnectionCount)

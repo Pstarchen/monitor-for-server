@@ -84,6 +84,15 @@ public class MetricSnapshot {
     @Column(name = "container_memory_usage")
     private Double containerMemoryUsage;
 
+    @Column(name = "smart_passed", nullable = false)
+    private int smartPassed;
+
+    @Column(name = "smart_failed", nullable = false)
+    private int smartFailed;
+
+    @Column(name = "smart_unknown", nullable = false)
+    private int smartUnknown;
+
     @Column(name = "disks_json", columnDefinition = "TEXT")
     private String disksJson;
 

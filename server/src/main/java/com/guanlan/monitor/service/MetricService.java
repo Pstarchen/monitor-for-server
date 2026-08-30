@@ -73,6 +73,9 @@ public class MetricService {
         metric.setBatteryPercent(minOptional(batteries.stream().mapToDouble(battery -> clampPercent(battery.percent())).boxed().toList()));
         metric.setContainerCpuUsage(maxOptional(containers.stream().mapToDouble(container -> nonNegativeFinite(container.cpuPercent())).boxed().toList()));
         metric.setContainerMemoryUsage(maxOptional(containers.stream().mapToDouble(container -> clampPercent(container.memoryPercent())).boxed().toList()));
+        metric.setSmartPassed(smartCount(disks, "PASSED"));
+        metric.setSmartFailed(smartCount(disks, "FAILED"));
+        metric.setSmartUnknown(smartCount(disks, "UNKNOWN"));
         metric.setDisksJson(json(disks));
         metric.setProcessesJson(json(report.processes() == null ? List.of() : report.processes()));
         metric.setServicesJson(json(report.services() == null ? List.of() : report.services()));
@@ -123,6 +126,13 @@ public class MetricService {
 
     private Double minOptional(List<Double> values) {
         return values.stream().filter(value -> value != null && Double.isFinite(value)).min(Double::compareTo).orElse(null);
+    }
+
+    private int smartCount(List<AgentReportRequest.DiskStats> disks, String status) {
+        return (int) disks.stream()
+                .filter(disk -> disk != null && disk.smart() != null)
+                .filter(disk -> status.equalsIgnoreCase(disk.smart().status()))
+                .count();
     }
     private String join(String first, String second) { return ((first == null ? "" : first) + " " + (second == null ? "" : second)).trim(); }
 }

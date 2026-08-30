@@ -275,6 +275,11 @@ p, h1, h2, h3 { margin: 0; }
 .hardware-health-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 0; }
 .hardware-health-list > span { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; }
 .hardware-health-list small { margin-left: 2px; color: var(--muted); }
+.smart-status { display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-size: 11px; white-space: nowrap; }
+.smart-status[data-level="warning"] { color: var(--warning); }
+.smart-status[data-level="critical"] { color: var(--danger); }
+.smart-status small { color: var(--muted); font-size: 10px; }
+.muted-value { color: var(--muted); font-size: 11px; }
 .temperature-list { display: flex; flex-wrap: wrap; gap: 7px; padding: 11px 16px; border-top: 1px solid var(--border); }
 .temperature-list span { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 999px; color: var(--muted); background: var(--surface-subtle); font-size: 10px; }
 .temperature-list span[data-level="warning"] { color: var(--warning); background: var(--warning-bg); }

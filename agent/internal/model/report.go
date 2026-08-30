@@ -79,15 +79,28 @@ type MemoryStats struct {
 }
 
 type DiskStats struct {
-	Device           string  `json:"device"`
-	Mountpoint       string  `json:"mountpoint"`
-	FileSystem       string  `json:"fileSystem"`
-	TotalBytes       uint64  `json:"totalBytes"`
-	UsedBytes        uint64  `json:"usedBytes"`
-	FreeBytes        uint64  `json:"freeBytes"`
-	UsagePercent     float64 `json:"usagePercent"`
-	ReadBytesPerSec  float64 `json:"readBytesPerSec"`
-	WriteBytesPerSec float64 `json:"writeBytesPerSec"`
+	Device           string       `json:"device"`
+	Mountpoint       string       `json:"mountpoint"`
+	FileSystem       string       `json:"fileSystem"`
+	TotalBytes       uint64       `json:"totalBytes"`
+	UsedBytes        uint64       `json:"usedBytes"`
+	FreeBytes        uint64       `json:"freeBytes"`
+	UsagePercent     float64      `json:"usagePercent"`
+	ReadBytesPerSec  float64      `json:"readBytesPerSec"`
+	WriteBytesPerSec float64      `json:"writeBytesPerSec"`
+	Smart            *SmartHealth `json:"smart,omitempty"`
+}
+
+// SmartHealth is intentionally optional: virtual disks, containers and cloud
+// volumes commonly do not expose SMART data to the Agent.
+type SmartHealth struct {
+	Status          string `json:"status"`
+	Message         string `json:"message,omitempty"`
+	Temperature     int64  `json:"temperature"`
+	PowerOnHours    uint64 `json:"powerOnHours"`
+	PercentageUsed  int64  `json:"percentageUsed"`
+	MediaErrors     uint64 `json:"mediaErrors"`
+	UnsafeShutdowns uint64 `json:"unsafeShutdowns"`
 }
 
 type NetworkStats struct {

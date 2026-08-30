@@ -9,6 +9,8 @@ ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/guanlan-agent ./cmd/agent
 
 FROM alpine:3.22 AS artifact
-RUN apk add --no-cache ca-certificates
+# smartmontools is optional at runtime: the collector reports UNKNOWN when
+# host devices or the required privileges are not exposed to the container.
+RUN apk add --no-cache ca-certificates smartmontools
 COPY --from=build /out/guanlan-agent /guanlan-agent
 ENTRYPOINT ["/guanlan-agent"]

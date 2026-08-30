@@ -136,6 +136,7 @@ services:
       CONTROLLER_AGENT_SERVER_URL: http://127.0.0.1:${WEB_PORT:-18080}
     volumes:
       - /:/host:ro
+      - /dev:/host/dev:ro
       - controller-agent-spool:/var/lib/guanlan-agent/spool
     tmpfs:
       - /run
