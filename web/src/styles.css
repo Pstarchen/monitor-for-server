@@ -209,6 +209,8 @@ p, h1, h2, h3 { margin: 0; }
 .data-table tbody tr:hover { background: color-mix(in srgb, var(--surface-subtle) 62%, transparent); }
 .data-table td > strong, .data-table td > small { display: block; }
 .data-table td > small { max-width: 290px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; }
+.data-table td > .container-network { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.container-image { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .clickable-row { cursor: pointer; }
 .clickable-row:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
 .actions-column { width: 1%; text-align: right !important; }

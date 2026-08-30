@@ -86,4 +86,7 @@ public class MetricSnapshot {
 
     @Column(name = "ports_json", columnDefinition = "TEXT")
     private String portsJson;
+
+    @Column(name = "containers_json", columnDefinition = "TEXT")
+    private String containersJson;
 }

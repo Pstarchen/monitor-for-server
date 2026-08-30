@@ -80,7 +80,7 @@ X-Agent-Key: <agent-key>
 Content-Type: application/json
 ```
 
-请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`processes` 与 `services`。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
+请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。`containers` 是可选的 Docker 容器摘要，最多 100 条；无法访问 Docker socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
 
 ## Agent 任务
 
@@ -243,7 +243,7 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 
 服务监控请求还可设置 `failureThreshold`（连续失败次数，1-20）和 `latencyThresholdMs`（延迟告警阈值，0 表示关闭）。服务异常从正常进入和恢复时分别发送一次通知，避免按探测周期重复发送。结果中的 `certificateExpiresAt` 仅在 HTTPS 目标成功完成 TLS 握手时返回。
 
-告警规则支持 `CPU_USAGE`、`MEMORY_USAGE`、`DISK_USAGE`、`TCP_CONNECTIONS` 和 `DEVICE_OFFLINE`；连接数阈值使用连接数，离线阈值使用秒，其余资源阈值使用百分比。
+告警规则支持 `CPU_USAGE`、`MEMORY_USAGE`、`DISK_USAGE`、`TCP_CONNECTIONS`、`NETWORK_RECV_BPS`、`NETWORK_SENT_BPS`、`TEMPERATURE` 和 `DEVICE_OFFLINE`；连接数阈值使用连接数，网络阈值使用 B/s，温度阈值使用 °C，离线阈值使用秒，其余资源阈值使用百分比。
 
 系统设置请求：
 

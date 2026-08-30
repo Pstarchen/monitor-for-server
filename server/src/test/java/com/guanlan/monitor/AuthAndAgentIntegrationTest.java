@@ -286,7 +286,7 @@ class AuthAndAgentIntegrationTest {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("inventory-node", "lab", "tests", "127.0.0.4"));
         String report = sampleReport()
                 .replace("\"temperatures\":[]", "\"temperatures\":[{\"sensor\":\"cpu-package\",\"value\":72.5}]")
-                .replace("\"processes\":[]", "\"networkInterfaces\":[{\"name\":\"eth0\",\"mtu\":1500,\"hardwareAddr\":\"00:11:22:33:44:55\",\"flags\":[\"up\"],\"addresses\":[\"10.0.0.4\"]}],\"ports\":[{\"protocol\":\"TCP\",\"address\":\"0.0.0.0\",\"port\":443,\"pid\":12}],\"processes\":[]");
+                .replace("\"processes\":[]", "\"networkInterfaces\":[{\"name\":\"eth0\",\"mtu\":1500,\"hardwareAddr\":\"00:11:22:33:44:55\",\"flags\":[\"up\"],\"addresses\":[\"10.0.0.4\"]}],\"ports\":[{\"protocol\":\"TCP\",\"address\":\"0.0.0.0\",\"port\":443,\"pid\":12}],\"containers\":[{\"id\":\"abc123\",\"name\":\"api\",\"image\":\"example/api:latest\",\"state\":\"running\",\"status\":\"Up 2 hours\",\"cpuPercent\":12.5,\"memoryUsageBytes\":800,\"memoryLimitBytes\":1000,\"memoryPercent\":80.0,\"networkRxBytes\":13,\"networkTxBytes\":27,\"restartCount\":0}],\"processes\":[]");
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
                         .header("X-Device-Id", credential.device().id())
@@ -296,7 +296,8 @@ class AuthAndAgentIntegrationTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.temperatureMax").value(72.5))
                 .andExpect(jsonPath("$.networkInterfaces[0].name").value("eth0"))
-                .andExpect(jsonPath("$.ports[0].port").value(443));
+                .andExpect(jsonPath("$.ports[0].port").value(443))
+                .andExpect(jsonPath("$.containers[0].name").value("api"));
     }
 
     @Test

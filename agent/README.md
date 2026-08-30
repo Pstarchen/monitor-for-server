@@ -17,6 +17,7 @@ Agent 每轮先将报告原子写入磁盘缓冲，再按时间顺序上报。�
 - `skip_connection_count`：跳过 TCP 连接枚举，降低连接密集型主机的采集开销。
 - `disk_mountpoints`：仅采集列出的挂载点；空数组表示采集全部可用分区。
 - `host_root`：仅供 Linux 总终端的受管 Agent 使用。设置为只读宿主机挂载目录（安装器使用 `/host`）后，磁盘容量从宿主机读取；普通 Agent 保持空值。
+- `docker_socket`：可选 Docker/Podman 兼容 Unix socket 路径；留空时自动探测 `/var/run/docker.sock`、`/run/podman/podman.sock` 及受管 Agent 的 `/host` 对应路径。Agent 只调用兼容 API 的容器列表和统计 GET 接口，无法访问运行时或权限不足时返回空列表。挂载运行时 socket 等同于授予高权限，请仅在受信任主机上启用。
 - `monitored_services`：检查指定 systemd 服务或 Windows 服务状态。
 - 默认采集监听中的 TCP/UDP 端口和网络接口明细；端口枚举会复用 `skip_connection_count` 开关，受限主机可关闭。
 - `allow_command_execution`：启用服务端一次性命令任务，默认关闭；只有明确开启后 Agent 才会轮询和执行任务。
@@ -26,4 +27,4 @@ Agent 每轮先将报告原子写入磁盘缓冲，再按时间顺序上报。�
 
 Linux 安装器可在确认主机用途后通过 `--allow-command-execution` 和 `--allow-file-operations` 写入上述开关；Windows 安装器对应使用 `-AllowCommandExecution` 和 `-AllowFileOperations`。未传参数时两项均保持关闭。
 
-以上字段均可在 `agent.example.json` 中查看完整示例。省略时保持完整采集。主机温度、每核 CPU、监听端口和网卡信息会随监控报告保存，并在设备详情中按权限展示。
+以上字段均可在 `agent.example.json` 中查看完整示例。省略时保持完整采集。主机温度、每核 CPU、监听端口、网卡和 Docker 容器信息会随监控报告保存，并在设备详情中按权限展示。

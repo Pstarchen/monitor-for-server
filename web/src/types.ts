@@ -51,6 +51,21 @@ export interface PortMetric {
   pid: number
 }
 
+export interface ContainerMetric {
+  id: string
+  name: string
+  image: string
+  state: string
+  status: string
+  cpuPercent: number
+  memoryUsageBytes: number
+  memoryLimitBytes: number
+  memoryPercent: number
+  networkRxBytes: number
+  networkTxBytes: number
+  restartCount: number
+}
+
 export interface Metric {
   id: number
   deviceId: string
@@ -72,6 +87,7 @@ export interface Metric {
   temperatureMax: number
   networkInterfaces: NetworkInterfaceMetric[]
   ports: PortMetric[]
+  containers: ContainerMetric[]
   disks: DiskMetric[]
   processes: ProcessMetric[]
   services: ServiceMetric[]

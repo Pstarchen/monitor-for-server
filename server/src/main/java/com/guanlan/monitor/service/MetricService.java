@@ -70,6 +70,7 @@ public class MetricService {
         metric.setServicesJson(json(report.services() == null ? List.of() : report.services()));
         metric.setNetworkInterfacesJson(json(report.networkInterfaces() == null ? List.of() : report.networkInterfaces()));
         metric.setPortsJson(json(report.ports() == null ? List.of() : report.ports()));
+        metric.setContainersJson(json(report.containers() == null ? List.of() : report.containers()));
         metrics.save(metric);
 
         MetricView view = MetricView.from(metric, mapper);

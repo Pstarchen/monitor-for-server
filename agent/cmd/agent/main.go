@@ -38,6 +38,7 @@ func main() {
 		SkipConnectionCount: cfg.SkipConnectionCount,
 		DiskMountpoints:     cfg.DiskMountpoints,
 		HostRoot:            cfg.HostRoot,
+		DockerSocket:        cfg.DockerSocket,
 	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

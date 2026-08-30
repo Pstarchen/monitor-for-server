@@ -19,6 +19,8 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
 
 `--server-url` 只填写域名或 `域名:端口` 即可。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 HTTP 并在配置中启用明文连接。也支持直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS；HTTP 仅适合没有证书的临时或内网部署。安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
 
+如果主机存在 `/var/run/docker.sock` 或 Docker 兼容的 Podman socket，Agent 会额外读取容器状态、CPU、内存和累计网络流量；受管 Docker Agent 也会尝试 `/host` 对应路径。没有 socket 或权限不足时自动跳过，不影响其他主机指标。运行时 socket 具备高权限，只应在受信任主机上挂载。
+
 ```bash
 docker ps --filter name=guanlan-agent
 docker logs --tail 100 guanlan-agent

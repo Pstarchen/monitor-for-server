@@ -27,6 +27,7 @@ type Config struct {
 	SkipConnectionCount   bool
 	DiskMountpoints       []string
 	HostRoot              string
+	DockerSocket          string
 	AllowCommandExecution bool
 	AllowFileOperations   bool
 	CommandPollInterval   time.Duration
@@ -47,6 +48,7 @@ type fileConfig struct {
 	SkipConnectionCount   bool     `json:"skip_connection_count"`
 	DiskMountpoints       []string `json:"disk_mountpoints"`
 	HostRoot              string   `json:"host_root"`
+	DockerSocket          string   `json:"docker_socket"`
 	AllowCommandExecution bool     `json:"allow_command_execution"`
 	AllowFileOperations   bool     `json:"allow_file_operations"`
 	CommandPollInterval   string   `json:"command_poll_interval"`
@@ -109,6 +111,7 @@ func Load(args []string) (Config, error) {
 		SkipConnectionCount:   file.SkipConnectionCount,
 		DiskMountpoints:       cleanList(file.DiskMountpoints),
 		HostRoot:              strings.TrimSpace(file.HostRoot),
+		DockerSocket:          strings.TrimSpace(file.DockerSocket),
 		AllowCommandExecution: file.AllowCommandExecution,
 		AllowFileOperations:   file.AllowFileOperations,
 		CommandPollInterval:   pollInterval,

@@ -65,7 +65,8 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
         "skip_process_collection":true,
         "skip_connection_count":true,
 		"disk_mountpoints":["/", " /data ", "/data", ""],
-		"host_root":" /host "
+		"host_root":" /host ",
+		"docker_socket":" /host/var/run/docker.sock "
     }`)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
@@ -82,6 +83,9 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
 	}
 	if cfg.HostRoot != "/host" {
 		t.Fatalf("unexpected host root: %q", cfg.HostRoot)
+	}
+	if cfg.DockerSocket != "/host/var/run/docker.sock" {
+		t.Fatalf("unexpected docker socket: %q", cfg.DockerSocket)
 	}
 }
 

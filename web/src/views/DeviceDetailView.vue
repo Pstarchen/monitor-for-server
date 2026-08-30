@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Copy, Cpu, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, Thermometer, Waypoints } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Box, Copy, Cpu, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, Thermometer, Waypoints } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -61,6 +61,7 @@ const perCoreUsage = computed(() => {
 const maxTemperature = computed(() => temperatures.value.reduce((max, item) => Math.max(max, item.value), 0))
 const networkInterfaces = computed(() => latest.value?.networkInterfaces ?? [])
 const ports = computed(() => latest.value?.ports ?? [])
+const containers = computed(() => latest.value?.containers ?? [])
 
 function section(name: string): Record<string, unknown> {
   const value = device.value?.hardware?.[name]
@@ -229,6 +230,10 @@ onBeforeUnmount(() => {
 
         <el-tab-pane :label="`端口 (${ports.length})`" name="ports">
           <article class="panel"><div v-if="ports.length" class="table-wrap"><table class="data-table"><thead><tr><th>协议</th><th>监听地址</th><th>端口</th><th>进程 PID</th></tr></thead><tbody><tr v-for="port in ports" :key="`${port.protocol}-${port.address}-${port.port}-${port.pid}`"><td><StatusBadge :status="port.protocol === 'TCP' ? 'ONLINE' : 'INFO'" /></td><td class="mono-value">{{ port.address }}</td><td><strong class="mono-value">{{ port.port }}</strong></td><td class="mono-value">{{ port.pid || '--' }}</td></tr></tbody></table></div><EmptyState v-else title="暂无监听端口" description="Agent 未返回监听端口，或已在轻量采集配置中跳过连接枚举。" /></article>
+        </el-tab-pane>
+
+        <el-tab-pane :label="`容器 (${containers.length})`" name="containers">
+          <article class="panel"><div class="panel-head"><div><h2>Docker 容器</h2><p>运行状态、资源占用与累计网络流量</p></div><Box :size="17" /></div><div v-if="containers.length" class="table-wrap"><table class="data-table"><thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th><th>网络</th><th>重启</th></tr></thead><tbody><tr v-for="container in containers" :key="container.id"><td><strong>{{ container.name }}</strong><small class="mono-value">{{ container.id.slice(0, 12) }}</small></td><td class="mono-value container-image">{{ container.image || '--' }}</td><td><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /><small>{{ container.status || '--' }}</small></td><td>{{ percent(container.cpuPercent) }}</td><td>{{ percent(container.memoryPercent) }}<small>{{ bytes(container.memoryUsageBytes) }} / {{ bytes(container.memoryLimitBytes) }}</small></td><td><span class="container-network"><ArrowUp :size="12" />{{ bytes(container.networkTxBytes) }}</span><span class="container-network"><ArrowDown :size="12" />{{ bytes(container.networkRxBytes) }}</span></td><td>{{ container.restartCount }}</td></tr></tbody></table></div><EmptyState v-else title="暂无 Docker 容器" description="Agent 未检测到可访问的 Docker socket；主机监控、服务检查与其他指标不受影响。" /></article>
         </el-tab-pane>
 
         <el-tab-pane :label="`网卡 (${networkInterfaces.length})`" name="network">

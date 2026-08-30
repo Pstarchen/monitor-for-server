@@ -11,6 +11,7 @@ type Report struct {
 	Network           NetworkStats       `json:"network"`
 	NetworkInterfaces []NetworkInterface `json:"networkInterfaces"`
 	Ports             []PortStats        `json:"ports"`
+	Containers        []ContainerStats   `json:"containers"`
 	Processes         []ProcessStats     `json:"processes"`
 	Services          []ServiceStatus    `json:"services"`
 }
@@ -87,6 +88,21 @@ type PortStats struct {
 	Address  string `json:"address"`
 	Port     uint32 `json:"port"`
 	PID      int32  `json:"pid"`
+}
+
+type ContainerStats struct {
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	Image            string  `json:"image"`
+	State            string  `json:"state"`
+	Status           string  `json:"status"`
+	CPUPercent       float64 `json:"cpuPercent"`
+	MemoryUsageBytes uint64  `json:"memoryUsageBytes"`
+	MemoryLimitBytes uint64  `json:"memoryLimitBytes"`
+	MemoryPercent    float64 `json:"memoryPercent"`
+	NetworkRxBytes   uint64  `json:"networkRxBytes"`
+	NetworkTxBytes   uint64  `json:"networkTxBytes"`
+	RestartCount     int     `json:"restartCount"`
 }
 
 type ProcessStats struct {

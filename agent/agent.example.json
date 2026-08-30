@@ -12,6 +12,7 @@
   "skip_connection_count": false,
   "disk_mountpoints": ["/", "/data"],
   "host_root": "",
+  "docker_socket": "",
   "allow_command_execution": false,
   "allow_file_operations": false,
   "command_poll_interval": "1s",

@@ -22,6 +22,7 @@ public record AgentReportRequest(
         @NotNull @Valid NetworkStats network,
         @Size(max = 512) List<@Valid NetworkInterface> networkInterfaces,
         @Size(max = 512) List<@Valid PortStats> ports,
+        @Size(max = 100) List<@Valid ContainerStats> containers,
         @Size(max = 256) List<@Valid ProcessStats> processes,
         @Size(max = 128) List<@Valid ServiceStatus> services
 ) {
@@ -64,7 +65,14 @@ public record AgentReportRequest(
                                    @Size(max = 64) List<@NotBlank @Size(max = 128) String> addresses) {}
 
     public record PortStats(@NotBlank @Size(max = 8) String protocol, @NotBlank @Size(max = 128) String address,
-                            @PositiveOrZero int port, @PositiveOrZero int pid) {}
+                            @PositiveOrZero @Max(65535) int port, @PositiveOrZero int pid) {}
+
+    public record ContainerStats(@NotBlank @Size(max = 96) String id, @NotBlank @Size(max = 255) String name,
+                                 @Size(max = 255) String image, @Size(max = 32) String state,
+                                 @Size(max = 255) String status, @PositiveOrZero double cpuPercent,
+                                 @PositiveOrZero long memoryUsageBytes, @PositiveOrZero long memoryLimitBytes,
+                                 @Min(0) @Max(100) double memoryPercent, @PositiveOrZero long networkRxBytes,
+                                 @PositiveOrZero long networkTxBytes, @PositiveOrZero int restartCount) {}
 
     public record ProcessStats(@PositiveOrZero int pid, @Size(max = 255) String name, @Size(max = 255) String username,
                                @PositiveOrZero double cpuPercent, @Min(0) @Max(100) double memoryPercent,

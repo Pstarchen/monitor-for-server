@@ -42,6 +42,7 @@ type Options struct {
 	SkipConnectionCount bool
 	DiskMountpoints     []string
 	HostRoot            string
+	DockerSocket        string
 }
 
 func New(options Options) *Collector {
@@ -68,6 +69,7 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 	network, netSent, netRecv := collectNetwork(ctx, c.options.SkipConnectionCount)
 	interfaces := collectNetworkInterfaces(ctx)
 	ports := collectListeningPorts(ctx, c.options.SkipConnectionCount)
+	containers := collectContainers(ctx, c.options.DockerSocket, c.options.HostRoot)
 
 	c.mu.Lock()
 	previous := c.previous
@@ -101,6 +103,7 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		Network:           network,
 		NetworkInterfaces: interfaces,
 		Ports:             ports,
+		Containers:        containers,
 		Processes:         processes,
 		Services:          collectServices(ctx, c.options.MonitoredServices, c.options.HostRoot),
 	}, nil

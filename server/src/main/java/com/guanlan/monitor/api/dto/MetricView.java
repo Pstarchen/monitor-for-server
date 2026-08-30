@@ -28,6 +28,7 @@ public record MetricView(
         double temperatureMax,
         List<AgentReportRequest.NetworkInterface> networkInterfaces,
         List<AgentReportRequest.PortStats> ports,
+        List<AgentReportRequest.ContainerStats> containers,
         List<AgentReportRequest.DiskStats> disks,
         List<AgentReportRequest.ProcessStats> processes,
         List<AgentReportRequest.ServiceStatus> services
@@ -41,6 +42,7 @@ public record MetricView(
                 metric.getNetworkRecvBps(), metric.getNetworkSentBytes(), metric.getNetworkRecvBytes(), metric.getTcpConnections(), metric.getTemperatureMax(),
                 readList(mapper, metric.getNetworkInterfacesJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getPortsJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getContainersJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getDisksJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getProcessesJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getServicesJson(), new TypeReference<>() {})
