@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
 
 export interface User {
   id: number
@@ -66,6 +66,10 @@ export interface ContainerMetric {
   restartCount: number
 }
 
+export interface FanMetric { name: string; rpm: number }
+export interface BatteryMetric { name: string; percent: number; status: string }
+export interface GpuMetric { index: number; name: string; usagePercent: number; memoryUsedBytes: number; memoryTotalBytes: number; temperature: number }
+
 export interface Metric {
   id: number
   deviceId: string
@@ -85,12 +89,19 @@ export interface Metric {
   networkRecvBytes: number
   tcpConnections: number
   temperatureMax: number
+  gpuUsage: number | null
+  batteryPercent: number | null
+  containerCpuUsage: number | null
+  containerMemoryUsage: number | null
   networkInterfaces: NetworkInterfaceMetric[]
   ports: PortMetric[]
   containers: ContainerMetric[]
   disks: DiskMetric[]
   processes: ProcessMetric[]
   services: ServiceMetric[]
+  fans: FanMetric[]
+  batteries: BatteryMetric[]
+  gpus: GpuMetric[]
 }
 
 export interface Device {
@@ -122,6 +133,7 @@ export interface DdnsConfig {
   provider: DdnsProvider
   domains: string[]
   webhookConfigured: boolean
+  keyword?: string
   method: DdnsHttpMethod
   enabled: boolean
   ipv4Enabled: boolean
@@ -202,6 +214,8 @@ export interface WebhookSettings {
   configured: boolean
   source: 'DATABASE' | 'ENVIRONMENT' | 'NONE'
   webhookConfigured: boolean
+  keywordConfigured?: boolean
+  signSecretConfigured?: boolean
 }
 
 export interface Settings {

@@ -80,7 +80,7 @@ X-Agent-Key: <agent-key>
 Content-Type: application/json
 ```
 
-请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。`containers` 是可选的 Docker 容器摘要，最多 100 条；无法访问 Docker socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
+请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。`host.fans`、`host.batteries` 和 `host.gpus` 是可选硬件健康数据：Linux 从 hwmon/power_supply 读取风扇与电池，安装 `nvidia-smi` 时采集 NVIDIA GPU；不支持或无权限时为空数组，不影响其他指标。`containers` 是可选的 Docker 容器摘要，最多 100 条；无法访问 Docker socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
 
 ## Agent 任务
 
@@ -121,6 +121,8 @@ Agent 端配置：
 | DELETE | `/api/alert-rules/{id}` | ADMIN / OPERATOR | 无历史事件时删除，否则停用 |
 
 规则请求：
+
+`metric` 支持 CPU、内存、磁盘空间、1 分钟负载、磁盘读写速率、容器 CPU/内存、GPU 使用率、电池电量、TCP 连接数、网络速率、温度和设备离线。GPU、电池及容器规则在目标没有对应数据时会自动跳过，避免把缺失数据误判为 0。
 
 ```json
 {

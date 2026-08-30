@@ -72,6 +72,18 @@ public class MetricSnapshot {
     @Column(name = "temperature_max", nullable = false)
     private double temperatureMax;
 
+    @Column(name = "gpu_usage")
+    private Double gpuUsage;
+
+    @Column(name = "battery_percent")
+    private Double batteryPercent;
+
+    @Column(name = "container_cpu_usage")
+    private Double containerCpuUsage;
+
+    @Column(name = "container_memory_usage")
+    private Double containerMemoryUsage;
+
     @Column(name = "disks_json", columnDefinition = "TEXT")
     private String disksJson;
 
@@ -89,4 +101,13 @@ public class MetricSnapshot {
 
     @Column(name = "containers_json", columnDefinition = "TEXT")
     private String containersJson;
+
+    @Column(name = "fans_json", columnDefinition = "TEXT")
+    private String fansJson;
+
+    @Column(name = "batteries_json", columnDefinition = "TEXT")
+    private String batteriesJson;
+
+    @Column(name = "gpus_json", columnDefinition = "TEXT")
+    private String gpusJson;
 }

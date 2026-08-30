@@ -53,7 +53,7 @@ func New(options Options) *Collector {
 
 func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 	now := time.Now().UTC()
-	hostInfo, err := collectHost(ctx)
+	hostInfo, err := collectHost(ctx, c.options.HostRoot)
 	if err != nil {
 		return model.Report{}, err
 	}
@@ -188,7 +188,7 @@ func maxInt(value, minimum int) int {
 	return value
 }
 
-func collectHost(ctx context.Context) (model.HostInfo, error) {
+func collectHost(ctx context.Context, hostRoot string) (model.HostInfo, error) {
 	info, err := host.InfoWithContext(ctx)
 	if err != nil {
 		return model.HostInfo{}, err
@@ -198,7 +198,11 @@ func collectHost(ctx context.Context) (model.HostInfo, error) {
 		Hostname: info.Hostname, OS: info.OS, Platform: info.Platform,
 		PlatformVersion: info.PlatformVersion, KernelVersion: info.KernelVersion,
 		Architecture: runtime.GOARCH, UptimeSeconds: info.Uptime, BootTime: info.BootTime,
+		Fans: collectFans(hostRoot), Batteries: collectBatteries(hostRoot),
 	}
+	// GPU discovery is intentionally best effort. nvidia-smi is optional and
+	// should never prevent CPU/memory metrics from being reported.
+	result.GPUs = collectGPUs(ctx)
 	for _, sensor := range temperatures {
 		if sensor.Temperature > 0 {
 			result.Temperatures = append(result.Temperatures, model.Temperature{Sensor: sensor.SensorKey, Value: sensor.Temperature})

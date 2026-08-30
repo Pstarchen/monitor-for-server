@@ -26,12 +26,19 @@ public record MetricView(
         long networkRecvBytes,
         int tcpConnections,
         double temperatureMax,
+        Double gpuUsage,
+        Double batteryPercent,
+        Double containerCpuUsage,
+        Double containerMemoryUsage,
         List<AgentReportRequest.NetworkInterface> networkInterfaces,
         List<AgentReportRequest.PortStats> ports,
         List<AgentReportRequest.ContainerStats> containers,
         List<AgentReportRequest.DiskStats> disks,
         List<AgentReportRequest.ProcessStats> processes,
-        List<AgentReportRequest.ServiceStatus> services
+        List<AgentReportRequest.ServiceStatus> services,
+        List<AgentReportRequest.Fan> fans,
+        List<AgentReportRequest.Battery> batteries,
+        List<AgentReportRequest.Gpu> gpus
 ) {
     public static MetricView from(MetricSnapshot metric, ObjectMapper mapper) {
         return new MetricView(
@@ -40,12 +47,16 @@ public record MetricView(
                 metric.getLoad1(), metric.getLoad5(), metric.getLoad15(), metric.getDiskUsage(),
                 metric.getDiskReadBps(), metric.getDiskWriteBps(), metric.getNetworkSentBps(),
                 metric.getNetworkRecvBps(), metric.getNetworkSentBytes(), metric.getNetworkRecvBytes(), metric.getTcpConnections(), metric.getTemperatureMax(),
+                metric.getGpuUsage(), metric.getBatteryPercent(), metric.getContainerCpuUsage(), metric.getContainerMemoryUsage(),
                 readList(mapper, metric.getNetworkInterfacesJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getPortsJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getContainersJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getDisksJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getProcessesJson(), new TypeReference<>() {}),
-                readList(mapper, metric.getServicesJson(), new TypeReference<>() {})
+                readList(mapper, metric.getServicesJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getFansJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getBatteriesJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getGpusJson(), new TypeReference<>() {})
         );
     }
 

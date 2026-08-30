@@ -39,8 +39,12 @@ public class SettingService {
     private static final String EMAIL_START_TLS = "notification.email.start_tls";
     private static final String DINGTALK_ENABLED = "notification.dingtalk.enabled";
     private static final String DINGTALK_WEBHOOK = "notification.dingtalk.webhook";
+    private static final String DINGTALK_KEYWORD = "notification.dingtalk.keyword";
+    private static final String DINGTALK_SIGN_SECRET = "notification.dingtalk.sign_secret";
     private static final String WECOM_ENABLED = "notification.wecom.enabled";
     private static final String WECOM_WEBHOOK = "notification.wecom.webhook";
+    private static final String WECOM_KEYWORD = "notification.wecom.keyword";
+    private static final String WECOM_SIGN_SECRET = "notification.wecom.sign_secret";
 
     private final SystemSettingRepository settings;
     private final AppProperties properties;
@@ -81,8 +85,8 @@ public class SettingService {
         save(TIMEZONE, request.timezone().trim());
         save(ENABLE_MCP, request.enableMcp());
         updateEmail(request.email());
-        updateWebhook(DINGTALK_ENABLED, DINGTALK_WEBHOOK, request.dingtalk());
-        updateWebhook(WECOM_ENABLED, WECOM_WEBHOOK, request.wecom());
+        updateWebhook(DINGTALK_ENABLED, DINGTALK_WEBHOOK, DINGTALK_KEYWORD, DINGTALK_SIGN_SECRET, request.dingtalk());
+        updateWebhook(WECOM_ENABLED, WECOM_WEBHOOK, WECOM_KEYWORD, WECOM_SIGN_SECRET, request.wecom());
         audit.record("SETTINGS_UPDATE", "system", "更新系统策略与通知通道配置");
         return get();
     }
@@ -113,12 +117,15 @@ public class SettingService {
         WebhookRuntime dingtalk = new WebhookRuntime(
                 booleanValue(DINGTALK_ENABLED, configured(fallback.getDingtalkWebhookUrl())),
                 secretValue(DINGTALK_WEBHOOK, fallback.getDingtalkWebhookUrl()),
-                source(DINGTALK_WEBHOOK, fallback.getDingtalkWebhookUrl())
+                source(DINGTALK_WEBHOOK, fallback.getDingtalkWebhookUrl()),
+                stringValue(DINGTALK_KEYWORD, fallback.getDingtalkKeyword()),
+                secretValue(DINGTALK_SIGN_SECRET, fallback.getDingtalkSignSecret())
         );
         WebhookRuntime wecom = new WebhookRuntime(
                 booleanValue(WECOM_ENABLED, configured(fallback.getWecomWebhookUrl())),
                 secretValue(WECOM_WEBHOOK, fallback.getWecomWebhookUrl()),
-                source(WECOM_WEBHOOK, fallback.getWecomWebhookUrl())
+                source(WECOM_WEBHOOK, fallback.getWecomWebhookUrl()),
+                stringValue(WECOM_KEYWORD, ""), secretValue(WECOM_SIGN_SECRET, "")
         );
         return new NotificationRuntime(email, dingtalk, wecom);
     }
@@ -154,12 +161,17 @@ public class SettingService {
         updateSecret(EMAIL_PASSWORD, email.password(), email.clearPassword());
     }
 
-    private void updateWebhook(String enabledKey, String secretKey, WebhookUpdate webhook) {
+    private void updateWebhook(String enabledKey, String secretKey, String keywordKey, String signSecretKey, WebhookUpdate webhook) {
         save(enabledKey, webhook.enabled());
         if (webhook.webhookUrl() != null && !webhook.webhookUrl().isBlank()) {
             validateWebhook(secretKey, webhook.webhookUrl());
         }
         updateSecret(secretKey, webhook.webhookUrl(), webhook.clearWebhook());
+        if (webhook.keyword() != null && !webhook.keyword().isBlank()) {
+            if (webhook.keyword().length() > 100) throw new ApiException(HttpStatus.BAD_REQUEST, "钉钉关键词不能超过 100 个字符");
+            save(keywordKey, webhook.keyword().trim());
+        }
+        updateSecret(signSecretKey, webhook.signSecret(), webhook.clearSignSecret());
     }
 
     private void updateSecret(String key, String replacement, boolean clear) {
@@ -204,6 +216,12 @@ public class SettingService {
         }
         if (email.enabled() && (blank(email.host()) || blank(email.from()) || blank(email.recipients()))) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "启用邮件通知前请填写 SMTP 主机、发件人和收件人");
+        }
+        if (request.dingtalk().keyword() != null && request.dingtalk().keyword().length() > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "钉钉关键词不能超过 100 个字符");
+        }
+        if (request.dingtalk().signSecret() != null && request.dingtalk().signSecret().length() > 255) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "钉钉加签密钥长度无效");
         }
     }
 
@@ -274,7 +292,8 @@ public class SettingService {
     }
 
     private WebhookView webhookView(WebhookRuntime webhook) {
-        return new WebhookView(webhook.enabled(), configured(webhook.url()), webhook.source(), configured(webhook.url()));
+        return new WebhookView(webhook.enabled(), configured(webhook.url()), webhook.source(), configured(webhook.url()),
+                webhook.keyword(), configured(webhook.keyword()), configured(webhook.signSecret()));
     }
 
     private void save(String key, int value) { save(key, Integer.toString(value)); }
@@ -320,7 +339,8 @@ public class SettingService {
     public record EmailView(boolean enabled, boolean configured, String source, String host, int port,
                             String username, String from, String recipients, boolean auth, boolean startTls,
                             boolean passwordConfigured) {}
-    public record WebhookView(boolean enabled, boolean configured, String source, boolean webhookConfigured) {}
+    public record WebhookView(boolean enabled, boolean configured, String source, boolean webhookConfigured,
+                              String keyword, boolean keywordConfigured, boolean signSecretConfigured) {}
     public record Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                          String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, EmailUpdate email,
                          WebhookUpdate dingtalk, WebhookUpdate wecom) {
@@ -332,11 +352,20 @@ public class SettingService {
     }
     public record EmailUpdate(boolean enabled, String host, int port, String username, String password,
                               boolean clearPassword, String from, String recipients, boolean auth, boolean startTls) {}
-    public record WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook) {}
+    public record WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook, String keyword,
+                                String signSecret, boolean clearSignSecret) {
+        public WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook) {
+            this(enabled, webhookUrl, clearWebhook, null, null, false);
+        }
+    }
     public record NotificationRuntime(EmailRuntime email, WebhookRuntime dingtalk, WebhookRuntime wecom) {}
     public record AgentBootstrapView(String publicBaseUrl, int defaultCollectionSeconds) {}
     public record PublicBrandView(String siteName, String siteIconUrl) {}
     public record EmailRuntime(boolean enabled, String host, int port, String username, String password,
                                String from, String recipients, boolean auth, boolean startTls, String source) {}
-    public record WebhookRuntime(boolean enabled, String url, String source) {}
+    public record WebhookRuntime(boolean enabled, String url, String source, String keyword, String signSecret) {
+        public WebhookRuntime(boolean enabled, String url, String source) {
+            this(enabled, url, source, "", "");
+        }
+    }
 }

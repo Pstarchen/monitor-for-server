@@ -99,16 +99,24 @@ public class AlertService {
     public void evaluateMetric(Device device, MetricSnapshot metric) {
         for (AlertRule rule : rules.findByEnabledTrue()) {
             if (rule.getMetric() == AlertRule.Metric.DEVICE_OFFLINE || !applies(rule, device)) continue;
-            double value = switch (rule.getMetric()) {
+            Double value = switch (rule.getMetric()) {
                 case CPU_USAGE -> metric.getCpuUsage();
                 case MEMORY_USAGE -> metric.getMemoryUsage();
                 case DISK_USAGE -> metric.getDiskUsage();
-                case TCP_CONNECTIONS -> metric.getTcpConnections();
+                case LOAD_1 -> metric.getLoad1();
+                case DISK_READ_BPS -> metric.getDiskReadBps();
+                case DISK_WRITE_BPS -> metric.getDiskWriteBps();
+                case CONTAINER_CPU_USAGE -> metric.getContainerCpuUsage();
+                case CONTAINER_MEMORY_USAGE -> metric.getContainerMemoryUsage();
+                case GPU_USAGE -> metric.getGpuUsage();
+                case BATTERY_PERCENT -> metric.getBatteryPercent();
+                case TCP_CONNECTIONS -> (double) metric.getTcpConnections();
                 case NETWORK_RECV_BPS -> metric.getNetworkRecvBps();
                 case NETWORK_SENT_BPS -> metric.getNetworkSentBps();
                 case TEMPERATURE -> metric.getTemperatureMax();
-                case DEVICE_OFFLINE -> 0;
+                case DEVICE_OFFLINE -> 0d;
             };
+            if (value == null || !Double.isFinite(value)) continue;
             evaluate(rule, device, value, value >= rule.getThreshold());
         }
     }
@@ -161,7 +169,9 @@ public class AlertService {
                 || !Double.isFinite(request.threshold()) || request.threshold() < 0) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "告警规则内容无效");
         }
-        if (request.metric() == AlertRule.Metric.CPU_USAGE || request.metric() == AlertRule.Metric.MEMORY_USAGE || request.metric() == AlertRule.Metric.DISK_USAGE) {
+        if (request.metric() == AlertRule.Metric.CPU_USAGE || request.metric() == AlertRule.Metric.MEMORY_USAGE
+                || request.metric() == AlertRule.Metric.DISK_USAGE || request.metric() == AlertRule.Metric.CONTAINER_MEMORY_USAGE
+                || request.metric() == AlertRule.Metric.GPU_USAGE || request.metric() == AlertRule.Metric.BATTERY_PERCENT) {
             if (request.threshold() > 100) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "资源使用率阈值必须在 0-100 之间");
             }
@@ -173,6 +183,13 @@ public class AlertService {
             case CPU_USAGE -> "CPU 使用率";
             case MEMORY_USAGE -> "内存使用率";
             case DISK_USAGE -> "磁盘使用率";
+            case LOAD_1 -> "1 分钟负载";
+            case DISK_READ_BPS -> "磁盘读取速率";
+            case DISK_WRITE_BPS -> "磁盘写入速率";
+            case CONTAINER_CPU_USAGE -> "容器 CPU 使用率";
+            case CONTAINER_MEMORY_USAGE -> "容器内存使用率";
+            case GPU_USAGE -> "GPU 使用率";
+            case BATTERY_PERCENT -> "电池电量";
             case TCP_CONNECTIONS -> "TCP 连接数";
             case NETWORK_RECV_BPS -> "网络接收速率";
             case NETWORK_SENT_BPS -> "网络发送速率";
@@ -183,6 +200,8 @@ public class AlertService {
             case DEVICE_OFFLINE -> " 秒";
             case TCP_CONNECTIONS -> " 个";
             case NETWORK_RECV_BPS, NETWORK_SENT_BPS -> " B/s";
+            case DISK_READ_BPS, DISK_WRITE_BPS -> " B/s";
+            case LOAD_1 -> "";
             case TEMPERATURE -> " °C";
             default -> "%";
         };

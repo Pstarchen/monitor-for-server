@@ -26,11 +26,34 @@ type HostInfo struct {
 	UptimeSeconds   uint64        `json:"uptimeSeconds"`
 	BootTime        uint64        `json:"bootTime"`
 	Temperatures    []Temperature `json:"temperatures"`
+	Fans            []Fan         `json:"fans"`
+	Batteries       []Battery     `json:"batteries"`
+	GPUs            []GPU         `json:"gpus"`
 }
 
 type Temperature struct {
 	Sensor string  `json:"sensor"`
 	Value  float64 `json:"value"`
+}
+
+type Fan struct {
+	Name string  `json:"name"`
+	RPM  float64 `json:"rpm"`
+}
+
+type Battery struct {
+	Name    string  `json:"name"`
+	Percent float64 `json:"percent"`
+	Status  string  `json:"status"`
+}
+
+type GPU struct {
+	Index            int     `json:"index"`
+	Name             string  `json:"name"`
+	UsagePercent     float64 `json:"usagePercent"`
+	MemoryUsedBytes  uint64  `json:"memoryUsedBytes"`
+	MemoryTotalBytes uint64  `json:"memoryTotalBytes"`
+	Temperature      float64 `json:"temperature"`
 }
 
 type CPUStats struct {

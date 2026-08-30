@@ -68,8 +68,8 @@ const form = reactive({
     enabled: false, host: '', port: 587, username: '', password: '', clearPassword: false,
     from: '', recipients: '', auth: true, startTls: true,
   },
-  dingtalk: { enabled: false, webhookUrl: '', clearWebhook: false },
-  wecom: { enabled: false, webhookUrl: '', clearWebhook: false },
+  dingtalk: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false },
+  wecom: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false },
 })
 const loading = ref(true)
 const saving = ref(false)
@@ -127,8 +127,8 @@ function apply(value: Settings) {
     auth: value.email.auth,
     startTls: value.email.startTls,
   })
-  Object.assign(form.dingtalk, { enabled: value.dingtalk.enabled, webhookUrl: '', clearWebhook: false })
-  Object.assign(form.wecom, { enabled: value.wecom.enabled, webhookUrl: '', clearWebhook: false })
+  Object.assign(form.dingtalk, { enabled: value.dingtalk.enabled, webhookUrl: '', clearWebhook: false, keyword: value.dingtalk.keyword ?? '', signSecret: '', clearSignSecret: false })
+  Object.assign(form.wecom, { enabled: value.wecom.enabled, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false })
   baseline.value = snapshot()
 }
 
@@ -584,6 +584,14 @@ onBeforeUnmount(() => {
                     <el-checkbox v-if="settings[activeSection].source === 'DATABASE'" v-model="form[activeSection].clearWebhook">清除已保存地址</el-checkbox>
                   </div>
                 </div>
+                <div v-if="activeSection === 'dingtalk'" class="setting-row">
+                  <div class="setting-copy"><label for="dingtalk-keyword">安全关键词</label><p>钉钉机器人启用关键词校验时，系统会自动把关键词附加到每条消息。</p></div>
+                  <div class="setting-control"><el-input id="dingtalk-keyword" v-model="form.dingtalk.keyword" maxlength="100" placeholder="例如：监控" /></div>
+                </div>
+                <div v-if="activeSection === 'dingtalk'" class="setting-row">
+                  <div class="setting-copy"><label for="dingtalk-sign-secret">加签密钥（可选）</label><p>{{ settings.dingtalk.signSecretConfigured ? '已保存加签密钥，留空不会覆盖。' : '从钉钉机器人安全设置复制加签密钥。' }}</p></div>
+                  <div class="setting-control secret-control"><el-input id="dingtalk-sign-secret" v-model="form.dingtalk.signSecret" type="password" show-password autocomplete="new-password" :disabled="!settings.secretStorageReady" :placeholder="settings.dingtalk.signSecretConfigured ? '输入新密钥以替换' : 'SEC... '" /><el-checkbox v-if="settings.dingtalk.signSecretConfigured" v-model="form.dingtalk.clearSignSecret">清除已保存密钥</el-checkbox></div>
+                </div>
               </div>
               <div class="settings-section-actions"><p>{{ hasChanges ? '保存当前修改后可测试通道。' : '测试将发送一条验证消息。' }}</p><el-button :disabled="!canTest(activeSection)" :loading="testing[activeSection]" @click="testChannel(activeSection)"><Send :size="15" />发送测试消息</el-button></div>
             </el-form>
@@ -619,7 +627,7 @@ onBeforeUnmount(() => {
               <dl class="security-list">
                 <div><dt><Database :size="15" />指标数据</dt><dd><strong>私有数据库</strong><span>{{ form.metricRetentionDays }} 天留存</span></dd></div>
                 <div><dt><KeyRound :size="15" />邮件凭据</dt><dd><strong>{{ sourceText(settings.email.source) }}</strong><span>{{ settings.email.passwordConfigured ? '密码已配置' : '未配置密码' }}</span></dd></div>
-                <div><dt><MessageSquareText :size="15" />钉钉 Webhook</dt><dd><strong>{{ sourceText(settings.dingtalk.source) }}</strong><span>{{ settings.dingtalk.webhookConfigured ? '地址已配置' : '未配置地址' }}</span></dd></div>
+                <div><dt><MessageSquareText :size="15" />钉钉 Webhook</dt><dd><strong>{{ sourceText(settings.dingtalk.source) }}</strong><span>{{ settings.dingtalk.webhookConfigured ? '地址已配置' : '未配置地址' }}{{ settings.dingtalk.keywordConfigured ? ' · 关键词已配置' : '' }}{{ settings.dingtalk.signSecretConfigured ? ' · 加签已配置' : '' }}</span></dd></div>
                 <div><dt><MessageSquareText :size="15" />企业微信 Webhook</dt><dd><strong>{{ sourceText(settings.wecom.source) }}</strong><span>{{ settings.wecom.webhookConfigured ? '地址已配置' : '未配置地址' }}</span></dd></div>
               </dl>
               <div class="security-footnote"><ShieldCheck :size="16" /><p>设置接口只返回配置状态。保存和测试操作均写入审计日志。</p></div>

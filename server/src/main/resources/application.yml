@@ -95,6 +95,8 @@ app:
     email-from: ${ALERT_EMAIL_FROM:}
     email-to: ${ALERT_EMAIL_TO:}
     dingtalk-webhook-url: ${DINGTALK_WEBHOOK_URL:}
+    dingtalk-keyword: ${DINGTALK_KEYWORD:}
+    dingtalk-sign-secret: ${DINGTALK_SIGN_SECRET:}
     wecom-webhook-url: ${WECOM_WEBHOOK_URL:}
 
 ---

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowLeft, ArrowUp, Box, Copy, Cpu, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, Thermometer, Waypoints } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, Copy, Cpu, Fan, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, Thermometer, Waypoints, Zap } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -62,6 +62,9 @@ const maxTemperature = computed(() => temperatures.value.reduce((max, item) => M
 const networkInterfaces = computed(() => latest.value?.networkInterfaces ?? [])
 const ports = computed(() => latest.value?.ports ?? [])
 const containers = computed(() => latest.value?.containers ?? [])
+const fans = computed(() => latest.value?.fans ?? [])
+const batteries = computed(() => latest.value?.batteries ?? [])
+const gpus = computed(() => latest.value?.gpus ?? [])
 
 function section(name: string): Record<string, unknown> {
   const value = device.value?.hardware?.[name]
@@ -183,9 +186,17 @@ onBeforeUnmount(() => {
               <div><span><Cpu :size="14" />每核 CPU 峰值</span><strong>{{ perCoreUsage.length ? percent(Math.max(...perCoreUsage)) : '--' }}</strong><small>{{ perCoreUsage.length ? `${perCoreUsage.length} 个逻辑核心` : '暂无每核数据' }}</small></div>
               <div><span><MemoryStick :size="14" />交换分区</span><strong>{{ latest ? percent(latest.swapUsage) : '--' }}</strong><small>{{ latest?.swapUsage && latest.swapUsage >= 80 ? '使用率偏高' : '当前使用情况' }}</small></div>
               <div><span><Waypoints :size="14" />TCP 连接</span><strong>{{ latest?.tcpConnections ?? '--' }}</strong><small>最近一次采集</small></div>
+              <div><span><Fan :size="14" />风扇转速</span><strong>{{ fans.length ? `${Math.round(Math.max(...fans.map((fan) => fan.rpm)))} RPM` : '--' }}</strong><small>{{ fans.length ? `${fans.length} 个风扇` : '未检测到风扇传感器' }}</small></div>
+              <div><span><BatteryCharging :size="14" />电池电量</span><strong>{{ latest?.batteryPercent == null ? '--' : percent(latest.batteryPercent) }}</strong><small>{{ batteries.length ? batteries.map((battery) => battery.status || '未知').join(' · ') : '未检测到电池' }}</small></div>
+              <div><span><Zap :size="14" />GPU 使用率</span><strong>{{ latest?.gpuUsage == null ? '--' : percent(latest.gpuUsage) }}</strong><small>{{ gpus.length ? `${gpus.length} 个 GPU` : '未检测到 NVIDIA GPU' }}</small></div>
             </div>
             <div v-if="temperatures.length" class="temperature-list"><span v-for="item in temperatures" :key="item.sensor" :data-level="temperatureTone(item.value)"><Thermometer :size="12" />{{ item.sensor }} {{ item.value.toFixed(1) }} °C</span></div>
             <div v-if="perCoreUsage.length" class="core-usage-list" aria-label="每核 CPU 使用率"><span v-for="(value, index) in perCoreUsage" :key="index" :title="`核心 ${index + 1}: ${percent(value)}`"><i><b :data-level="temperatureTone(value)" :style="{ height: `${Math.min(100, value)}%` }" /></i><small>{{ index + 1 }}</small></span></div>
+            <div v-if="fans.length || batteries.length || gpus.length" class="hardware-health-list">
+              <span v-for="fan in fans" :key="`fan-${fan.name}`"><Fan :size="12" />{{ fan.name }} {{ Math.round(fan.rpm) }} RPM</span>
+              <span v-for="battery in batteries" :key="`battery-${battery.name}`"><BatteryCharging :size="12" />{{ battery.name }} {{ percent(battery.percent) }}</span>
+              <span v-for="gpu in gpus" :key="`gpu-${gpu.index}`"><Zap :size="12" />{{ gpu.name || `GPU ${gpu.index}` }} {{ percent(gpu.usagePercent) }}<small v-if="gpu.temperature">{{ gpu.temperature.toFixed(0) }} °C</small></span>
+            </div>
           </article>
 
           <div class="section two-column detail-summary-grid">

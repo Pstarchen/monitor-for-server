@@ -11,10 +11,16 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Properties;
 import java.time.Duration;
+import java.util.Base64;
 
 @Service
 public class NotificationService {
@@ -100,10 +106,34 @@ public class NotificationService {
     private void sendWebhook(SettingService.WebhookRuntime config, String text, String channel) {
         if (!config.enabled()) return;
         if (blank(config.url())) throw new ApiException(HttpStatus.BAD_REQUEST, "Webhook 通知配置不完整");
-        WebhookResponse response = restClient.post().uri(config.url())
-                .body(Map.of("msgtype", "text", "text", Map.of("content", text)))
+        String content = text;
+        URI endpoint = URI.create(config.url());
+        if ("钉钉".equals(channel)) {
+            if (!blank(config.keyword()) && !content.contains(config.keyword())) {
+                content = content + "\n关键词: " + config.keyword().trim();
+            }
+            endpoint = dingtalkEndpoint(endpoint, config.signSecret());
+        }
+        WebhookResponse response = restClient.post().uri(endpoint)
+                .body(Map.of("msgtype", "text", "text", Map.of("content", content)))
                 .retrieve().body(WebhookResponse.class);
         validateWebhookResponse(channel, response);
+    }
+
+    private URI dingtalkEndpoint(URI endpoint, String signSecret) {
+        if (blank(signSecret)) return endpoint;
+        long timestamp = System.currentTimeMillis();
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(signSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String value = timestamp + "\n" + signSecret;
+            String signature = Base64.getEncoder().encodeToString(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
+            return UriComponentsBuilder.fromUri(endpoint).queryParam("timestamp", timestamp)
+                    .queryParam("sign", signature)
+                    .build().encode().toUri();
+        } catch (Exception exception) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "钉钉加签配置无效");
+        }
     }
 
     private void validateWebhookResponse(String channel, WebhookResponse response) {

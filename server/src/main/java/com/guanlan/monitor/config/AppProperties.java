@@ -56,6 +56,8 @@ public class AppProperties {
         private String emailFrom;
         private String emailTo;
         private String dingtalkWebhookUrl;
+        private String dingtalkKeyword;
+        private String dingtalkSignSecret;
         private String wecomWebhookUrl;
     }
 }

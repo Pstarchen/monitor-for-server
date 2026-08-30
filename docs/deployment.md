@@ -190,7 +190,7 @@ Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Se
 
 ## 通知配置
 
-邮件、钉钉和企业微信可在 Web 控制台的“系统设置”中启用、编辑和测试。SMTP 密码与 Webhook 写入数据库前使用 AES-256-GCM 加密，页面只显示是否已配置；`.env` 中的值作为未设置数据库覆盖值时的回退。修改环境回退值后重建服务端容器：
+邮件、钉钉和企业微信可在 Web 控制台的“系统设置”中启用、编辑和测试。SMTP 密码、Webhook 和钉钉加签密钥写入数据库前使用 AES-256-GCM 加密，页面只显示是否已配置；钉钉安全关键词会自动附加到消息内容，避免关键词校验导致发送失败。`.env` 中的值作为未设置数据库覆盖值时的回退（可使用 `APP_NOTIFICATION_DINGTALK_KEYWORD`、`APP_NOTIFICATION_DINGTALK_SIGN_SECRET`）；修改环境回退值后重建服务端容器：
 
 ```powershell
 docker compose up -d --force-recreate server

@@ -30,11 +30,24 @@ public record AgentReportRequest(
             @NotBlank @Size(max = 255) String hostname, @Size(max = 80) String os, @Size(max = 80) String platform,
             @Size(max = 120) String platformVersion, @Size(max = 255) String kernelVersion,
             @Size(max = 40) String architecture, @PositiveOrZero long uptimeSeconds, @PositiveOrZero long bootTime,
-            @Size(max = 256) List<@Valid Temperature> temperatures
+            @Size(max = 256) List<@Valid Temperature> temperatures,
+            @Size(max = 256) List<@Valid Fan> fans,
+            @Size(max = 32) List<@Valid Battery> batteries,
+            @Size(max = 16) List<@Valid Gpu> gpus
     ) {}
 
     public record Temperature(@Size(max = 255) String sensor,
                                @DecimalMin(value = "-273.15") @DecimalMax(value = "1000.0") double value) {}
+
+    public record Fan(@Size(max = 255) String name, @PositiveOrZero double rpm) {}
+
+    public record Battery(@Size(max = 255) String name, @Min(0) @Max(100) double percent,
+                          @Size(max = 80) String status) {}
+
+    public record Gpu(@PositiveOrZero int index, @Size(max = 255) String name,
+                      @Min(0) @Max(100) double usagePercent, @PositiveOrZero long memoryUsedBytes,
+                      @PositiveOrZero long memoryTotalBytes,
+                      @DecimalMin(value = "-273.15") @DecimalMax(value = "1000.0") double temperature) {}
 
     public record CpuStats(
             @Size(max = 255) String model, @PositiveOrZero int logicalCores, @PositiveOrZero int physicalCores,

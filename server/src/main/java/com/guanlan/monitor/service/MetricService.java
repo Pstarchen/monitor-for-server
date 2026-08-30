@@ -45,6 +45,10 @@ public class MetricService {
         alerts.evaluateOffline(device, 0);
 
         List<AgentReportRequest.DiskStats> disks = report.disks() == null ? List.of() : report.disks();
+        List<AgentReportRequest.ContainerStats> containers = report.containers() == null ? List.of() : report.containers();
+        List<AgentReportRequest.Fan> fans = report.host().fans() == null ? List.of() : report.host().fans();
+        List<AgentReportRequest.Battery> batteries = report.host().batteries() == null ? List.of() : report.host().batteries();
+        List<AgentReportRequest.Gpu> gpus = report.host().gpus() == null ? List.of() : report.host().gpus();
         MetricSnapshot metric = new MetricSnapshot();
         metric.setDevice(device);
         metric.setCollectedAt(report.collectedAt());
@@ -65,12 +69,19 @@ public class MetricService {
         metric.setTemperatureMax(report.host().temperatures() == null ? 0 : report.host().temperatures().stream()
                 .mapToDouble(temperature -> Double.isFinite(temperature.value()) ? Math.max(0, temperature.value()) : 0)
                 .max().orElse(0));
+        metric.setGpuUsage(maxOptional(gpus.stream().mapToDouble(gpu -> clampPercent(gpu.usagePercent())).boxed().toList()));
+        metric.setBatteryPercent(minOptional(batteries.stream().mapToDouble(battery -> clampPercent(battery.percent())).boxed().toList()));
+        metric.setContainerCpuUsage(maxOptional(containers.stream().mapToDouble(container -> nonNegativeFinite(container.cpuPercent())).boxed().toList()));
+        metric.setContainerMemoryUsage(maxOptional(containers.stream().mapToDouble(container -> clampPercent(container.memoryPercent())).boxed().toList()));
         metric.setDisksJson(json(disks));
         metric.setProcessesJson(json(report.processes() == null ? List.of() : report.processes()));
         metric.setServicesJson(json(report.services() == null ? List.of() : report.services()));
         metric.setNetworkInterfacesJson(json(report.networkInterfaces() == null ? List.of() : report.networkInterfaces()));
         metric.setPortsJson(json(report.ports() == null ? List.of() : report.ports()));
-        metric.setContainersJson(json(report.containers() == null ? List.of() : report.containers()));
+        metric.setContainersJson(json(containers));
+        metric.setFansJson(json(fans));
+        metric.setBatteriesJson(json(batteries));
+        metric.setGpusJson(json(gpus));
         metrics.save(metric);
 
         MetricView view = MetricView.from(metric, mapper);
@@ -105,5 +116,13 @@ public class MetricService {
 
     private double clampPercent(double value) { return Double.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0; }
     private double nonNegativeFinite(double value) { return Double.isFinite(value) ? Math.max(0, value) : 0; }
+
+    private Double maxOptional(List<Double> values) {
+        return values.stream().filter(value -> value != null && Double.isFinite(value)).max(Double::compareTo).orElse(null);
+    }
+
+    private Double minOptional(List<Double> values) {
+        return values.stream().filter(value -> value != null && Double.isFinite(value)).min(Double::compareTo).orElse(null);
+    }
     private String join(String first, String second) { return ((first == null ? "" : first) + " " + (second == null ? "" : second)).trim(); }
 }
