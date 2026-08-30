@@ -437,10 +437,10 @@ socket_group_line=""
 if [[ -n "${docker_socket}" && -S "${docker_socket}" ]] && command -v stat >/dev/null 2>&1; then
   socket_gid="$(stat -c '%g' "${docker_socket}" 2>/dev/null || true)"
   socket_group=""
-  if [[ -n "${socket_gid}" ]] && command -v getent >/dev/null 2>&1; then
+  if [[ -n "${socket_gid}" && "${socket_gid}" != "0" ]] && command -v getent >/dev/null 2>&1; then
     socket_group="$(getent group "${socket_gid}" | cut -d: -f1 | head -n 1 || true)"
   fi
-  if [[ -z "${socket_group}" && "${socket_gid}" =~ ^[0-9]+$ ]]; then
+  if [[ -z "${socket_group}" && "${socket_gid}" =~ ^[0-9]+$ && "${socket_gid}" != "0" ]]; then
     socket_group="${socket_gid}"
   fi
   if [[ -n "${socket_group}" ]]; then
