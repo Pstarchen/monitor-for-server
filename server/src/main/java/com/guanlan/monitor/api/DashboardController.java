@@ -32,7 +32,7 @@ public class DashboardController {
         List<DeviceDtos.View> measured = devices.stream()
                 .filter(device -> device.status() == Device.Status.ONLINE && device.latest() != null).toList();
         List<DeviceDtos.View> top = measured.stream()
-                .sorted(Comparator.comparingDouble((DeviceDtos.View device) -> device.latest().cpuUsage()).reversed())
+                .sorted(Comparator.comparingDouble(this::peakResourceUsage).reversed())
                 .limit(5).toList();
         return new DashboardView(
                 devices.size(),
@@ -79,6 +79,11 @@ public class DashboardController {
             case "memory" -> device.latest().memoryUsage();
             default -> device.latest().diskUsage();
         }).average().orElse(0);
+    }
+
+    private double peakResourceUsage(DeviceDtos.View device) {
+        var latest = device.latest();
+        return Math.max(latest.cpuUsage(), Math.max(latest.memoryUsage(), latest.diskUsage()));
     }
 
     public record DashboardView(
