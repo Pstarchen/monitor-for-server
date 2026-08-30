@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity, ArrowDown, ArrowUp, BellRing, CheckCircle2, Clock3, Cpu, HardDrive,
-  FileWarning, MapPin, MemoryStick, RefreshCw, Search, Server, ShieldAlert, ShieldCheck, WifiOff,
+  FileWarning, Gauge, MapPin, MemoryStick, RefreshCw, Search, Server, ShieldAlert, ShieldCheck, WifiOff,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
@@ -149,6 +149,15 @@ function metric(device: Device, key: 'cpuUsage' | 'memoryUsage' | 'diskUsage') {
   return device.latest?.[key] ?? 0
 }
 
+function pressure(device: Device) {
+  const values = [
+    { label: 'CPU', value: metric(device, 'cpuUsage') },
+    { label: '内存', value: metric(device, 'memoryUsage') },
+    { label: '磁盘', value: metric(device, 'diskUsage') },
+  ]
+  return values.reduce((highest, current) => current.value > highest.value ? current : highest, values[0])
+}
+
 function progressTone(value: number) {
   if (value >= 90) return 'critical'
   if (value >= 75) return 'warning'
@@ -245,6 +254,24 @@ onBeforeUnmount(() => {
 
       <section class="section">
         <div class="section-heading">
+          <div><h2>资源压力排行</h2><p>优先查看当前资源占用最高的在线节点</p></div>
+          <span class="filter-count">{{ dashboard.topDevices.length }} 个重点节点</span>
+        </div>
+        <article class="panel pressure-panel">
+          <div v-if="dashboard.topDevices.length" class="pressure-list">
+            <button v-for="(device, index) in dashboard.topDevices" :key="device.id" type="button" @click="router.push(`/devices/${device.id}`)">
+              <span class="pressure-rank">{{ String(index + 1).padStart(2, '0') }}</span>
+              <span class="pressure-main"><strong>{{ device.name }}</strong><small>{{ device.primaryIp || device.hostname || '主机地址待识别' }}</small></span>
+              <span class="pressure-indicator" :data-level="progressTone(pressure(device).value)"><Gauge :size="14" /><b>{{ pressure(device).label }}</b><strong>{{ percent(pressure(device).value) }}</strong></span>
+              <i class="pressure-bar" aria-hidden="true"><b :data-level="progressTone(pressure(device).value)" :style="{ width: `${Math.min(100, pressure(device).value)}%` }" /></i>
+            </button>
+          </div>
+          <EmptyState v-else title="暂无资源压力数据" description="在线节点完成首次上报后，这里会列出资源占用最高的节点。" />
+        </article>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
           <div><h2>服务可用性</h2><p>最近探测记录与近 7 天可用率</p></div>
           <div class="section-heading-actions">
             <span v-if="!servicesError" class="filter-count"><CheckCircle2 :size="14" />{{ onlineServices }} / {{ serviceChecks.length }} 正常</span>
@@ -258,7 +285,7 @@ onBeforeUnmount(() => {
           <EmptyState title="服务可用性加载失败" :description="servicesError"><el-button :loading="servicesRefreshing" @click="loadServices">重新加载</el-button></EmptyState>
         </div>
         <div v-else-if="serviceChecks.length" class="service-availability-grid">
-          <ServiceAvailabilityCard v-for="check in serviceChecks" :key="check.id" :name="check.name" :type-label="serviceLabel(check)" :subtitle="check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs" />
+          <ServiceAvailabilityCard v-for="check in serviceChecks" :key="check.id" :name="check.name" :type-label="serviceLabel(check)" :subtitle="check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs" :refresh-interval-seconds="check.intervalSeconds" />
         </div>
           <div v-else class="panel"><EmptyState title="暂无服务监控" description="添加 HTTP、Ping、TCP 或外部心跳后，这里会显示服务可用性。"><el-button text @click="router.push('/services')">前往服务监控</el-button></EmptyState></div>
       </section>

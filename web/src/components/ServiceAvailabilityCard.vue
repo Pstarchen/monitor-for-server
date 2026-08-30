@@ -28,7 +28,8 @@ const props = withDefaults(defineProps<{
   refreshIntervalSeconds: 30,
 })
 
-const refreshCountdown = ref(props.refreshIntervalSeconds)
+const refreshInterval = computed(() => Math.max(5, Math.floor(Number(props.refreshIntervalSeconds) || 30)))
+const refreshCountdown = ref(refreshInterval.value)
 let countdownTimer = 0
 
 const records = computed(() => {
@@ -46,6 +47,18 @@ const availability = computed(() => {
   if (!records.value.length) return null
   return records.value.filter((record) => record.success).length / records.value.length * 100
 })
+
+const successfulRecords = computed(() => records.value.filter((record) => record.success && Number.isFinite(record.latencyMs) && record.latencyMs >= 0))
+const averageLatency = computed(() => {
+  if (!successfulRecords.value.length) return null
+  return successfulRecords.value.reduce((total, record) => total + record.latencyMs, 0) / successfulRecords.value.length
+})
+const p95Latency = computed(() => {
+  if (!successfulRecords.value.length) return null
+  const sorted = successfulRecords.value.map((record) => record.latencyMs).sort((left, right) => left - right)
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]
+})
+const failureCount = computed(() => records.value.filter((record) => !record.success).length)
 
 const scoreTone = computed(() => {
   if (availability.value === null) return 'empty'
@@ -77,7 +90,7 @@ function recordLabel(record: AvailabilityRecord | null) {
 }
 
 function resetCountdown() {
-  refreshCountdown.value = props.refreshIntervalSeconds
+  refreshCountdown.value = refreshInterval.value
 }
 
 function tickCountdown() {
@@ -85,7 +98,7 @@ function tickCountdown() {
   else refreshCountdown.value -= 1
 }
 
-watch(() => [props.latest?.checkedAt, Array.isArray(props.history) ? props.history.length : 0], resetCountdown)
+watch(() => [props.latest?.checkedAt, Array.isArray(props.history) ? props.history.length : 0, refreshInterval.value], resetCountdown)
 onMounted(() => {
   countdownTimer = window.setInterval(tickCountdown, 1000)
 })
@@ -115,6 +128,11 @@ onBeforeUnmount(() => window.clearInterval(countdownTimer))
       <span v-for="(record, index) in barSlots" :key="`${record?.checkedAt || 'empty'}-${index}`" class="availability-bar" :data-state="barState(record)" :style="{ height: barHeight(record) }" :title="recordLabel(record)" :aria-label="recordLabel(record)" />
     </div>
     <div class="availability-axis"><span>过去</span><span>现在</span></div>
+    <div class="availability-stat-strip" aria-label="服务延迟统计">
+      <div><span>平均延迟</span><strong>{{ averageLatency === null ? '--' : `${Math.round(averageLatency)} ms` }}</strong></div>
+      <div><span>P95 延迟</span><strong>{{ p95Latency === null ? '--' : `${Math.round(p95Latency)} ms` }}</strong></div>
+      <div><span>异常次数</span><strong :data-tone="failureCount ? 'danger' : 'success'">{{ failureCount }}</strong></div>
+    </div>
     <div v-if="$slots.details" class="availability-details"><slot name="details" /></div>
     <footer class="availability-foot">
       <span :data-state="latest ? barState(latest) : 'empty'"><CheckCircle2 v-if="latest?.success" :size="13" /><CircleAlert v-else-if="latest" :size="13" /><Clock3 v-else :size="13" />{{ latest ? (latest.success ? '最新正常' : '最新异常') : '等待首次探测' }}</span>

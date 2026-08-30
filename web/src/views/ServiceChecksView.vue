@@ -7,6 +7,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import ServiceAvailabilityCard from '@/components/ServiceAvailabilityCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+import MetricChart from '@/components/MetricChart.vue'
 import { api, errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
 import { copyText } from '@/lib/clipboard'
@@ -32,6 +33,8 @@ const heartbeatCredential = ref<ServiceCheck | null>(null)
 const form = reactive({ name: '', target: '', type: 'HTTP_GET' as ServiceCheckType, intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14 })
 const labels: Record<ServiceCheckType, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', HEARTBEAT: '外部心跳' }
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
+const historyLabels = computed(() => history.value.map((item) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.checkedAt))))
+const historyLatencySeries = computed(() => [{ name: '响应延迟', data: history.value.map((item) => Math.max(0, Number(item.latencyMs) || 0)), color: '#2867a6' }])
 
 async function load(background = false) {
   if (!background) loading.value = true
@@ -160,7 +163,7 @@ useVisibilityPolling(() => load(true))
     <LoadingState v-if="loading" />
     <div v-else-if="error" class="panel state-panel"><EmptyState title="服务监控加载失败" :description="error"><el-button @click="load">重新加载</el-button></EmptyState></div>
     <div v-else-if="checks.length" class="service-availability-grid">
-      <ServiceAvailabilityCard v-for="check in checks" :key="check.id" :name="check.name" :type-label="labels[check.type]" :subtitle="check.type === 'HEARTBEAT' ? `外部任务 · 令牌 ${check.heartbeatTokenPrefix ?? '已配置'}...` : check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs">
+      <ServiceAvailabilityCard v-for="check in checks" :key="check.id" :name="check.name" :type-label="labels[check.type]" :subtitle="check.type === 'HEARTBEAT' ? `外部任务 · 令牌 ${check.heartbeatTokenPrefix ?? '已配置'}...` : check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs" :refresh-interval-seconds="check.intervalSeconds">
         <template #actions>
           <span class="availability-actions">
             <button class="table-icon-button" type="button" title="查看历史" aria-label="查看历史" @click="openHistory(check)"><Clock3 :size="15" /></button>
@@ -208,6 +211,6 @@ useVisibilityPolling(() => load(true))
       </div>
       <template #footer><el-button @click="heartbeatDialog = false">完成</el-button><el-button type="primary" @click="copyHeartbeatCommand"><Copy :size="16" />复制命令</el-button></template>
     </el-dialog>
-    <el-dialog v-model="historyDialog" :title="historyCheck ? `${historyCheck.name} · 最近 31 天历史` : '服务历史'" width="min(900px, calc(100vw - 28px))"><LoadingState v-if="historyLoading" /><div v-else-if="history.length" class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>结果</th><th>延迟</th><th>状态码</th><th>证书到期</th><th>错误</th></tr></thead><tbody><tr v-for="item in [...history].reverse()" :key="item.checkedAt"><td>{{ dateTime(item.checkedAt) }}</td><td><StatusBadge :status="item.success ? 'ONLINE' : 'OFFLINE'" /></td><td>{{ item.latencyMs }} ms</td><td>{{ item.statusCode ?? '--' }}</td><td>{{ item.certificateExpiresAt ? dateTime(item.certificateExpiresAt) : '--' }}</td><td>{{ item.error || '--' }}</td></tr></tbody></table></div><EmptyState v-else title="暂无历史结果" description="服务执行探测后，结果会出现在这里。" /></el-dialog>
+    <el-dialog v-model="historyDialog" :title="historyCheck ? `${historyCheck.name} · 最近 31 天历史` : '服务历史'" width="min(900px, calc(100vw - 28px))"><LoadingState v-if="historyLoading" /><template v-else-if="history.length"><div class="history-chart-panel"><div class="panel-head"><div><h2>响应延迟趋势</h2><p>按探测时间展示最近 {{ history.length }} 条记录</p></div><Clock3 :size="17" /></div><MetricChart :labels="historyLabels" :series="historyLatencySeries" unit="ms" :aria-label="`${historyCheck?.name ?? '服务'}响应延迟趋势`" /></div><div class="table-wrap"><table class="data-table"><thead><tr><th>时间</th><th>结果</th><th>延迟</th><th>状态码</th><th>证书到期</th><th>错误</th></tr></thead><tbody><tr v-for="item in [...history].reverse()" :key="item.checkedAt"><td>{{ dateTime(item.checkedAt) }}</td><td><StatusBadge :status="item.success ? 'ONLINE' : 'OFFLINE'" /></td><td>{{ item.latencyMs }} ms</td><td>{{ item.statusCode ?? '--' }}</td><td>{{ item.certificateExpiresAt ? dateTime(item.certificateExpiresAt) : '--' }}</td><td>{{ item.error || '--' }}</td></tr></tbody></table></div></template><EmptyState v-else title="暂无历史结果" description="服务执行探测后，结果会出现在这里。" /></el-dialog>
   </section>
 </template>
