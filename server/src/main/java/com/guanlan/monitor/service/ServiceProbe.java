@@ -24,6 +24,7 @@ public class ServiceProbe {
                 case HTTP_GET -> http(check);
                 case ICMP_PING -> ping(check);
                 case TCPING -> tcp(check);
+                case HEARTBEAT -> throw new ApiException(HttpStatus.BAD_REQUEST, "心跳监控由外部任务上报，不能主动探测");
             };
             return result.latencyMs() > 0 ? result : new Result(result.success(), elapsed(started), result.statusCode(), result.error(), result.certificateExpiresAt());
         } catch (Exception exception) {

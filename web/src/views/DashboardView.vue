@@ -156,7 +156,7 @@ function progressTone(value: number) {
 }
 
 function serviceLabel(service: ServiceCheck) {
-  return service.type === 'HTTP_GET' ? 'HTTP' : service.type === 'TCPING' ? 'TCP' : 'PING'
+  return service.type === 'HTTP_GET' ? 'HTTP' : service.type === 'TCPING' ? 'TCP' : service.type === 'HEARTBEAT' ? 'HEARTBEAT' : 'PING'
 }
 
 function uptimeSeconds(device: Device) {
@@ -257,7 +257,7 @@ onBeforeUnmount(() => {
         <div v-else-if="serviceChecks.length" class="service-availability-grid">
           <ServiceAvailabilityCard v-for="check in serviceChecks" :key="check.id" :name="check.name" :type-label="serviceLabel(check)" :subtitle="check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs" />
         </div>
-        <div v-else class="panel"><EmptyState title="暂无服务监控" description="添加 HTTP、Ping 或 TCP 目标后，这里会显示服务可用性。"><el-button text @click="router.push('/services')">前往服务监控</el-button></EmptyState></div>
+          <div v-else class="panel"><EmptyState title="暂无服务监控" description="添加 HTTP、Ping、TCP 或外部心跳后，这里会显示服务可用性。"><el-button text @click="router.push('/services')">前往服务监控</el-button></EmptyState></div>
       </section>
 
       <section class="section">

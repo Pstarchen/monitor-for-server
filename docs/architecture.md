@@ -39,7 +39,7 @@ flowchart LR
 ### Web 控制台
 
 - Vue 3、TypeScript、Pinia、Vue Router、Element Plus、Lucide 与 ECharts。
-- 路由包含运行总览、设备列表与详情、趋势、磁盘、进程、服务、告警事件、告警规则、系统设置、账号权限和审计日志。
+- 路由包含运行总览、设备列表与详情、趋势、磁盘、进程、服务与外部心跳、告警事件、告警规则、系统设置、账号权限和审计日志。
 - 桌面端使用 240px 侧栏，窄屏切换为抽屉导航；支持浅色、深色、键盘焦点和 `prefers-reduced-motion`。
 - 浏览器路由守卫仅用于交互引导，所有权限仍由服务端强制执行。
 
@@ -63,6 +63,7 @@ flowchart LR
 - `system_settings`：运行参数与使用 AES-256-GCM 加密的通知凭据；API 只返回配置状态，不回传明文。
 - `audit_logs`：关键管理操作的操作者、目标和摘要。
 - `agent_tasks`：目标设备、命令参数、队列状态、超时、输出和执行审计信息。
+- `service_checks` / `service_check_results`：HTTP、Ping、TCP 和外部心跳监控配置、探测结果与七日可用率；心跳令牌只保存摘要。
 
 ## 可靠性与安全边界
 

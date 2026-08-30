@@ -2,6 +2,7 @@ package com.guanlan.monitor.service;
 
 import com.guanlan.monitor.domain.ServiceCheck;
 import com.guanlan.monitor.domain.ServiceCheckResult;
+import com.guanlan.monitor.api.dto.ServiceDtos;
 import com.guanlan.monitor.repository.ServiceCheckRepository;
 import com.guanlan.monitor.repository.ServiceCheckResultRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -89,5 +90,41 @@ class ServiceMonitorServiceTest {
         assertThat(view.availabilityPercent()).isEqualTo(91.0);
         assertThat(view.history()).hasSize(1);
         assertThat(view.history().get(0).latencyMs()).isEqualTo(91);
+    }
+
+    @Test
+    void createsAndAcceptsOneTimeHeartbeatToken() {
+        ServiceDtos.Request request = new ServiceDtos.Request(
+                "备份任务", "", ServiceCheck.Type.HEARTBEAT, 60, 5000, false, 0, true, 1, 0, 0);
+        when(checks.save(any(ServiceCheck.class))).thenAnswer(invocation -> {
+            ServiceCheck saved = invocation.getArgument(0);
+            saved.setId(77L);
+            return saved;
+        });
+        when(results.findTopByServiceCheckIdOrderByCheckedAtDesc(anyLong())).thenReturn(Optional.empty());
+        when(results.findTop60ByServiceCheckIdOrderByCheckedAtDesc(anyLong())).thenReturn(List.of());
+        when(results.countByServiceCheckIdAndCheckedAtBetween(anyLong(), any(), any())).thenReturn(0L);
+        when(checks.findById(77L)).thenReturn(Optional.of(check));
+
+        var created = service.create(request);
+
+        assertThat(created.heartbeatToken()).startsWith("hb_");
+        assertThat(created.heartbeatPath()).isEqualTo("/api/heartbeat/77");
+        check.setType(ServiceCheck.Type.HEARTBEAT);
+        check.setHeartbeatTokenHash(savedHash(created.heartbeatToken()));
+        check.setHeartbeatTokenPrefix(created.heartbeatToken().substring(0, 8));
+        service.receiveHeartbeat(77L, created.heartbeatToken());
+        verify(results).save(any(ServiceCheckResult.class));
+    }
+
+    private String savedHash(String value) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder();
+            for (byte item : digest) result.append(String.format("%02x", item));
+            return result.toString();
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 }

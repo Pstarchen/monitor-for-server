@@ -212,7 +212,7 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 | DELETE | `/api/ddns/{id}` | ADMIN / OPERATOR | 删除配置 |
 | POST | `/api/ddns/{id}/test?ip=` | ADMIN / OPERATOR | 使用指定地址执行一次测试更新 |
 
-服务监控由总控服务执行 HTTP GET、ICMP Ping 或 TCPing 探测，结果按指标留存策略保存。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
+服务监控由总控服务执行 HTTP GET、ICMP Ping 或 TCPing 探测，结果按指标留存策略保存。另支持 `HEARTBEAT` 外部心跳类型：总控不主动连接目标，而是由 cron、CI、备份脚本等任务定时调用心跳地址；超过两个配置周期未收到上报会记录失败并触发通知。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -224,6 +224,7 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 | GET | `/api/services/{id}/history` | 登录 | 查询最多 31 天的探测历史 |
 | GET | `/api/services/public` | 公开 | 返回启用且允许公开的服务及最近结果 |
 | GET | `/api/public/overview` | 公开 | 返回公开状态页所需的服务器摘要、网络速率和服务结果 |
+| GET / POST | `/api/heartbeat/{id}` | 心跳令牌 | 接收外部任务心跳；令牌放在 `X-Heartbeat-Token` 请求头或 `token` 查询参数 |
 
 服务请求示例：
 
@@ -242,6 +243,16 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 ```
 
 服务监控请求还可设置 `failureThreshold`（连续失败次数，1-20）和 `latencyThresholdMs`（延迟告警阈值，0 表示关闭）。服务异常从正常进入和恢复时分别发送一次通知，避免按探测周期重复发送。结果中的 `certificateExpiresAt` 仅在 HTTPS 目标成功完成 TLS 握手时返回。
+
+创建心跳监控时将 `type` 设为 `HEARTBEAT`，`target` 留空即可。创建响应中的 `heartbeatToken` 和 `heartbeatPath` 只返回一次，请立即保存。例如：
+
+```bash
+curl -fsS -X POST -H 'X-Heartbeat-Token: hb_...' 'https://monitor.example.com/api/heartbeat/42'
+```
+
+也可以使用 `?token=` 查询参数兼容只支持 URL 的定时任务，但请求头方式不会把令牌带入常见的访问日志。
+
+建议将命令加入 cron（例如每分钟执行一次），并将 `intervalSeconds` 设置为 60。令牌服务端只保存 SHA-256 摘要；编辑或列表接口不会再次返回明文令牌。
 
 告警规则支持 `CPU_USAGE`、`MEMORY_USAGE`、`DISK_USAGE`、`TCP_CONNECTIONS`、`NETWORK_RECV_BPS`、`NETWORK_SENT_BPS`、`TEMPERATURE` 和 `DEVICE_OFFLINE`；连接数阈值使用连接数，网络阈值使用 B/s，温度阈值使用 °C，离线阈值使用秒，其余资源阈值使用百分比。
 

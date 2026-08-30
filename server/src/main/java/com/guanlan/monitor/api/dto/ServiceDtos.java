@@ -15,7 +15,7 @@ public final class ServiceDtos {
 
     public record Request(
             @NotBlank @Size(max = 100) String name,
-            @NotBlank @Size(max = 500) String target,
+            @Size(max = 500) String target,
             @NotNull ServiceCheck.Type type,
             @Min(15) @Max(86400) int intervalSeconds,
             @Min(500) @Max(30000) int timeoutMs,
@@ -62,7 +62,10 @@ public final class ServiceDtos {
             Instant updatedAt,
             ResultView latest,
             Double availabilityPercent,
-            List<ResultView> history
+            List<ResultView> history,
+            String heartbeatTokenPrefix,
+            String heartbeatToken,
+            String heartbeatPath
     ) {}
 
     public record PublicView(

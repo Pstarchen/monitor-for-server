@@ -15,6 +15,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.List;
 
 @Service
@@ -28,6 +33,7 @@ public class ServiceMonitorService {
     private final AuditService audit;
     private final NotificationService notifications;
     private final SettingService settings;
+    private final SecureRandom random = new SecureRandom();
 
     @Transactional(readOnly = true)
     public List<ServiceDtos.View> list() {
@@ -46,10 +52,10 @@ public class ServiceMonitorService {
     public ServiceDtos.View create(ServiceDtos.Request request) {
         validate(request);
         ServiceCheck check = new ServiceCheck();
-        apply(check, request);
+        String rawToken = apply(check, request);
         checks.save(check);
         audit.record("SERVICE_CREATE", "service:" + check.getId(), "创建服务监控 " + check.getName());
-        return view(check);
+        return view(check, rawToken);
     }
 
     @Transactional
@@ -73,6 +79,10 @@ public class ServiceMonitorService {
     public void runEnabledChecks() {
         Instant now = Instant.now();
         for (ServiceCheck check : checks.findByEnabledTrueOrderBySortOrderDescNameAsc()) {
+            if (check.getType() == ServiceCheck.Type.HEARTBEAT) {
+                evaluateHeartbeatTimeout(check, now);
+                continue;
+            }
             var latest = results.findTopByServiceCheckIdOrderByCheckedAtDesc(check.getId());
             if (latest.isPresent() && latest.get().getCheckedAt().isAfter(now.minusSeconds(check.getIntervalSeconds()))) continue;
             run(check);
@@ -81,7 +91,24 @@ public class ServiceMonitorService {
 
     @Transactional
     public ServiceDtos.View runNow(Long id) {
-        return view(run(require(id)));
+        ServiceCheck check = require(id);
+        if (check.getType() == ServiceCheck.Type.HEARTBEAT) return view(check);
+        return view(run(check));
+    }
+
+    @Transactional
+    public Instant receiveHeartbeat(Long id, String token) {
+        ServiceCheck check = require(id);
+        if (check.getType() != ServiceCheck.Type.HEARTBEAT || token == null || token.isBlank()
+                || check.getHeartbeatTokenHash() == null
+                || !MessageDigest.isEqual(hash(token).getBytes(StandardCharsets.UTF_8), check.getHeartbeatTokenHash().getBytes(StandardCharsets.UTF_8))) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "心跳令牌无效");
+        }
+        Instant receivedAt = Instant.now();
+        ServiceProbe.Result measured = new ServiceProbe.Result(true, 0, null, null, null);
+        saveResult(check, receivedAt, measured);
+        evaluateAlert(check, measured);
+        return receivedAt;
     }
 
     @Transactional(readOnly = true)
@@ -95,17 +122,39 @@ public class ServiceMonitorService {
 
     private ServiceCheck run(ServiceCheck check) {
         ServiceProbe.Result measured = probe.check(check);
+        saveResult(check, Instant.now(), measured);
+        evaluateAlert(check, measured);
+        return check;
+    }
+
+    private void saveResult(ServiceCheck check, Instant checkedAt, ServiceProbe.Result measured) {
         ServiceCheckResult result = new ServiceCheckResult();
         result.setServiceCheck(check);
-        result.setCheckedAt(Instant.now());
+        result.setCheckedAt(checkedAt);
         result.setSuccess(measured.success());
         result.setLatencyMs(measured.latencyMs());
         result.setStatusCode(measured.statusCode());
         result.setCertificateExpiresAt(measured.certificateExpiresAt());
         result.setError(measured.error());
         results.save(result);
-        evaluateAlert(check, measured);
-        return check;
+    }
+
+    private void evaluateHeartbeatTimeout(ServiceCheck check, Instant now) {
+        var latest = results.findTopByServiceCheckIdOrderByCheckedAtDesc(check.getId());
+        if (latest.isEmpty()) {
+            if (check.getCreatedAt() == null || now.isBefore(check.getCreatedAt().plusSeconds(staleAfterSeconds(check)))) return;
+        } else {
+            ServiceCheckResult result = latest.get();
+            if (result.isSuccess() && now.isBefore(result.getCheckedAt().plusSeconds(staleAfterSeconds(check)))) return;
+            if (!result.isSuccess() && now.isBefore(result.getCheckedAt().plusSeconds(check.getIntervalSeconds()))) return;
+        }
+        ServiceProbe.Result timeout = new ServiceProbe.Result(false, 0, null, "心跳超时，未在预期时间内收到上报", null);
+        saveResult(check, now, timeout);
+        evaluateAlert(check, timeout);
+    }
+
+    private long staleAfterSeconds(ServiceCheck check) {
+        return Math.max(30L, (long) check.getIntervalSeconds() * 2L);
     }
 
     private ServiceCheck require(Long id) {
@@ -113,11 +162,11 @@ public class ServiceMonitorService {
     }
 
     private void validate(ServiceDtos.Request request) {
-        if (request == null || request.name() == null || request.target() == null || request.type() == null) {
+        if (request == null || request.name() == null || request.type() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "服务监控内容无效");
         }
-        String target = request.target().trim();
-        if (target.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "服务目标不能为空");
+        String target = request.target() == null ? "" : request.target().trim();
+        if (request.type() != ServiceCheck.Type.HEARTBEAT && target.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "服务目标不能为空");
         if (request.type() == ServiceCheck.Type.HTTP_GET) {
             try {
                 var uri = java.net.URI.create(target);
@@ -144,9 +193,9 @@ public class ServiceMonitorService {
         }
     }
 
-    private void apply(ServiceCheck check, ServiceDtos.Request request) {
+    private String apply(ServiceCheck check, ServiceDtos.Request request) {
         check.setName(request.name().trim());
-        check.setTarget(request.target().trim());
+        check.setTarget(request.type() == ServiceCheck.Type.HEARTBEAT ? "external" : request.target().trim());
         check.setType(request.type());
         check.setIntervalSeconds(request.intervalSeconds());
         check.setTimeoutMs(request.timeoutMs());
@@ -156,10 +205,24 @@ public class ServiceMonitorService {
         check.setFailureThreshold(request.failureThreshold() == null ? 1 : request.failureThreshold());
         check.setLatencyThresholdMs(request.latencyThresholdMs() == null ? 0 : request.latencyThresholdMs());
         check.setCertificateThresholdDays(request.certificateThresholdDays() == null ? 14 : request.certificateThresholdDays());
+        if (request.type() != ServiceCheck.Type.HEARTBEAT) {
+            check.setHeartbeatTokenHash(null);
+            check.setHeartbeatTokenPrefix(null);
+            return null;
+        }
+        if (check.getHeartbeatTokenHash() != null) return null;
+        String rawToken = newToken();
+        check.setHeartbeatTokenHash(hash(rawToken));
+        check.setHeartbeatTokenPrefix(rawToken.substring(0, 8));
+        return rawToken;
     }
 
     private ServiceDtos.View view(ServiceCheck check) {
-        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check), availabilityPercent(check), historyViews(check));
+        return view(check, null);
+    }
+
+    private ServiceDtos.View view(ServiceCheck check, String rawToken) {
+        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check), availabilityPercent(check), historyViews(check), check.getHeartbeatTokenPrefix(), rawToken, check.getType() == ServiceCheck.Type.HEARTBEAT ? "/api/heartbeat/" + check.getId() : null);
     }
 
     private ServiceDtos.PublicView publicView(ServiceCheck check) {
@@ -213,6 +276,23 @@ public class ServiceMonitorService {
         } else if (!breached && check.isAlertActive()) {
             check.setAlertActive(false);
             notifications.sendMessage("[" + settings.publicBrand().siteName() + "] 服务“" + check.getName() + "”已恢复，当前延迟 " + measured.latencyMs() + " ms");
+        }
+    }
+
+    private String newToken() {
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
+        return "hb_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private String hash(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte item : digest) result.append(String.format("%02x", item));
+            return result.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 不可用", exception);
         }
     }
 }

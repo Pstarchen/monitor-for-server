@@ -317,7 +317,7 @@ export interface AgentTask {
   error: string
 }
 
-export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING'
+export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING' | 'HEARTBEAT'
 
 export interface ServiceCheckResult {
   checkedAt: string
@@ -347,6 +347,9 @@ export interface ServiceCheck {
   latest: ServiceCheckResult | null
   availabilityPercent: number | null
   history: ServiceCheckResult[]
+  heartbeatTokenPrefix?: string | null
+  heartbeatToken?: string | null
+  heartbeatPath?: string | null
 }
 
 export interface PublicServiceCheckResult {

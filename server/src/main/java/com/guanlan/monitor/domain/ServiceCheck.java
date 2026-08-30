@@ -15,7 +15,7 @@ import java.time.Instant;
         @Index(name = "idx_service_checks_enabled_sort", columnList = "enabled,sort_order")
 })
 public class ServiceCheck {
-    public enum Type { HTTP_GET, ICMP_PING, TCPING }
+    public enum Type { HTTP_GET, ICMP_PING, TCPING, HEARTBEAT }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -54,6 +54,12 @@ public class ServiceCheck {
 
     @Column(name = "certificate_threshold_days", nullable = false)
     private int certificateThresholdDays = 14;
+
+    @Column(name = "heartbeat_token_hash", length = 64)
+    private String heartbeatTokenHash;
+
+    @Column(name = "heartbeat_token_prefix", length = 16)
+    private String heartbeatTokenPrefix;
 
     @Column(name = "consecutive_failures", nullable = false)
     private int consecutiveFailures;
