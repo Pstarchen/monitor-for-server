@@ -133,7 +133,6 @@ export interface DdnsConfig {
   provider: DdnsProvider
   domains: string[]
   webhookConfigured: boolean
-  keyword?: string
   method: DdnsHttpMethod
   enabled: boolean
   ipv4Enabled: boolean
@@ -214,6 +213,7 @@ export interface WebhookSettings {
   configured: boolean
   source: 'DATABASE' | 'ENVIRONMENT' | 'NONE'
   webhookConfigured: boolean
+  keyword?: string
   keywordConfigured?: boolean
   signSecretConfigured?: boolean
 }
