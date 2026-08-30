@@ -6,6 +6,7 @@ const props = defineProps<{
   labels: string[]
   series: { name: string; data: number[]; color: string }[]
   unit?: string
+  ariaLabel?: string
 }>()
 const root = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
@@ -38,4 +39,4 @@ onMounted(() => { render(); window.addEventListener('resize', resize) })
 onBeforeUnmount(() => { window.removeEventListener('resize', resize); chart?.dispose() })
 </script>
 
-<template><div ref="root" class="metric-chart" role="img" aria-label="监控指标趋势图" /></template>
+<template><div ref="root" class="metric-chart" role="img" :aria-label="props.ariaLabel ?? '监控指标趋势图'" /></template>

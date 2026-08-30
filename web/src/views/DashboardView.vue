@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity, ArrowDown, ArrowUp, BellRing, CheckCircle2, Clock3, Cpu, HardDrive,
@@ -11,10 +11,12 @@ import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ServiceAvailabilityCard from '@/components/ServiceAvailabilityCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+import MetricChart from '@/components/MetricChart.vue'
 import { api, errorMessage } from '@/lib/api'
-import { dateTime, percent, rate, relativeTime, uptime } from '@/lib/format'
+import { trendWindow, type TrendRangeHours } from '@/lib/dashboard-trend'
+import { dateTime, percent, rate, rateScale, relativeTime, uptime } from '@/lib/format'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
-import type { Dashboard, Device, DeviceStatus, ServiceCheck } from '@/types'
+import type { Dashboard, Device, DeviceStatus, Metric, ServiceCheck } from '@/types'
 
 type SortKey = 'attention' | 'cpu' | 'memory' | 'disk' | 'name'
 
@@ -30,7 +32,13 @@ const search = ref('')
 const status = ref<DeviceStatus | ''>('')
 const group = ref('')
 const sort = ref<SortKey>('attention')
+const trendDeviceId = ref('')
+const trendRangeHours = ref<TrendRangeHours>(6)
+const trendHistory = ref<Metric[]>([])
+const trendLoading = ref(false)
+const trendError = ref('')
 let refreshTimer = 0
+let trendRequestId = 0
 
 const groups = computed(() => Array.from(new Set(
   (dashboard.value?.devices ?? []).map((device) => device.groupName).filter((value): value is string => Boolean(value)),
@@ -54,6 +62,49 @@ const filteredDevices = computed(() => {
 })
 
 const onlineServices = computed(() => serviceChecks.value.filter((service) => service.latest?.success).length)
+const trendDevices = computed(() => (dashboard.value?.devices ?? []).filter((device) => device.latest || device.status === 'ONLINE'))
+const trendDevice = computed(() => trendDevices.value.find((device) => device.id === trendDeviceId.value) ?? null)
+const trendLatest = computed(() => trendHistory.value[trendHistory.value.length - 1] ?? trendDevice.value?.latest ?? null)
+const trendLabels = computed(() => trendHistory.value.map((item) => new Intl.DateTimeFormat('zh-CN', {
+  hour: '2-digit', minute: '2-digit', second: trendRangeHours.value === 1 ? '2-digit' : undefined,
+}).format(new Date(item.collectedAt))))
+const trendResourceSeries = computed(() => [
+  { name: 'CPU', data: trendHistory.value.map((item) => item.cpuUsage), color: '#2867a6' },
+  { name: '内存', data: trendHistory.value.map((item) => item.memoryUsage), color: '#17834d' },
+  { name: '磁盘', data: trendHistory.value.map((item) => item.diskUsage), color: '#986400' },
+])
+const trendIoScale = computed(() => rateScale(trendHistory.value.reduce((max, item) => Math.max(max, item.networkRecvBps, item.networkSentBps), 0)))
+const trendIoSeries = computed(() => [
+  { name: '网络接收', data: trendHistory.value.map((item) => item.networkRecvBps / trendIoScale.value.divisor), color: '#2867a6' },
+  { name: '网络发送', data: trendHistory.value.map((item) => item.networkSentBps / trendIoScale.value.divisor), color: '#17834d' },
+])
+const trendLoad = computed(() => trendLatest.value ? `${trendLatest.value.load1.toFixed(2)} / ${trendLatest.value.load5.toFixed(2)} / ${trendLatest.value.load15.toFixed(2)}` : '--')
+
+function syncTrendDevice() {
+  if (trendDevices.value.some((device) => device.id === trendDeviceId.value)) return
+  trendDeviceId.value = trendDevices.value[0]?.id ?? ''
+}
+
+async function loadTrend() {
+  const id = trendDeviceId.value
+  if (!id) {
+    trendHistory.value = []
+    trendError.value = ''
+    return
+  }
+  const requestId = ++trendRequestId
+  trendLoading.value = true
+  trendError.value = ''
+  const { from, to } = trendWindow(trendRangeHours.value)
+  try {
+    const response = await api.get<Metric[]>(`/devices/${id}/metrics/history`, { params: { from: from.toISOString(), to: to.toISOString() } })
+    if (requestId === trendRequestId) trendHistory.value = response.data
+  } catch (cause) {
+    if (requestId === trendRequestId) trendError.value = errorMessage(cause)
+  } finally {
+    if (requestId === trendRequestId) trendLoading.value = false
+  }
+}
 
 async function load(background = false) {
   if (background) refreshing.value = true
@@ -72,6 +123,8 @@ async function load(background = false) {
     } else {
       servicesError.value = errorMessage(servicesRequest.reason)
     }
+    syncTrendDevice()
+    if (background && trendDeviceId.value) void loadTrend()
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
@@ -122,6 +175,7 @@ onMounted(() => {
   load()
   window.addEventListener('guanlan:realtime', scheduleRefresh)
 })
+watch([trendDeviceId, trendRangeHours], loadTrend)
 useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
@@ -154,6 +208,37 @@ onBeforeUnmount(() => {
         <div><span><MemoryStick :size="15" />平均内存</span><strong>{{ percent(dashboard.averageMemory) }}</strong><i><b :data-level="progressTone(dashboard.averageMemory)" :style="{ width: `${Math.min(100, dashboard.averageMemory)}%` }" /></i></div>
         <div><span><HardDrive :size="15" />平均磁盘</span><strong>{{ percent(dashboard.averageDisk) }}</strong><i><b :data-level="progressTone(dashboard.averageDisk)" :style="{ width: `${Math.min(100, dashboard.averageDisk)}%` }" /></i></div>
       </div>
+
+      <section class="section">
+        <div class="section-heading">
+          <div><h2>资源趋势</h2><p>按节点查看历史资源和网络吞吐，帮助定位短时尖峰</p></div>
+          <span v-if="trendDevice" class="filter-count">最近采集 {{ relativeTime(trendDevice.lastSeenAt) }}</span>
+        </div>
+        <article class="panel trend-panel">
+          <div class="trend-panel-toolbar">
+            <label class="trend-device-picker">监控节点<el-select v-model="trendDeviceId" placeholder="选择节点" :disabled="!trendDevices.length" aria-label="选择趋势监控节点"><el-option v-for="device in trendDevices" :key="device.id" :label="device.name" :value="device.id"><span class="trend-device-option"><strong>{{ device.name }}</strong><small>{{ device.groupName || '未分组' }} · {{ device.status === 'ONLINE' ? '在线' : '最近有数据' }}</small></span></el-option></el-select></label>
+            <div class="trend-range-control"><span>时间范围</span><el-segmented v-model="trendRangeHours" :options="[{ label: '1 小时', value: 1 }, { label: '6 小时', value: 6 }, { label: '24 小时', value: 24 }]" :disabled="!trendDeviceId" aria-label="趋势时间范围" /></div>
+          </div>
+          <div v-if="trendError" class="trend-state trend-state-error" role="alert"><span>{{ trendError }}</span><el-button text @click="loadTrend">重试</el-button></div>
+          <LoadingState v-else-if="trendLoading && !trendHistory.length" />
+          <EmptyState v-else-if="!trendDevices.length" title="暂无可用节点" description="接入 Agent 并完成首次上报后，即可查看资源趋势。"><Server :size="1" /></EmptyState>
+          <EmptyState v-else-if="!trendHistory.length" title="暂无趋势数据" description="所选节点在该时间范围内没有采集记录。"><el-button text @click="loadTrend">重新加载</el-button></EmptyState>
+          <template v-else>
+            <div class="trend-summary" aria-live="polite">
+              <div><span>当前 CPU</span><strong>{{ percent(trendLatest?.cpuUsage) }}</strong></div>
+              <div><span>当前内存</span><strong>{{ percent(trendLatest?.memoryUsage) }}</strong></div>
+              <div><span>当前磁盘</span><strong>{{ percent(trendLatest?.diskUsage) }}</strong></div>
+              <div><span>负载 1 / 5 / 15 分钟</span><strong>{{ trendLoad }}</strong></div>
+              <div><span>采集点</span><strong>{{ trendHistory.length }}</strong></div>
+            </div>
+            <div class="chart-grid trend-chart-grid">
+              <article><div class="panel-head"><div><h3>资源使用率</h3><p>CPU、内存与最高磁盘占用</p></div><Cpu :size="16" /></div><MetricChart :labels="trendLabels" :series="trendResourceSeries" unit="%" :aria-label="`${trendDevice?.name ?? '节点'}资源使用率趋势`" /></article>
+              <article><div class="panel-head"><div><h3>网络吞吐</h3><p>单位按峰值自动换算为 {{ trendIoScale.unit }}</p></div><Activity :size="16" /></div><MetricChart :labels="trendLabels" :series="trendIoSeries" :unit="trendIoScale.unit" :aria-label="`${trendDevice?.name ?? '节点'}网络吞吐趋势`" /></article>
+            </div>
+            <div v-if="trendLoading" class="trend-refreshing" role="status"><RefreshCw :size="13" class="spinning" />正在更新趋势数据</div>
+          </template>
+        </article>
+      </section>
 
       <section class="section">
         <div class="section-heading">
