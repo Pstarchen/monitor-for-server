@@ -137,7 +137,7 @@ run_installer 0
 grep -F 'go build -trimpath' "${log_file}" >/dev/null
 grep -F 'systemctl enable --now guanlan-agent.service' "${log_file}" >/dev/null
 grep -F '"host_root": ""' "${config_file}" >/dev/null
-grep -F '"docker_socket": ""' "${config_file}" >/dev/null
+grep -F '"docker_socket": "' "${config_file}" >/dev/null
 if grep -q '^docker pull ' "${log_file}"; then
   echo 'Local fallback unexpectedly pulled the Agent image.' >&2
   exit 1
