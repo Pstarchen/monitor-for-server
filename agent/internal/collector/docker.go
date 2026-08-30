@@ -102,7 +102,9 @@ func collectContainers(ctx context.Context, configuredSocket, hostRoot string) [
 
 func resolveDockerSocket(configured, hostRoot string) string {
 	if value := strings.TrimSpace(configured); value != "" {
-		return value
+		if isDockerSocket(value) {
+			return value
+		}
 	}
 	candidates := []string{"/var/run/docker.sock", "/run/podman/podman.sock"}
 	for _, socket := range []string{"/var/run/docker.sock", "/run/podman/podman.sock"} {
@@ -111,12 +113,16 @@ func resolveDockerSocket(configured, hostRoot string) string {
 		}
 	}
 	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err == nil && info.Mode()&os.ModeSocket != 0 {
+		if isDockerSocket(candidate) {
 			return candidate
 		}
 	}
 	return ""
+}
+
+func isDockerSocket(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode()&os.ModeSocket != 0
 }
 
 func containsString(values []string, candidate string) bool {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"guanlan-monitor/agent/internal/model"
@@ -77,5 +79,30 @@ func TestCollectContainersFromDockerSocket(t *testing.T) {
 	item := items[0]
 	if item.Name != "api" || item.CPUPercent != 80 || item.MemoryPercent != 80 || item.NetworkRxBytes != 13 || item.NetworkTxBytes != 27 || item.RestartCount != 2 {
 		t.Fatalf("container = %#v, want populated Docker stats", item)
+	}
+}
+
+func TestResolveDockerSocketFallsBackToHostRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket paths are not portable on Windows")
+	}
+	for _, candidate := range []string{"/var/run/docker.sock", "/run/podman/podman.sock"} {
+		if isDockerSocket(candidate) {
+			t.Skipf("host runtime socket %s would take precedence", candidate)
+		}
+	}
+	hostRoot := t.TempDir()
+	socketPath := filepath.Join(hostRoot, "var", "run", "docker.sock")
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	if got := resolveDockerSocket(filepath.Join(hostRoot, "missing.sock"), hostRoot); got != socketPath {
+		t.Fatalf("resolved socket = %q, want %q", got, socketPath)
 	}
 }

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -22,6 +22,8 @@ allow_file_operations=false
 no_docker=false
 allow_insecure_http=false
 auto_update=true
+docker_socket="${GUANLAN_DOCKER_SOCKET:-}"
+docker_socket_target="/run/guanlan-agent-docker.sock"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --image) agent_image="${2:-}"; shift 2 ;;
     --container) container_name="${2:-}"; shift 2 ;;
     --no-docker) no_docker=true; shift ;;
+    --docker-socket) docker_socket="${2:-}"; shift 2 ;;
     --source-url) repository_url="${2:-}"; shift 2 ;;
     --interval) interval="${2:-}"; shift 2 ;;
     --service) services+=("${2:-}"); shift 2 ;;
@@ -152,9 +155,28 @@ docker_available=false
 if [[ "${no_docker}" != true ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   docker_available=true
 fi
+
+if [[ -n "${docker_socket}" ]]; then
+  if [[ ! -S "${docker_socket}" ]]; then
+    echo "Docker/Podman socket does not exist or is not a Unix socket: ${docker_socket}" >&2
+    exit 2
+  fi
+else
+  for candidate_socket in /var/run/docker.sock /run/podman/podman.sock; do
+    if [[ -S "${candidate_socket}" ]]; then
+      docker_socket="${candidate_socket}"
+      break
+    fi
+  done
+fi
+
 host_root=""
 if [[ "${docker_available}" == true ]]; then
   host_root="/host"
+fi
+docker_socket_config="${docker_socket}"
+if [[ "${docker_available}" == true ]]; then
+  docker_socket_config="${docker_socket_target}"
 fi
 
 json_escape() {
@@ -186,8 +208,8 @@ if ((${#disks[@]} > 0)); then
 fi
 
 config_tmp="${temp_dir}/agent.json"
-printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "allow_command_execution": %s,\n  "allow_file_operations": %s,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s"\n}\n' \
-  "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${allow_command_execution}" "${allow_file_operations}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" > "${config_tmp}"
+printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "allow_command_execution": %s,\n  "allow_file_operations": %s,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s",\n  "docker_socket": "%s"\n}\n' \
+  "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${allow_command_execution}" "${allow_file_operations}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" "$(json_escape "${docker_socket_config}")" > "${config_tmp}"
 
 if [[ "${config_allow_insecure_http}" == true ]]; then
   sed -i 's/"allow_insecure_http": false/"allow_insecure_http": true/' "${config_tmp}"
@@ -212,6 +234,10 @@ install_docker_agent() {
   if docker container inspect "${container_name}" >/dev/null 2>&1; then
     docker rm -f "${container_name}" >/dev/null
   fi
+  local docker_socket_mount=()
+  if [[ -n "${docker_socket}" ]]; then
+    docker_socket_mount=(--mount "type=bind,src=${docker_socket},dst=${docker_socket_target},readonly")
+  fi
 
   docker run -d \
     --name "${container_name}" \
@@ -229,6 +255,7 @@ install_docker_agent() {
     --mount "type=bind,src=/sys,dst=/host/sys,readonly" \
     --mount "type=bind,src=/etc,dst=/host/etc,readonly" \
     --mount "type=bind,src=/run,dst=/host/run,readonly" \
+    "${docker_socket_mount[@]}" \
     "${agent_image}" -config /etc/guanlan-agent/agent.json >/dev/null
   sleep 2
   if [[ "$(docker inspect --format '{{.State.Running}}' "${container_name}")" != "true" ]]; then
@@ -281,6 +308,8 @@ install_agent_updater() {
     printf 'config_path=%s\n' "$(shell_quote "${agent_config_path}")"
     printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
     printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run}")"
+    printf 'docker_socket_source=%s\n' "$(shell_quote "${docker_socket}")"
+    printf 'docker_socket_target=%s\n' "$(shell_quote "${docker_socket_target}")"
     printf '%s\n' \
       'if command -v flock >/dev/null 2>&1; then lock_path="/run/lock/guanlan-agent-update.lock"; mkdir -p "$(dirname "${lock_path}")"; exec 9>"${lock_path}"; flock -n 9 || { echo "Agent 更新任务正在执行。" >&2; exit 75; }; fi' \
       'run_with_timeout() {' \
@@ -320,7 +349,10 @@ install_agent_updater() {
       '    docker start "${container_name}" >/dev/null 2>&1 || true' \
       '  fi' \
       '}' \
-      'if ! run_with_timeout 30 docker run -d --name "${new_container}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=/etc/guanlan-agent/agent.json,dst=/etc/guanlan-agent/agent.json,readonly" --mount "type=volume,src=${spool_volume},dst=/var/lib/guanlan-agent/spool" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${image}" -config /etc/guanlan-agent/agent.json >/dev/null; then restore_old; exit 1; fi' \
+      'if [[ -z "${docker_socket_source}" ]]; then for candidate_socket in /var/run/docker.sock /run/podman/podman.sock; do if [[ -S "${candidate_socket}" ]]; then docker_socket_source="${candidate_socket}"; break; fi; done; fi' \
+      'socket_mount=()' \
+      'if [[ -n "${docker_socket_source}" && -S "${docker_socket_source}" ]]; then socket_mount=(--mount "type=bind,src=${docker_socket_source},dst=${docker_socket_target},readonly"); fi' \
+      'if ! run_with_timeout 30 docker run -d --name "${new_container}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=/etc/guanlan-agent/agent.json,dst=/etc/guanlan-agent/agent.json,readonly" --mount "type=volume,src=${spool_volume},dst=/var/lib/guanlan-agent/spool" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${socket_mount[@]}" "${image}" -config /etc/guanlan-agent/agent.json >/dev/null; then restore_old; exit 1; fi' \
       'sleep 2' \
       'if [[ "$(docker inspect --format "{{.State.Running}}" "${new_container}" 2>/dev/null || true)" != true ]]; then docker logs --tail 100 "${new_container}" >&2 || true; restore_old; exit 1; fi' \
       'docker rm -f "${old_container}" >/dev/null 2>&1 || true' \
@@ -401,6 +433,21 @@ install_local_agent() {
   install -m 0755 "${binary_path}" /usr/local/bin/guanlan-agent
   install -o guanlan-agent -g guanlan-agent -m 0600 "${config_tmp}" "${agent_config_path}"
 
+socket_group_line=""
+if [[ -n "${docker_socket}" && -S "${docker_socket}" ]] && command -v stat >/dev/null 2>&1; then
+  socket_gid="$(stat -c '%g' "${docker_socket}" 2>/dev/null || true)"
+  socket_group=""
+  if [[ -n "${socket_gid}" ]] && command -v getent >/dev/null 2>&1; then
+    socket_group="$(getent group "${socket_gid}" | cut -d: -f1 | head -n 1 || true)"
+  fi
+  if [[ -z "${socket_group}" && "${socket_gid}" =~ ^[0-9]+$ ]]; then
+    socket_group="${socket_gid}"
+  fi
+  if [[ -n "${socket_group}" ]]; then
+    socket_group_line="SupplementaryGroups=${socket_group}"
+  fi
+fi
+
 unit_tmp="${temp_dir}/guanlan-agent.service"
 printf '%s\n' \
   '[Unit]' \
@@ -412,6 +459,7 @@ printf '%s\n' \
   'Type=simple' \
   'User=guanlan-agent' \
   'Group=guanlan-agent' \
+  "${socket_group_line}" \
   "ExecStart=/usr/local/bin/guanlan-agent -config ${agent_config_path}" \
   'Restart=always' \
   'RestartSec=5' \

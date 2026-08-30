@@ -123,6 +123,7 @@ grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_f
 grep -F 'docker run -d --name guanlan-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
+grep -F '"docker_socket": "/run/guanlan-agent-docker.sock"' "${config_file}" >/dev/null
 grep -F '"allow_command_execution": false' "${config_file}" >/dev/null
 grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
@@ -136,6 +137,7 @@ run_installer 0
 grep -F 'go build -trimpath' "${log_file}" >/dev/null
 grep -F 'systemctl enable --now guanlan-agent.service' "${log_file}" >/dev/null
 grep -F '"host_root": ""' "${config_file}" >/dev/null
+grep -F '"docker_socket": ""' "${config_file}" >/dev/null
 if grep -q '^docker pull ' "${log_file}"; then
   echo 'Local fallback unexpectedly pulled the Agent image.' >&2
   exit 1
@@ -199,6 +201,13 @@ else
     --server-url "${server_url}" --device-id test-device
 fi
 grep -F 'systemctl enable --now guanlan-agent-update.timer' "${log_file}" >/dev/null
+
+: > "${log_file}"
+server_url=https://monitor.example.com
+if run_installer 1 --docker-socket "${temp_dir}/missing.sock"; then
+  echo 'Invalid Docker socket path was accepted.' >&2
+  exit 1
+fi
 
 : > "${log_file}"
 server_url=monitor.example.com
