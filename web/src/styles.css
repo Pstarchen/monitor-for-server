@@ -112,6 +112,8 @@ p, h1, h2, h3 { margin: 0; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .section-heading h2 { font-size: 17px; font-weight: 650; }
 .section-heading p { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.section-heading-actions { display: inline-flex; align-items: center; gap: 10px; }
+.section-heading-actions .filter-count { display: inline-flex; align-items: center; gap: 5px; margin-left: 0; }
 .panel { min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sm); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; min-height: 50px; padding: 0 16px; border-bottom: 1px solid var(--border); }
 .panel-head h2 { font-size: 15px; }
@@ -702,6 +704,7 @@ p, h1, h2, h3 { margin: 0; }
 .availability-actions .table-icon-button { width: 28px; height: 28px; }
 .service-availability-grid, .public-availability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .service-availability-grid .availability-card { height: 100%; }
+.service-availability-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warning) 28%, var(--border)); border-radius: 6px; color: var(--warning); background: var(--warning-bg); font-size: 12px; flex-wrap: wrap; }
 
 .public-status-page { min-height: 100vh; color: var(--foreground); background: var(--background); }
 .public-status-header { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 max(22px, calc((100vw - 1180px) / 2)); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 14%, transparent); }
@@ -824,6 +827,7 @@ p, h1, h2, h3 { margin: 0; }
   .resource-overview { grid-template-columns: 1fr; }
   .resource-overview > div { border-right: 0; border-bottom: 1px solid var(--border); }
   .resource-overview > div:last-child { border-bottom: 0; }
+  .section-heading-actions { width: 100%; justify-content: space-between; }
   .dashboard-filter-bar { grid-template-columns: 1fr 1fr; }
   .dashboard-filter-bar .search-input { grid-column: 1 / -1; }
   .server-grid { grid-template-columns: 1fr; }

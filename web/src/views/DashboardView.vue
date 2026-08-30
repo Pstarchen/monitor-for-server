@@ -2,26 +2,30 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Activity, ArrowDown, ArrowUp, BellRing, Clock3, Cpu, HardDrive,
+  Activity, ArrowDown, ArrowUp, BellRing, CheckCircle2, Clock3, Cpu, HardDrive,
   MapPin, MemoryStick, RefreshCw, Search, Server, WifiOff,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import ServiceAvailabilityCard from '@/components/ServiceAvailabilityCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { dateTime, percent, rate, relativeTime, uptime } from '@/lib/format'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
-import type { Dashboard, Device, DeviceStatus } from '@/types'
+import type { Dashboard, Device, DeviceStatus, ServiceCheck } from '@/types'
 
 type SortKey = 'attention' | 'cpu' | 'memory' | 'disk' | 'name'
 
 const router = useRouter()
 const dashboard = ref<Dashboard | null>(null)
+const serviceChecks = ref<ServiceCheck[]>([])
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
+const servicesError = ref('')
+const servicesRefreshing = ref(false)
 const search = ref('')
 const status = ref<DeviceStatus | ''>('')
 const group = ref('')
@@ -49,17 +53,42 @@ const filteredDevices = computed(() => {
     })
 })
 
+const onlineServices = computed(() => serviceChecks.value.filter((service) => service.latest?.success).length)
+
 async function load(background = false) {
   if (background) refreshing.value = true
   else loading.value = true
   error.value = ''
   try {
-    dashboard.value = (await api.get<Dashboard>('/dashboard')).data
+    const [dashboardRequest, servicesRequest] = await Promise.allSettled([
+      api.get<Dashboard>('/dashboard'),
+      api.get<ServiceCheck[]>('/services'),
+    ])
+    if (dashboardRequest.status === 'rejected') throw dashboardRequest.reason
+    dashboard.value = dashboardRequest.value.data
+    if (servicesRequest.status === 'fulfilled') {
+      serviceChecks.value = servicesRequest.value.data
+      servicesError.value = ''
+    } else {
+      servicesError.value = errorMessage(servicesRequest.reason)
+    }
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
     loading.value = false
     refreshing.value = false
+  }
+}
+
+async function loadServices() {
+  servicesRefreshing.value = true
+  try {
+    serviceChecks.value = (await api.get<ServiceCheck[]>('/services')).data
+    servicesError.value = ''
+  } catch (cause) {
+    servicesError.value = errorMessage(cause)
+  } finally {
+    servicesRefreshing.value = false
   }
 }
 
@@ -71,6 +100,10 @@ function progressTone(value: number) {
   if (value >= 90) return 'critical'
   if (value >= 75) return 'warning'
   return 'normal'
+}
+
+function serviceLabel(service: ServiceCheck) {
+  return service.type === 'HTTP_GET' ? 'HTTP' : service.type === 'TCPING' ? 'TCP' : 'PING'
 }
 
 function uptimeSeconds(device: Device) {
@@ -121,6 +154,26 @@ onBeforeUnmount(() => {
         <div><span><MemoryStick :size="15" />平均内存</span><strong>{{ percent(dashboard.averageMemory) }}</strong><i><b :data-level="progressTone(dashboard.averageMemory)" :style="{ width: `${Math.min(100, dashboard.averageMemory)}%` }" /></i></div>
         <div><span><HardDrive :size="15" />平均磁盘</span><strong>{{ percent(dashboard.averageDisk) }}</strong><i><b :data-level="progressTone(dashboard.averageDisk)" :style="{ width: `${Math.min(100, dashboard.averageDisk)}%` }" /></i></div>
       </div>
+
+      <section class="section">
+        <div class="section-heading">
+          <div><h2>服务可用性</h2><p>最近探测记录与近 7 天可用率</p></div>
+          <div class="section-heading-actions">
+            <span v-if="!servicesError" class="filter-count"><CheckCircle2 :size="14" />{{ onlineServices }} / {{ serviceChecks.length }} 正常</span>
+            <el-button text @click="router.push('/services')">查看全部</el-button>
+          </div>
+        </div>
+        <div v-if="servicesError && serviceChecks.length" class="service-availability-notice" role="alert">
+          <span>服务可用性刷新失败：{{ servicesError }}</span><el-button text :loading="servicesRefreshing" @click="loadServices">重试</el-button>
+        </div>
+        <div v-else-if="servicesError" class="panel state-panel">
+          <EmptyState title="服务可用性加载失败" :description="servicesError"><el-button :loading="servicesRefreshing" @click="loadServices">重新加载</el-button></EmptyState>
+        </div>
+        <div v-else-if="serviceChecks.length" class="service-availability-grid">
+          <ServiceAvailabilityCard v-for="check in serviceChecks" :key="check.id" :name="check.name" :type-label="serviceLabel(check)" :subtitle="check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs" />
+        </div>
+        <div v-else class="panel"><EmptyState title="暂无服务监控" description="添加 HTTP、Ping 或 TCP 目标后，这里会显示服务可用性。"><el-button text @click="router.push('/services')">前往服务监控</el-button></EmptyState></div>
+      </section>
 
       <section class="section">
         <div class="section-heading">
