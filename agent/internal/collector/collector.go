@@ -38,6 +38,7 @@ type Collector struct {
 
 type Options struct {
 	MonitoredServices   []string
+	MonitoredProcesses  []string
 	SkipProcesses       bool
 	SkipConnectionCount bool
 	DiskMountpoints     []string
@@ -47,8 +48,14 @@ type Options struct {
 	IntegrityPaths      []string
 }
 
+const maxMonitoredProcesses = 32
+
 func New(options Options) *Collector {
 	options.MonitoredServices = append([]string(nil), options.MonitoredServices...)
+	options.MonitoredProcesses = append([]string(nil), options.MonitoredProcesses...)
+	if len(options.MonitoredProcesses) > maxMonitoredProcesses {
+		options.MonitoredProcesses = options.MonitoredProcesses[:maxMonitoredProcesses]
+	}
 	options.DiskMountpoints = append([]string(nil), options.DiskMountpoints...)
 	options.LogPaths = append([]string(nil), options.LogPaths...)
 	options.IntegrityPaths = append([]string(nil), options.IntegrityPaths...)
@@ -97,7 +104,7 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 
 	processes := make([]model.ProcessStats, 0)
 	if !c.options.SkipProcesses {
-		processes = collectProcesses(ctx, 12)
+		processes = collectProcesses(ctx, 12, c.options.MonitoredProcesses)
 	}
 	return model.Report{
 		CollectedAt:       now,
@@ -346,7 +353,7 @@ func allowedMountpoint(mountpoint string, allowlist []string) bool {
 	return false
 }
 
-func collectProcesses(ctx context.Context, limit int) []model.ProcessStats {
+func collectProcesses(ctx context.Context, limit int, monitored []string) []model.ProcessStats {
 	items, _ := process.ProcessesWithContext(ctx)
 	result := make([]model.ProcessStats, 0, len(items))
 	for _, item := range items {
@@ -371,9 +378,47 @@ func collectProcesses(ctx context.Context, limit int) []model.ProcessStats {
 		return result[i].CPUPercent > result[j].CPUPercent
 	})
 	if len(result) > limit {
-		result = result[:limit]
+		selected := append([]model.ProcessStats(nil), result[:limit]...)
+		seen := make(map[int32]struct{}, len(selected))
+		for _, item := range selected {
+			seen[item.PID] = struct{}{}
+		}
+		for _, item := range result[limit:] {
+			if !matchesMonitoredProcess(item.Name, monitored) {
+				continue
+			}
+			if _, exists := seen[item.PID]; exists {
+				continue
+			}
+			selected = append(selected, item)
+			seen[item.PID] = struct{}{}
+			if len(selected) >= limit+maxMonitoredProcesses {
+				break
+			}
+		}
+		result = selected
 	}
 	return result
+}
+
+func matchesMonitoredProcess(name string, monitored []string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, candidate := range monitored {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if strings.EqualFold(name, candidate) {
+			return true
+		}
+		if runtime.GOOS == "windows" && strings.EqualFold(strings.TrimSuffix(name, ".exe"), strings.TrimSuffix(candidate, ".exe")) {
+			return true
+		}
+	}
+	return false
 }
 
 func rate(current, previous uint64, seconds float64) float64 {

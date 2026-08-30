@@ -447,6 +447,16 @@ p, h1, h2, h3 { margin: 0; }
 .trend-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
 .trend-toolbar > span { color: var(--muted); font-size: 11px; }
 .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
+.analytics-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 12px; padding: 13px 15px; border: 1px solid var(--border); background: var(--surface-subtle); }
+.analytics-toolbar label { display: grid; gap: 6px; width: min(360px, 100%); color: var(--muted); font-size: 11px; }
+.analytics-toolbar label .el-select { width: 100%; }
+.analytics-option { display: grid; gap: 2px; min-width: 0; line-height: 1.3; }
+.analytics-option strong, .analytics-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analytics-option small { color: var(--muted); font-size: 10px; }
+.analytics-selection { padding-bottom: 8px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.analytics-chart-grid { margin-bottom: 14px; }
+.analytics-chart-grid .metric-chart { min-height: 260px; }
+.analytics-empty { margin-bottom: 14px; }
 .detail-summary-grid { grid-template-columns: 1fr 1fr; }
 .detail-list dl { display: grid; grid-template-columns: 1fr 1fr; margin: 0; padding: 7px 16px 15px; }
 .detail-list dl > div { min-width: 0; padding: 11px 0; border-bottom: 1px solid var(--border); }
@@ -979,6 +989,9 @@ p, h1, h2, h3 { margin: 0; }
   .detail-tabs .el-tabs__nav-wrap { overflow-x: auto; }
   .trend-toolbar { align-items: stretch; flex-direction: column; }
   .trend-toolbar .el-segmented { width: 100%; }
+  .analytics-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .analytics-toolbar label { width: 100%; }
+  .analytics-selection { padding-bottom: 0; white-space: normal; }
   .trend-panel-toolbar { align-items: stretch; flex-direction: column; gap: 12px; }
   .trend-device-picker { width: 100%; }
   .trend-range-control { align-items: stretch; justify-items: stretch; }

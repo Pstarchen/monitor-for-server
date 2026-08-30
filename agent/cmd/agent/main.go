@@ -34,6 +34,7 @@ func main() {
 	client := api.NewClient(cfg.ServerURL, cfg.DeviceID, cfg.AgentKey, cfg.RequestTimeout)
 	metrics := collector.New(collector.Options{
 		MonitoredServices:   cfg.MonitoredServices,
+		MonitoredProcesses:  cfg.MonitoredProcesses,
 		SkipProcesses:       cfg.SkipProcesses,
 		SkipConnectionCount: cfg.SkipConnectionCount,
 		DiskMountpoints:     cfg.DiskMountpoints,

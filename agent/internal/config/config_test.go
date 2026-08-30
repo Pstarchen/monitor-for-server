@@ -65,6 +65,7 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
         "skip_process_collection":true,
         "skip_connection_count":true,
 		"disk_mountpoints":["/", " /data ", "/data", ""],
+		"monitored_processes":[" java ", "", "postgres"],
 		"host_root":" /host ",
 		"docker_socket":" /host/var/run/docker.sock "
     }`)
@@ -83,6 +84,9 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
 	}
 	if cfg.HostRoot != "/host" {
 		t.Fatalf("unexpected host root: %q", cfg.HostRoot)
+	}
+	if len(cfg.MonitoredProcesses) != 2 || cfg.MonitoredProcesses[0] != "java" || cfg.MonitoredProcesses[1] != "postgres" {
+		t.Fatalf("unexpected monitored processes: %#v", cfg.MonitoredProcesses)
 	}
 	if cfg.DockerSocket != "/host/var/run/docker.sock" {
 		t.Fatalf("unexpected docker socket: %q", cfg.DockerSocket)

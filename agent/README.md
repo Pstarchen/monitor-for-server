@@ -19,6 +19,7 @@ Agent 每轮先将报告原子写入磁盘缓冲，再按时间顺序上报。�
 - `host_root`：仅供 Linux 总终端的受管 Agent 使用。设置为只读宿主机挂载目录（安装器使用 `/host`）后，磁盘容量从宿主机读取；普通 Agent 保持空值。
 - `docker_socket`：可选 Docker/Podman 兼容 Unix socket 路径；留空时自动探测 `/var/run/docker.sock`、`/run/podman/podman.sock` 及受管 Agent 的 `/host` 对应路径。指定路径失效时仍会回退到自动探测，避免运行时 socket 重建后永久停止采集。Agent 只调用兼容 API 的容器列表和统计 GET 接口，无法访问运行时或权限不足时返回空列表。挂载运行时 socket 等同于授予高权限，请仅在受信任主机上启用。
 - `monitored_services`：检查指定 systemd 服务或 Windows 服务状态。
+- `monitored_processes`：额外保留指定进程，即使它们不在 CPU 排名前 12；适合持续观察低占用但关键的 Nginx、Java、数据库进程。最多额外保留 32 个配置项。
 - `log_paths`：可选的绝对日志文件路径白名单。启用后仅上传每个文件最后 20 行（最多 32 KiB），默认为空，不会读取日志。
 - `integrity_paths`：可选的绝对文件或目录白名单。启用后上传 SHA-256、大小和修改时间，用于检测文件被修改；单文件最多 16 MiB，目录最多 512 个文件，默认为空。
 - 默认采集监听中的 TCP/UDP 端口和网络接口明细；端口枚举会复用 `skip_connection_count` 开关，受限主机可关闭。

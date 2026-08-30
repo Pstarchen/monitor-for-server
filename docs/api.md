@@ -48,7 +48,7 @@
 | POST | `/api/devices/{id}/rotate-key` | ADMIN | 轮换并一次性返回新密钥 |
 | DELETE | `/api/devices/{id}` | ADMIN | 删除设备及关联数据 |
 | GET | `/api/devices/{id}/metrics/latest` | 登录 | 最新指标 |
-| GET | `/api/devices/{id}/metrics/history` | 登录 | `from` 到 `to` 的历史指标，最大 31 天 |
+| GET | `/api/devices/{id}/metrics/history` | 登录 | `from` 到 `to` 的历史指标，最大 31 天；每个快照包含当时的容器与进程列表，控制台可据此绘制单容器/单进程历史趋势 |
 
 创建设备请求：
 
@@ -80,7 +80,7 @@ X-Agent-Key: <agent-key>
 Content-Type: application/json
 ```
 
-请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。`host.fans`、`host.batteries` 和 `host.gpus` 是可选硬件健康数据：Linux 从 hwmon/power_supply 读取风扇与电池，安装 `nvidia-smi` 时采集 NVIDIA GPU；不支持或无权限时为空数组，不影响其他指标。磁盘可包含可选 `smart` 健康对象；Agent 在 Linux 上检测到 `smartctl` 且设备权限允许时读取 SMART/NVMe 自检、温度、寿命与错误计数，否则状态为 `UNKNOWN` 或不附带对象。`containers` 是可选的 Docker 容器摘要，最多 100 条；无法访问 Docker socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
+请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。Agent 的 `monitored_processes` 配置会让指定进程即使不在默认 CPU 前 12 名也保留在 `processes` 列表中（最多额外 32 个），便于长期观察关键但低占用的业务进程。`host.fans`、`host.batteries` 和 `host.gpus` 是可选硬件健康数据：Linux 从 hwmon/power_supply 读取风扇与电池，安装 `nvidia-smi` 时采集 NVIDIA GPU；不支持或无权限时为空数组，不影响其他指标。磁盘可包含可选 `smart` 健康对象；Agent 在 Linux 上检测到 `smartctl` 且设备权限允许时读取 SMART/NVMe 自检、温度、寿命与错误计数，否则状态为 `UNKNOWN` 或不附带对象。`containers` 是可选的 Docker/Podman 容器摘要，最多 100 条；无法访问运行时 socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
 
 ## Agent 任务
 

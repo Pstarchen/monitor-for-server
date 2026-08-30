@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--disk MOUNTPOINT] [--log-path PATH] [--integrity-path PATH] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--process NAME] [--disk MOUNTPOINT] [--log-path PATH] [--integrity-path PATH] [--skip-processes] [--skip-connections]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -14,6 +14,7 @@ container_name="${GUANLAN_AGENT_CONTAINER:-guanlan-agent}"
 binary_path=""
 interval="3s"
 services=()
+processes=()
 disks=()
 log_paths=()
 integrity_paths=()
@@ -43,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --source-url) repository_url="${2:-}"; shift 2 ;;
     --interval) interval="${2:-}"; shift 2 ;;
     --service) services+=("${2:-}"); shift 2 ;;
+    --process) processes+=("${2:-}"); shift 2 ;;
     --disk) disks+=("${2:-}"); shift 2 ;;
     --log-path) log_paths+=("${2:-}"); shift 2 ;;
     --integrity-path) integrity_paths+=("${2:-}"); shift 2 ;;
@@ -188,6 +190,8 @@ json_escape() {
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
   value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
   printf '%s' "${value}"
 }
 
@@ -198,6 +202,16 @@ if ((${#services[@]} > 0)); then
       service_json+=","
     fi
     service_json+="\"$(json_escape "${service}")\""
+  done
+fi
+
+process_json=""
+if ((${#processes[@]} > 0)); then
+  for process in "${processes[@]}"; do
+    if [[ -n "${process_json}" ]]; then
+      process_json+=","
+    fi
+    process_json+="\"$(json_escape "${process}")\""
   done
 fi
 
@@ -235,15 +249,11 @@ config_tmp="${temp_dir}/agent.json"
 printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "/var/lib/guanlan-agent/spool",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "allow_command_execution": %s,\n  "allow_file_operations": %s,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s",\n  "docker_socket": "%s"\n}\n' \
   "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "${allow_command_execution}" "${allow_file_operations}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" "$(json_escape "${docker_socket_config}")" > "${config_tmp}"
 
-security_config_tmp="${config_tmp}.security"
-awk -v log_json="${log_json}" -v integrity_json="${integrity_json}" '
-  /  "host_root":/ {
-    print "  \"log_paths\": [" log_json "],"
-    print "  \"integrity_paths\": [" integrity_json "],"
-  }
-  { print }
-' "${config_tmp}" > "${security_config_tmp}"
-mv "${security_config_tmp}" "${config_tmp}"
+# Append optional arrays without passing escaped JSON through awk -v, which can
+# reinterpret backslashes and turn valid JSON escape sequences into newlines.
+sed -i '$d' "${config_tmp}"
+sed -i '$s/$/,/' "${config_tmp}"
+printf '  "monitored_processes": [%s],\n  "log_paths": [%s],\n  "integrity_paths": [%s]\n}\n' "${process_json}" "${log_json}" "${integrity_json}" >> "${config_tmp}"
 
 if [[ "${config_allow_insecure_http}" == true ]]; then
   sed -i 's/"allow_insecure_http": false/"allow_insecure_http": true/' "${config_tmp}"

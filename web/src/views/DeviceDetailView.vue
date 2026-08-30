@@ -11,10 +11,11 @@ import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
+import { counterRate } from '@/lib/device-analytics'
 import { bytes, dateTime, percent, rate, rateScale, relativeTime } from '@/lib/format'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
-import type { Device, DeviceCredential, Metric } from '@/types'
+import type { ContainerMetric, Device, DeviceCredential, Metric, ProcessMetric } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,6 +28,8 @@ const error = ref('')
 const rangeHours = ref(1)
 const activeTab = ref('overview')
 const credential = ref<DeviceCredential | null>(null)
+const containerSelectionId = ref('')
+const processSelectionKey = ref('')
 let refreshTimer = 0
 
 const deviceId = computed(() => String(route.params.id))
@@ -62,6 +65,67 @@ const maxTemperature = computed(() => temperatures.value.reduce((max, item) => M
 const networkInterfaces = computed(() => latest.value?.networkInterfaces ?? [])
 const ports = computed(() => latest.value?.ports ?? [])
 const containers = computed(() => latest.value?.containers ?? [])
+const containerOptions = computed(() => {
+  const options = new Map<string, Pick<ContainerMetric, 'id' | 'name' | 'image'>>()
+  for (const metric of history.value) {
+    for (const container of metric.containers) {
+      if (!options.has(container.id)) options.set(container.id, { id: container.id, name: container.name, image: container.image })
+    }
+  }
+  return Array.from(options.values()).sort((left, right) => (left.name || left.id).localeCompare(right.name || right.id, 'zh-CN'))
+})
+const selectedContainerId = computed({
+  get: () => containerOptions.value.some((item) => item.id === containerSelectionId.value) ? containerSelectionId.value : containerOptions.value[0]?.id ?? '',
+  set: (value: string) => { containerSelectionId.value = value },
+})
+const selectedContainer = computed(() => containers.value.find((item) => item.id === selectedContainerId.value) ?? null)
+const containerTrendPoints = computed(() => history.value.flatMap((metric) => {
+  const container = metric.containers.find((item) => item.id === selectedContainerId.value)
+  return container ? [{ collectedAt: metric.collectedAt, container }] : []
+}))
+const containerTrendLabels = computed(() => containerTrendPoints.value.map((item) => trendLabel(item.collectedAt)))
+const containerResourceSeries = computed(() => [
+  { name: 'CPU', data: containerTrendPoints.value.map((item) => item.container.cpuPercent), color: '#2867a6' },
+  { name: '内存', data: containerTrendPoints.value.map((item) => item.container.memoryPercent), color: '#17834d' },
+])
+const containerNetworkRates = computed(() => containerTrendPoints.value.map((point, index) => {
+  if (index === 0) return { rx: 0, tx: 0 }
+  const previous = containerTrendPoints.value[index - 1]
+  const seconds = (new Date(point.collectedAt).getTime() - new Date(previous.collectedAt).getTime()) / 1000
+  return {
+    rx: counterRate(point.container.networkRxBytes, previous.container.networkRxBytes, seconds),
+    tx: counterRate(point.container.networkTxBytes, previous.container.networkTxBytes, seconds),
+  }
+}))
+const containerNetworkScale = computed(() => rateScale(containerNetworkRates.value.reduce((max, item) => Math.max(max, item.rx, item.tx), 0)))
+const containerNetworkSeries = computed(() => [
+  { name: '网络接收', data: containerNetworkRates.value.map((item) => item.rx / containerNetworkScale.value.divisor), color: '#2867a6' },
+  { name: '网络发送', data: containerNetworkRates.value.map((item) => item.tx / containerNetworkScale.value.divisor), color: '#17834d' },
+])
+const processOptions = computed(() => {
+  const options = new Map<string, ProcessMetric>()
+  for (const metric of history.value) {
+    for (const process of metric.processes) {
+      const key = processKey(process)
+      if (!options.has(key)) options.set(key, process)
+    }
+  }
+  return Array.from(options.values()).sort((left, right) => (left.name || '').localeCompare(right.name || '', 'zh-CN') || left.pid - right.pid)
+})
+const selectedProcessKey = computed({
+  get: () => processOptions.value.some((item) => processKey(item) === processSelectionKey.value) ? processSelectionKey.value : processOptions.value[0] ? processKey(processOptions.value[0]) : '',
+  set: (value: string) => { processSelectionKey.value = value },
+})
+const selectedProcess = computed(() => processOptions.value.find((item) => processKey(item) === selectedProcessKey.value) ?? null)
+const processTrendPoints = computed(() => history.value.flatMap((metric) => {
+  const process = metric.processes.find((item) => processKey(item) === selectedProcessKey.value)
+  return process ? [{ collectedAt: metric.collectedAt, process }] : []
+}))
+const processTrendLabels = computed(() => processTrendPoints.value.map((item) => trendLabel(item.collectedAt)))
+const processSeries = computed(() => [
+  { name: 'CPU', data: processTrendPoints.value.map((item) => item.process.cpuPercent), color: '#986400' },
+  { name: '内存', data: processTrendPoints.value.map((item) => item.process.memoryPercent), color: '#c73832' },
+])
 const fans = computed(() => latest.value?.fans ?? [])
 const batteries = computed(() => latest.value?.batteries ?? [])
 const gpus = computed(() => latest.value?.gpus ?? [])
@@ -98,6 +162,14 @@ function section(name: string): Record<string, unknown> {
 
 function text(value: unknown, fallback = '--') {
   return value === null || value === undefined || value === '' ? fallback : String(value)
+}
+
+function trendLabel(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: rangeHours.value === 1 ? '2-digit' : undefined }).format(new Date(value))
+}
+
+function processKey(process: Pick<ProcessMetric, 'pid' | 'name'>) {
+  return `${process.pid}:${process.name}`
 }
 
 function uptime(value: unknown) {
@@ -258,6 +330,14 @@ onBeforeUnmount(() => {
         </el-tab-pane>
 
         <el-tab-pane :label="`进程 (${latest?.processes.length ?? 0})`" name="processes">
+          <div v-if="processOptions.length" class="analytics-toolbar">
+            <label><span>历史进程</span><el-select v-model="selectedProcessKey" filterable aria-label="选择历史进程"><el-option v-for="process in processOptions" :key="processKey(process)" :label="`${process.name || '未命名'} · PID ${process.pid}`" :value="processKey(process)"><span class="analytics-option"><strong>{{ process.name || '未命名进程' }}</strong><small>PID {{ process.pid }}{{ process.username ? ` · ${process.username}` : '' }}</small></span></el-option></el-select></label>
+            <span v-if="selectedProcess" class="analytics-selection">最近 CPU {{ percent(selectedProcess.cpuPercent) }} · 内存 {{ percent(selectedProcess.memoryPercent) }}</span>
+          </div>
+          <div v-if="processTrendPoints.length > 1" class="chart-grid analytics-chart-grid">
+            <article class="panel"><div class="panel-head"><div><h2>进程资源趋势</h2><p>{{ selectedProcess?.name || '所选进程' }} · PID {{ selectedProcess?.pid ?? '--' }}</p></div><Cpu :size="17" /></div><MetricChart :labels="processTrendLabels" :series="processSeries" unit="%" :aria-label="`${selectedProcess?.name || '进程'}资源趋势`" /></article>
+          </div>
+          <div v-else-if="processOptions.length" class="panel analytics-empty"><EmptyState title="暂无进程历史数据" description="该进程在当前时间范围内只有一个采集点，继续采集后会显示趋势。" /></div>
           <article class="panel"><div v-if="latest?.processes.length" class="table-wrap"><table class="data-table"><thead><tr><th>PID</th><th>进程</th><th>用户</th><th>CPU</th><th>内存</th><th>状态</th></tr></thead><tbody><tr v-for="process in latest.processes" :key="process.pid"><td class="mono-value">{{ process.pid }}</td><td><strong>{{ process.name }}</strong></td><td>{{ process.username || '--' }}</td><td>{{ percent(process.cpuPercent) }}</td><td>{{ percent(process.memoryPercent) }}</td><td>{{ process.status }}</td></tr></tbody></table></div><EmptyState v-else title="暂无进程数据" /></article>
         </el-tab-pane>
 
@@ -270,6 +350,15 @@ onBeforeUnmount(() => {
         </el-tab-pane>
 
         <el-tab-pane :label="`容器 (${containers.length})`" name="containers">
+          <div v-if="containerOptions.length" class="analytics-toolbar">
+            <label><span>历史容器</span><el-select v-model="selectedContainerId" filterable aria-label="选择历史容器"><el-option v-for="container in containerOptions" :key="container.id" :label="container.name || container.id.slice(0, 12)" :value="container.id"><span class="analytics-option"><strong>{{ container.name || '未命名容器' }}</strong><small>{{ container.image || container.id.slice(0, 12) }}</small></span></el-option></el-select></label>
+            <span v-if="selectedContainer" class="analytics-selection">当前 CPU {{ percent(selectedContainer.cpuPercent) }} · 内存 {{ percent(selectedContainer.memoryPercent) }}</span>
+          </div>
+          <div v-if="containerTrendPoints.length > 1" class="chart-grid analytics-chart-grid">
+            <article class="panel"><div class="panel-head"><div><h2>容器资源趋势</h2><p>{{ selectedContainer?.name || '所选容器' }} · CPU 与内存使用率</p></div><Box :size="17" /></div><MetricChart :labels="containerTrendLabels" :series="containerResourceSeries" unit="%" :aria-label="`${selectedContainer?.name || '容器'}资源趋势`" /></article>
+            <article class="panel"><div class="panel-head"><div><h2>容器网络吞吐</h2><p>按相邻采集点计算，计数器重置会自动归零 · {{ containerNetworkScale.unit }}</p></div><Network :size="17" /></div><MetricChart :labels="containerTrendLabels" :series="containerNetworkSeries" :unit="containerNetworkScale.unit" :aria-label="`${selectedContainer?.name || '容器'}网络吞吐趋势`" /></article>
+          </div>
+          <div v-else-if="containerOptions.length" class="panel analytics-empty"><EmptyState title="暂无容器历史数据" description="该容器在当前时间范围内只有一个采集点，继续采集后会显示趋势。" /></div>
           <article class="panel"><div class="panel-head"><div><h2>Docker 容器</h2><p>运行状态、资源占用与累计网络流量</p></div><Box :size="17" /></div><div v-if="containers.length" class="table-wrap"><table class="data-table"><thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th><th>网络</th><th>重启</th></tr></thead><tbody><tr v-for="container in containers" :key="container.id"><td><strong>{{ container.name }}</strong><small class="mono-value">{{ container.id.slice(0, 12) }}</small></td><td class="mono-value container-image">{{ container.image || '--' }}</td><td><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /><small>{{ container.status || '--' }}</small></td><td>{{ percent(container.cpuPercent) }}</td><td>{{ percent(container.memoryPercent) }}<small>{{ bytes(container.memoryUsageBytes) }} / {{ bytes(container.memoryLimitBytes) }}</small></td><td><span class="container-network"><ArrowUp :size="12" />{{ bytes(container.networkTxBytes) }}</span><span class="container-network"><ArrowDown :size="12" />{{ bytes(container.networkRxBytes) }}</span></td><td>{{ container.restartCount }}</td></tr></tbody></table></div><EmptyState v-else title="暂无 Docker 容器" description="Agent 未检测到可访问的 Docker socket；主机监控、服务检查与其他指标不受影响。" /></article>
         </el-tab-pane>
 

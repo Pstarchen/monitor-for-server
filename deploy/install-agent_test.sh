@@ -129,9 +129,10 @@ grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 
 : > "${log_file}"
 server_url=https://monitor.example.com
-run_installer 1 --log-path /var/log/example.log --integrity-path /etc/example
+run_installer 1 --log-path /var/log/example.log --integrity-path /etc/example --process java
 grep -F '"log_paths": ["/var/log/example.log"]' "${config_file}" >/dev/null
 grep -F '"integrity_paths": ["/etc/example"]' "${config_file}" >/dev/null
+grep -F '"monitored_processes": ["java"]' "${config_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker path unexpectedly invoked Go.' >&2
   exit 1

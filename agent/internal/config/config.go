@@ -23,6 +23,7 @@ type Config struct {
 	MaxBufferedReports    int
 	AllowInsecureHTTP     bool
 	MonitoredServices     []string
+	MonitoredProcesses    []string
 	SkipProcesses         bool
 	SkipConnectionCount   bool
 	DiskMountpoints       []string
@@ -46,6 +47,7 @@ type fileConfig struct {
 	MaxBufferedReports    int      `json:"max_buffered_reports"`
 	AllowInsecureHTTP     bool     `json:"allow_insecure_http"`
 	MonitoredServices     []string `json:"monitored_services"`
+	MonitoredProcesses    []string `json:"monitored_processes"`
 	SkipProcesses         bool     `json:"skip_process_collection"`
 	SkipConnectionCount   bool     `json:"skip_connection_count"`
 	DiskMountpoints       []string `json:"disk_mountpoints"`
@@ -111,6 +113,7 @@ func Load(args []string) (Config, error) {
 		MaxBufferedReports:    maxBuffered,
 		AllowInsecureHTTP:     file.AllowInsecureHTTP,
 		MonitoredServices:     file.MonitoredServices,
+		MonitoredProcesses:    cleanList(file.MonitoredProcesses),
 		SkipProcesses:         file.SkipProcesses,
 		SkipConnectionCount:   file.SkipConnectionCount,
 		DiskMountpoints:       cleanList(file.DiskMountpoints),

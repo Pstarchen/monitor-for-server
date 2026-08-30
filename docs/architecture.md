@@ -40,7 +40,7 @@ flowchart LR
 
 - Vue 3、TypeScript、Pinia、Vue Router、Element Plus、Lucide 与 ECharts。
 - 路由包含运行总览、设备列表与详情、趋势、磁盘、进程、服务与外部心跳、告警事件、告警规则、系统设置、账号权限和审计日志。
-- 桌面端使用 240px 侧栏，窄屏切换为抽屉导航；支持浅色、深色、键盘焦点和 `prefers-reduced-motion`。
+- 桌面端使用 240px 侧栏，窄屏切换为抽屉导航；支持浅色、深色、键盘焦点和 `prefers-reduced-motion`。设备详情可从历史快照筛选容器与进程，展示资源和容器网络趋势。
 - 浏览器路由守卫仅用于交互引导，所有权限仍由服务端强制执行。
 
 ## 权限模型

@@ -6,6 +6,7 @@ param(
     [string] $BinaryPath,
     [string] $RepositoryUrl = 'https://github.com/Pstarchen/monitor-for-server.git',
     [string[]] $MonitoredService = @(),
+    [string[]] $MonitoredProcess = @(),
     [string[]] $DiskMountpoint = @(),
     [string[]] $LogPath = @(),
     [string[]] $IntegrityPath = @(),
@@ -172,6 +173,7 @@ try {
         allow_command_execution = $AllowCommandExecution.IsPresent
         allow_file_operations = $AllowFileOperations.IsPresent
         monitored_services = $MonitoredService
+        monitored_processes = $MonitoredProcess
         skip_process_collection = $SkipProcesses.IsPresent
         skip_connection_count = $SkipConnections.IsPresent
         disk_mountpoints = $DiskMountpoint

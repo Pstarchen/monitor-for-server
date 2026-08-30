@@ -74,3 +74,23 @@ func TestHostPath(t *testing.T) {
 		t.Fatalf("relative mount path = %q, want empty", got)
 	}
 }
+
+func TestMatchesMonitoredProcess(t *testing.T) {
+	if !matchesMonitoredProcess("java", []string{" nginx ", "JAVA"}) {
+		t.Fatal("configured process name should match case-insensitively")
+	}
+	if matchesMonitoredProcess("postgres", []string{"redis"}) {
+		t.Fatal("unconfigured process should not match")
+	}
+}
+
+func TestNewCapsMonitoredProcesses(t *testing.T) {
+	names := make([]string, maxMonitoredProcesses+5)
+	for index := range names {
+		names[index] = "process"
+	}
+	collector := New(Options{MonitoredProcesses: names})
+	if len(collector.options.MonitoredProcesses) != maxMonitoredProcesses {
+		t.Fatalf("monitored process count = %d, want %d", len(collector.options.MonitoredProcesses), maxMonitoredProcesses)
+	}
+}
