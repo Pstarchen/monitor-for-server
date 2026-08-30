@@ -25,6 +25,7 @@ const averageAvailability = computed(() => {
   return services.length ? services.reduce((sum, item) => sum + item.availabilityPercent, 0) / services.length : 0
 })
 const sortedDevices = computed(() => [...(report.value?.devices ?? [])].sort((a, b) => b.peakPressure - a.peakPressure))
+const serviceLabels: Record<string, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', REDIS_PING: 'Redis PING', POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', HEARTBEAT: '外部心跳' }
 
 async function load() {
   loading.value = true
@@ -58,6 +59,7 @@ async function download() {
 
 function percent(value: number) { return `${Number(value || 0).toFixed(1)}%` }
 function latency(value: number) { return `${Math.round(value || 0)} ms` }
+function serviceLabel(value: string) { return serviceLabels[value] || value }
 
 onMounted(load)
 </script>
@@ -90,7 +92,7 @@ onMounted(load)
 
       <section class="section report-section">
         <div class="section-heading"><div><h2>服务可用率</h2><p>包含状态码、响应体条件和延迟结果的综合探测表现。</p></div><span class="filter-count">{{ report.services.length }} 项服务</span></div>
-        <article class="panel"><div v-if="report.services.length" class="table-wrap"><table class="data-table report-table"><thead><tr><th>服务</th><th>类型</th><th>探测次数</th><th>可用率</th><th>平均延迟</th><th>异常次数</th></tr></thead><tbody><tr v-for="service in report.services" :key="service.id"><td><strong>{{ service.name }}</strong></td><td>{{ service.type }}</td><td>{{ service.samples }}</td><td><strong :class="service.availabilityPercent < 99 ? 'report-warning' : 'report-success'">{{ service.samples ? percent(service.availabilityPercent) : '--' }}</strong></td><td>{{ service.samples ? latency(service.averageLatencyMs) : '--' }}</td><td><strong :class="service.incidents ? 'report-danger' : ''">{{ service.incidents }}</strong></td></tr></tbody></table></div><EmptyState v-else title="暂无服务监控" description="创建 HTTP、Ping、TCP 或心跳监控后，报告会展示服务表现。" /></article>
+        <article class="panel"><div v-if="report.services.length" class="table-wrap"><table class="data-table report-table"><thead><tr><th>服务</th><th>类型</th><th>探测次数</th><th>可用率</th><th>平均延迟</th><th>异常次数</th></tr></thead><tbody><tr v-for="service in report.services" :key="service.id"><td><strong>{{ service.name }}</strong></td><td>{{ serviceLabel(service.type) }}</td><td>{{ service.samples }}</td><td><strong :class="service.availabilityPercent < 99 ? 'report-warning' : 'report-success'">{{ service.samples ? percent(service.availabilityPercent) : '--' }}</strong></td><td>{{ service.samples ? latency(service.averageLatencyMs) : '--' }}</td><td><strong :class="service.incidents ? 'report-danger' : ''">{{ service.incidents }}</strong></td></tr></tbody></table></div><EmptyState v-else title="暂无服务监控" description="创建 HTTP、Ping、TCP、数据库协议或心跳监控后，报告会展示服务表现。" /></article>
       </section>
     </template>
   </section>

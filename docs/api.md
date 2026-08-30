@@ -218,7 +218,7 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 | DELETE | `/api/ddns/{id}` | ADMIN / OPERATOR | 删除配置 |
 | POST | `/api/ddns/{id}/test?ip=` | ADMIN / OPERATOR | 使用指定地址执行一次测试更新 |
 
-服务监控由总控服务执行 HTTP GET、ICMP Ping 或 TCPing 探测，结果按指标留存策略保存。HTTP GET 可额外设置 `expectedStatus` 精确匹配状态码，以及 `bodyContains` 检查响应体是否包含业务标记（响应体最多读取 64 KiB）。另支持 `HEARTBEAT` 外部心跳类型：总控不主动连接目标，而是由 cron、CI、备份脚本等任务定时调用心跳地址；超过两个配置周期未收到上报会记录失败并触发通知。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
+服务监控由总控服务执行 HTTP GET、ICMP Ping、TCPing、Redis PING、PostgreSQL 或 MySQL 协议探测，结果按指标留存策略保存。数据库探测只发送最小协议握手，不执行查询，也不需要保存数据库密码；Redis 启用认证时，`NOAUTH` 响应仍表示服务已在线。HTTP GET 可额外设置 `expectedStatus` 精确匹配状态码，以及 `bodyContains` 检查响应体是否包含业务标记（响应体最多读取 64 KiB）。另支持 `HEARTBEAT` 外部心跳类型：总控不主动连接目标，而是由 cron、CI、备份脚本等任务定时调用心跳地址；超过两个配置周期未收到上报会记录失败并触发通知。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -251,6 +251,26 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 ```
 
 服务监控请求还可设置 `failureThreshold`（连续失败次数，1-20）和 `latencyThresholdMs`（延迟告警阈值，0 表示关闭）。服务异常从正常进入和恢复时分别发送一次通知，避免按探测周期重复发送。结果中的 `certificateExpiresAt` 仅在 HTTPS 目标成功完成 TLS 握手时返回。
+
+数据库协议探测示例（目标必须包含端口）：
+
+```json
+{
+  "name": "生产 Redis",
+  "target": "redis.internal:6379",
+  "type": "REDIS_PING",
+  "intervalSeconds": 30,
+  "timeoutMs": 3000,
+  "publicVisible": false,
+  "sortOrder": 0,
+  "enabled": true,
+  "failureThreshold": 2,
+  "latencyThresholdMs": 0,
+  "certificateThresholdDays": 0
+}
+```
+
+将 `type` 替换为 `POSTGRESQL`（默认端口 5432）或 `MYSQL`（默认端口 3306）即可探测对应服务。探测只验证协议握手，不执行 SQL；启用认证的 Redis 返回 `NOAUTH` 时仍会记录为在线。
 
 创建心跳监控时将 `type` 设为 `HEARTBEAT`，`target` 留空即可。创建响应中的 `heartbeatToken` 和 `heartbeatPath` 只返回一次，请立即保存。例如：
 

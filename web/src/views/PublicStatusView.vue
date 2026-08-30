@@ -74,7 +74,7 @@ function handleVisibilityChange() {
 }
 
 function serviceLabel(service: PublicServiceCheck) {
-  return service.type === 'HTTP_GET' ? 'HTTP' : service.type === 'TCPING' ? 'TCP' : service.type === 'HEARTBEAT' ? 'HEARTBEAT' : 'PING'
+  return service.type === 'HTTP_GET' ? 'HTTP' : service.type === 'TCPING' ? 'TCP' : service.type === 'REDIS_PING' ? 'Redis' : service.type === 'POSTGRESQL' ? 'PostgreSQL' : service.type === 'MYSQL' ? 'MySQL' : service.type === 'HEARTBEAT' ? 'HEARTBEAT' : 'PING'
 }
 
 function metricValue(value: number | null | undefined) {

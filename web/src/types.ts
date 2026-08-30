@@ -403,7 +403,7 @@ export interface AgentTask {
   error: string
 }
 
-export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING' | 'HEARTBEAT'
+export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING' | 'REDIS_PING' | 'POSTGRESQL' | 'MYSQL' | 'HEARTBEAT'
 
 export interface ServiceCheckResult {
   checkedAt: string

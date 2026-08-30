@@ -15,7 +15,15 @@ import java.time.Instant;
         @Index(name = "idx_service_checks_enabled_sort", columnList = "enabled,sort_order")
 })
 public class ServiceCheck {
-    public enum Type { HTTP_GET, ICMP_PING, TCPING, HEARTBEAT }
+    public enum Type {
+        HTTP_GET,
+        ICMP_PING,
+        TCPING,
+        REDIS_PING,
+        POSTGRESQL,
+        MYSQL,
+        HEARTBEAT
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

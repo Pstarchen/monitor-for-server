@@ -31,7 +31,7 @@ const history = ref<ServiceCheckResult[]>([])
 const heartbeatDialog = ref(false)
 const heartbeatCredential = ref<ServiceCheck | null>(null)
 const form = reactive({ name: '', target: '', type: 'HTTP_GET' as ServiceCheckType, intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null as number | null, bodyContains: '' })
-const labels: Record<ServiceCheckType, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', HEARTBEAT: '外部心跳' }
+const labels: Record<ServiceCheckType, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', REDIS_PING: 'Redis PING', POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', HEARTBEAT: '外部心跳' }
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
 const historyLabels = computed(() => history.value.map((item) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.checkedAt))))
 const historyLatencySeries = computed(() => [{ name: '响应延迟', data: history.value.map((item) => Math.max(0, Number(item.latencyMs) || 0)), color: '#2867a6' }])
@@ -63,6 +63,9 @@ function openEdit(check: ServiceCheck) {
 function targetPlaceholder() {
   if (form.type === 'ICMP_PING') return '例如：1.1.1.1 或 example.com'
   if (form.type === 'TCPING') return '例如：example.com:443'
+  if (form.type === 'REDIS_PING') return '例如：redis.example.com:6379'
+  if (form.type === 'POSTGRESQL') return '例如：db.example.com:5432'
+  if (form.type === 'MYSQL') return '例如：db.example.com:3306'
   if (form.type === 'HEARTBEAT') return '创建后自动生成接入地址'
   return '例如：https://example.com/health'
 }
@@ -156,7 +159,7 @@ useVisibilityPolling(() => load(true))
 
 <template>
   <section>
-    <PageHeader eyebrow="SERVICE MONITORING" title="服务监控" description="探测网站、端口与网络目标；达到失败、延迟或证书阈值时，会通过已启用的通知通道发送告警。">
+    <PageHeader eyebrow="SERVICE MONITORING" title="服务监控" description="探测网站、端口、数据库协议与网络目标；达到失败、延迟或证书阈值时，会通过已启用的通知通道发送告警。">
       <template #actions><el-button @click="load"><RefreshCw :size="16" />刷新</el-button><el-button v-if="canEdit" type="primary" class="button-press" @click="openCreate"><Plus :size="16" />新建监控</el-button></template>
     </PageHeader>
 
@@ -205,7 +208,7 @@ useVisibilityPolling(() => load(true))
           </template>
         </div>
         <div class="form-inline-options"><el-checkbox v-model="form.publicVisible">在公开状态页展示</el-checkbox><el-checkbox v-model="form.enabled">启用自动探测</el-checkbox></div>
-        <p class="form-help"><Wifi :size="14" />HTTPS 会记录证书到期时间；HTTP 会记录响应状态码；Ping 与 TCPing 会记录连接延迟；外部心跳用于 cron、CI 等任务的存活监控。告警会在首次达到阈值时发送，恢复后再发送一条恢复通知。</p>
+        <p class="form-help"><Wifi :size="14" />HTTPS 会记录证书到期时间；HTTP 会记录响应状态码；Ping、TCPing 和数据库协议探测会记录连接延迟。Redis/PostgreSQL/MySQL 只执行最小握手，不保存或要求数据库密码；外部心跳用于 cron、CI 等任务的存活监控。告警会在首次达到阈值时发送，恢复后再发送一条恢复通知。</p>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存监控</el-button></template>
     </el-dialog>

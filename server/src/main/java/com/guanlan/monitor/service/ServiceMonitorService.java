@@ -181,18 +181,21 @@ public class ServiceMonitorService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "期望 HTTP 状态码必须在 100-599 之间");
             }
         }
-        if (request.type() == ServiceCheck.Type.TCPING) {
+        if (request.type() == ServiceCheck.Type.TCPING
+                || request.type() == ServiceCheck.Type.REDIS_PING
+                || request.type() == ServiceCheck.Type.POSTGRESQL
+                || request.type() == ServiceCheck.Type.MYSQL) {
             if (!target.matches("^\\[?[A-Za-z0-9:.%-]+\\]?:[0-9]{1,5}$")) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "TCP 目标必须是 host:port");
+                throw new ApiException(HttpStatus.BAD_REQUEST, "该探测类型的目标必须是 host:port");
             }
             int separator = target.lastIndexOf(':');
             int port;
             try {
                 port = Integer.parseInt(target.substring(separator + 1));
             } catch (NumberFormatException exception) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "TCP 端口无效");
+                throw new ApiException(HttpStatus.BAD_REQUEST, "目标端口无效");
             }
-            if (port < 1 || port > 65535) throw new ApiException(HttpStatus.BAD_REQUEST, "TCP 端口无效");
+            if (port < 1 || port > 65535) throw new ApiException(HttpStatus.BAD_REQUEST, "目标端口无效");
         }
     }
 

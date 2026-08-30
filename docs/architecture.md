@@ -63,7 +63,7 @@ flowchart LR
 - `system_settings`：运行参数与使用 AES-256-GCM 加密的通知凭据；API 只返回配置状态，不回传明文。
 - `audit_logs`：关键管理操作的操作者、目标和摘要。
 - `agent_tasks`：目标设备、命令参数、队列状态、超时、输出和执行审计信息。
-- `service_checks` / `service_check_results`：HTTP、Ping、TCP 和外部心跳监控配置、探测结果与七日可用率；心跳令牌只保存摘要。
+- `service_checks` / `service_check_results`：HTTP、Ping、TCP、Redis、PostgreSQL、MySQL 和外部心跳监控配置、探测结果与七日可用率；数据库探测使用无凭据协议握手，心跳令牌只保存摘要。
 
 ## 可靠性与安全边界
 
