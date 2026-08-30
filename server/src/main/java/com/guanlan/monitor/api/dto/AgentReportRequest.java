@@ -99,7 +99,8 @@ public record AgentReportRequest(
                                  @Min(0) @Max(100) double memoryPercent, @PositiveOrZero long networkRxBytes,
                                  @PositiveOrZero long networkTxBytes, @PositiveOrZero int restartCount) {}
 
-    public record ProcessStats(@PositiveOrZero int pid, @Size(max = 255) String name, @Size(max = 255) String username,
+    public record ProcessStats(@PositiveOrZero int pid, @Size(max = 255) String name, @Size(max = 2048) String commandLine,
+                               @Size(max = 255) String username,
                                @PositiveOrZero double cpuPercent, @Min(0) @Max(100) double memoryPercent,
                                @Size(max = 80) String status) {}
 

@@ -14,51 +14,63 @@ import (
 )
 
 type Config struct {
-	ServerURL             string
-	DeviceID              string
-	AgentKey              string
-	Interval              time.Duration
-	RequestTimeout        time.Duration
-	SpoolDir              string
-	MaxBufferedReports    int
-	AllowInsecureHTTP     bool
-	MonitoredServices     []string
-	MonitoredProcesses    []string
-	SkipProcesses         bool
-	SkipConnectionCount   bool
-	DiskMountpoints       []string
-	HostRoot              string
-	DockerSocket          string
-	LogPaths              []string
-	IntegrityPaths        []string
-	AllowCommandExecution bool
-	AllowFileOperations   bool
-	CommandPollInterval   time.Duration
-	MaxCommandOutputBytes int
+	ServerURL                string
+	DeviceID                 string
+	AgentKey                 string
+	Interval                 time.Duration
+	RequestTimeout           time.Duration
+	SpoolDir                 string
+	MaxBufferedReports       int
+	AllowInsecureHTTP        bool
+	MonitoredServices        []string
+	MonitoredProcesses       []string
+	SkipProcesses            bool
+	CollectAllProcesses      bool
+	ProcessCollectionLimit   int
+	SkipConnectionCount      bool
+	SkipPortCollection       bool
+	PortCollectionLimit      int
+	SkipContainerCollection  bool
+	ContainerCollectionLimit int
+	DiskMountpoints          []string
+	HostRoot                 string
+	DockerSocket             string
+	LogPaths                 []string
+	IntegrityPaths           []string
+	AllowCommandExecution    bool
+	AllowFileOperations      bool
+	CommandPollInterval      time.Duration
+	MaxCommandOutputBytes    int
 }
 
 type fileConfig struct {
-	ServerURL             string   `json:"server_url"`
-	DeviceID              string   `json:"device_id"`
-	AgentKey              string   `json:"agent_key"`
-	Interval              string   `json:"interval"`
-	RequestTimeout        string   `json:"request_timeout"`
-	SpoolDir              string   `json:"spool_dir"`
-	MaxBufferedReports    int      `json:"max_buffered_reports"`
-	AllowInsecureHTTP     bool     `json:"allow_insecure_http"`
-	MonitoredServices     []string `json:"monitored_services"`
-	MonitoredProcesses    []string `json:"monitored_processes"`
-	SkipProcesses         bool     `json:"skip_process_collection"`
-	SkipConnectionCount   bool     `json:"skip_connection_count"`
-	DiskMountpoints       []string `json:"disk_mountpoints"`
-	HostRoot              string   `json:"host_root"`
-	DockerSocket          string   `json:"docker_socket"`
-	LogPaths              []string `json:"log_paths"`
-	IntegrityPaths        []string `json:"integrity_paths"`
-	AllowCommandExecution bool     `json:"allow_command_execution"`
-	AllowFileOperations   bool     `json:"allow_file_operations"`
-	CommandPollInterval   string   `json:"command_poll_interval"`
-	MaxCommandOutputBytes int      `json:"max_command_output_bytes"`
+	ServerURL                string   `json:"server_url"`
+	DeviceID                 string   `json:"device_id"`
+	AgentKey                 string   `json:"agent_key"`
+	Interval                 string   `json:"interval"`
+	RequestTimeout           string   `json:"request_timeout"`
+	SpoolDir                 string   `json:"spool_dir"`
+	MaxBufferedReports       int      `json:"max_buffered_reports"`
+	AllowInsecureHTTP        bool     `json:"allow_insecure_http"`
+	MonitoredServices        []string `json:"monitored_services"`
+	MonitoredProcesses       []string `json:"monitored_processes"`
+	SkipProcesses            bool     `json:"skip_process_collection"`
+	CollectAllProcesses      bool     `json:"collect_all_processes"`
+	ProcessCollectionLimit   int      `json:"process_collection_limit"`
+	SkipConnectionCount      bool     `json:"skip_connection_count"`
+	SkipPortCollection       bool     `json:"skip_port_collection"`
+	PortCollectionLimit      int      `json:"port_collection_limit"`
+	SkipContainerCollection  bool     `json:"skip_container_collection"`
+	ContainerCollectionLimit int      `json:"container_collection_limit"`
+	DiskMountpoints          []string `json:"disk_mountpoints"`
+	HostRoot                 string   `json:"host_root"`
+	DockerSocket             string   `json:"docker_socket"`
+	LogPaths                 []string `json:"log_paths"`
+	IntegrityPaths           []string `json:"integrity_paths"`
+	AllowCommandExecution    bool     `json:"allow_command_execution"`
+	AllowFileOperations      bool     `json:"allow_file_operations"`
+	CommandPollInterval      string   `json:"command_poll_interval"`
+	MaxCommandOutputBytes    int      `json:"max_command_output_bytes"`
 }
 
 func Load(args []string) (Config, error) {
@@ -104,29 +116,47 @@ func Load(args []string) (Config, error) {
 	}
 
 	cfg := Config{
-		ServerURL:             strings.TrimRight(strings.TrimSpace(file.ServerURL), "/"),
-		DeviceID:              strings.TrimSpace(file.DeviceID),
-		AgentKey:              strings.TrimSpace(file.AgentKey),
-		Interval:              interval,
-		RequestTimeout:        timeout,
-		SpoolDir:              spoolDir,
-		MaxBufferedReports:    maxBuffered,
-		AllowInsecureHTTP:     file.AllowInsecureHTTP,
-		MonitoredServices:     file.MonitoredServices,
-		MonitoredProcesses:    cleanList(file.MonitoredProcesses),
-		SkipProcesses:         file.SkipProcesses,
-		SkipConnectionCount:   file.SkipConnectionCount,
-		DiskMountpoints:       cleanList(file.DiskMountpoints),
-		HostRoot:              strings.TrimSpace(file.HostRoot),
-		DockerSocket:          strings.TrimSpace(file.DockerSocket),
-		LogPaths:              cleanList(file.LogPaths),
-		IntegrityPaths:        cleanList(file.IntegrityPaths),
-		AllowCommandExecution: file.AllowCommandExecution,
-		AllowFileOperations:   file.AllowFileOperations,
-		CommandPollInterval:   pollInterval,
-		MaxCommandOutputBytes: maxCommandOutput,
+		ServerURL:                strings.TrimRight(strings.TrimSpace(file.ServerURL), "/"),
+		DeviceID:                 strings.TrimSpace(file.DeviceID),
+		AgentKey:                 strings.TrimSpace(file.AgentKey),
+		Interval:                 interval,
+		RequestTimeout:           timeout,
+		SpoolDir:                 spoolDir,
+		MaxBufferedReports:       maxBuffered,
+		AllowInsecureHTTP:        file.AllowInsecureHTTP,
+		MonitoredServices:        file.MonitoredServices,
+		MonitoredProcesses:       cleanList(file.MonitoredProcesses),
+		SkipProcesses:            file.SkipProcesses,
+		CollectAllProcesses:      file.CollectAllProcesses,
+		ProcessCollectionLimit:   positiveOrDefault(file.ProcessCollectionLimit, func() int {
+			if file.CollectAllProcesses {
+				return 256
+			}
+			return 12
+		}()),
+		SkipConnectionCount:      file.SkipConnectionCount,
+		SkipPortCollection:       file.SkipPortCollection,
+		PortCollectionLimit:      positiveOrDefault(file.PortCollectionLimit, 512),
+		SkipContainerCollection:  file.SkipContainerCollection,
+		ContainerCollectionLimit: positiveOrDefault(file.ContainerCollectionLimit, 100),
+		DiskMountpoints:          cleanList(file.DiskMountpoints),
+		HostRoot:                 strings.TrimSpace(file.HostRoot),
+		DockerSocket:             strings.TrimSpace(file.DockerSocket),
+		LogPaths:                 cleanList(file.LogPaths),
+		IntegrityPaths:           cleanList(file.IntegrityPaths),
+		AllowCommandExecution:    file.AllowCommandExecution,
+		AllowFileOperations:      file.AllowFileOperations,
+		CommandPollInterval:      pollInterval,
+		MaxCommandOutputBytes:    maxCommandOutput,
 	}
 	return cfg, cfg.Validate()
+}
+
+func positiveOrDefault(value, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func cleanList(values []string) []string {
@@ -180,6 +210,15 @@ func (c Config) Validate() error {
 	}
 	if c.MaxBufferedReports < 1 || c.MaxBufferedReports > 100000 {
 		return errors.New("max_buffered_reports must be between 1 and 100000")
+	}
+	if c.ProcessCollectionLimit < 1 || c.ProcessCollectionLimit > 256 {
+		return errors.New("process_collection_limit must be between 1 and 256")
+	}
+	if c.PortCollectionLimit < 1 || c.PortCollectionLimit > 512 {
+		return errors.New("port_collection_limit must be between 1 and 512")
+	}
+	if c.ContainerCollectionLimit < 1 || c.ContainerCollectionLimit > 100 {
+		return errors.New("container_collection_limit must be between 1 and 100")
 	}
 	return nil
 }

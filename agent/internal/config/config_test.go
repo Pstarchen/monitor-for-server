@@ -53,6 +53,9 @@ func TestLoadAllowsLocalDevelopmentHTTP(t *testing.T) {
 	if cfg.Interval.Seconds() != 3 {
 		t.Fatalf("unexpected interval: %s", cfg.Interval)
 	}
+	if cfg.ProcessCollectionLimit != 12 || cfg.PortCollectionLimit != 512 || cfg.ContainerCollectionLimit != 100 {
+		t.Fatalf("unexpected collection limits: %+v", cfg)
+	}
 }
 
 func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
@@ -62,8 +65,14 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
         "server_url":"https://monitor.example.com",
         "device_id":"device",
         "agent_key":"secret",
-        "skip_process_collection":true,
-        "skip_connection_count":true,
+		"skip_process_collection":true,
+		"collect_all_processes":true,
+		"process_collection_limit":64,
+		"skip_connection_count":true,
+		"skip_port_collection":true,
+		"port_collection_limit":128,
+		"skip_container_collection":true,
+		"container_collection_limit":20,
 		"disk_mountpoints":["/", " /data ", "/data", ""],
 		"monitored_processes":[" java ", "", "postgres"],
 		"host_root":" /host ",
@@ -78,6 +87,9 @@ func TestLoadAppliesLightweightCollectionOptions(t *testing.T) {
 	}
 	if !cfg.SkipProcesses || !cfg.SkipConnectionCount {
 		t.Fatal("expected lightweight collection options to be enabled")
+	}
+	if !cfg.CollectAllProcesses || cfg.ProcessCollectionLimit != 64 || !cfg.SkipPortCollection || cfg.PortCollectionLimit != 128 || !cfg.SkipContainerCollection || cfg.ContainerCollectionLimit != 20 {
+		t.Fatalf("unexpected extended collection options: %+v", cfg)
 	}
 	if len(cfg.DiskMountpoints) != 2 || cfg.DiskMountpoints[1] != "/data" {
 		t.Fatalf("unexpected disk allowlist: %#v", cfg.DiskMountpoints)

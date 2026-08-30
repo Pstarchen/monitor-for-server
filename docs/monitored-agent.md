@@ -41,7 +41,7 @@ systemctl status guanlan-agent-update.timer
 sudo systemctl start guanlan-agent-update.service
 ```
 
-支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`。本机回退模式安装后检查：
+支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。本机回退模式安装后检查：
 
 ```bash
 systemctl status guanlan-agent

@@ -129,6 +129,16 @@ grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 
 : > "${log_file}"
 server_url=https://monitor.example.com
+run_installer 1 --all-processes --process-limit 128 --skip-ports --port-limit 100 --skip-containers --container-limit 20
+grep -F '"collect_all_processes": true' "${config_file}" >/dev/null
+grep -F '"process_collection_limit": 128' "${config_file}" >/dev/null
+grep -F '"skip_port_collection": true' "${config_file}" >/dev/null
+grep -F '"port_collection_limit": 100' "${config_file}" >/dev/null
+grep -F '"skip_container_collection": true' "${config_file}" >/dev/null
+grep -F '"container_collection_limit": 20' "${config_file}" >/dev/null
+
+: > "${log_file}"
+server_url=https://monitor.example.com
 run_installer 1 --log-path /var/log/example.log --integrity-path /etc/example --process java
 grep -F '"log_paths": ["/var/log/example.log"]' "${config_file}" >/dev/null
 grep -F '"integrity_paths": ["/etc/example"]' "${config_file}" >/dev/null

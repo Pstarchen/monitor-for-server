@@ -31,10 +31,12 @@ const credentialPlatform = ref<'linux' | 'windows'>('linux')
 const agentServerUrl = ref(window.location.origin)
 const collectionSeconds = ref(3)
 const lightweight = ref(false)
+const collectAllProcesses = ref(false)
+const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
 const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent'
-const agentInstallerCacheKey = 'v5'
+const agentInstallerCacheKey = 'v6'
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
@@ -54,13 +56,15 @@ const installCommand = computed(() => {
   if (credentialPlatform.value === 'windows') {
     const diskArgs = disks.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
     const lightArgs = lightweight.value ? ' -SkipProcesses -SkipConnections' : ''
+    const processArgs = !lightweight.value && collectAllProcesses.value ? ` -CollectAllProcesses -ProcessCollectionLimit ${processCollectionLimit.value}` : ''
     return `$env:GUANLAN_AGENT_KEY = '${powerShellQuote(credential.value.agentKey)}'\n` +
-      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; Invoke-WebRequest -UseBasicParsing '${agentInstallerRawUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}; Remove-Item $installer -Force`
+      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; Invoke-WebRequest -UseBasicParsing '${agentInstallerRawUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}; Remove-Item $installer -Force`
   }
   const diskArgs = disks.map((value) => ` --disk '${shellQuote(value)}'`).join('')
   const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
+  const processArgs = !lightweight.value && collectAllProcesses.value ? ` --all-processes --process-limit ${processCollectionLimit.value}` : ''
   return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
-    `curl -fsSL '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' | sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}`
+    `curl -fsSL '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' | sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
 })
 
 async function load(background = false) {
@@ -91,6 +95,8 @@ function showCredential(value: DeviceCredential) {
   credential.value = value
   credentialPlatform.value = 'linux'
   lightweight.value = false
+  collectAllProcesses.value = false
+  processCollectionLimit.value = 64
   diskMountpoints.value = ''
 }
 
@@ -291,7 +297,11 @@ onBeforeUnmount(() => {
               <el-form-item label="采集周期"><el-select v-model="collectionSeconds"><el-option v-for="value in [1, 3, 10, 30, 60]" :key="value" :label="`${value} 秒`" :value="value" /></el-select></el-form-item>
               <el-form-item label="磁盘白名单"><el-input v-model="diskMountpoints" placeholder="例如：/, /data" /></el-form-item>
             </div>
-            <el-checkbox v-model="lightweight">轻量采集（跳过进程与 TCP 连接统计）</el-checkbox>
+            <div class="agent-option-list">
+              <el-checkbox v-model="lightweight">轻量采集（跳过进程与 TCP 连接统计）</el-checkbox>
+              <el-checkbox v-model="collectAllProcesses" :disabled="lightweight">采集完整进程清单（最多 256 个）</el-checkbox>
+              <el-input-number v-if="collectAllProcesses && !lightweight" v-model="processCollectionLimit" :min="32" :max="256" :step="16" controls-position="right" aria-label="进程采集上限" />
+            </div>
           </el-form>
         </div>
         <el-tabs v-model="credentialPlatform" class="install-tabs">

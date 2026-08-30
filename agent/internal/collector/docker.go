@@ -53,7 +53,10 @@ type dockerNetStats struct {
 	TxBytes uint64 `json:"tx_bytes"`
 }
 
-func collectContainers(ctx context.Context, configuredSocket, hostRoot string) []model.ContainerStats {
+func collectContainers(ctx context.Context, configuredSocket, hostRoot string, skip bool, limit int) []model.ContainerStats {
+	if skip {
+		return []model.ContainerStats{}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	socket := resolveDockerSocket(configuredSocket, hostRoot)
@@ -70,8 +73,11 @@ func collectContainers(ctx context.Context, configuredSocket, hostRoot string) [
 	sort.Slice(summaries, func(i, j int) bool {
 		return dockerContainerName(summaries[i]) < dockerContainerName(summaries[j])
 	})
-	if len(summaries) > maxContainerCount {
-		summaries = summaries[:maxContainerCount]
+	if limit <= 0 || limit > maxContainerCount {
+		limit = maxContainerCount
+	}
+	if len(summaries) > limit {
+		summaries = summaries[:limit]
 	}
 
 	result := make([]model.ContainerStats, 0, len(summaries))

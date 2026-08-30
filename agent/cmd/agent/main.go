@@ -33,15 +33,21 @@ func main() {
 
 	client := api.NewClient(cfg.ServerURL, cfg.DeviceID, cfg.AgentKey, cfg.RequestTimeout)
 	metrics := collector.New(collector.Options{
-		MonitoredServices:   cfg.MonitoredServices,
-		MonitoredProcesses:  cfg.MonitoredProcesses,
-		SkipProcesses:       cfg.SkipProcesses,
-		SkipConnectionCount: cfg.SkipConnectionCount,
-		DiskMountpoints:     cfg.DiskMountpoints,
-		HostRoot:            cfg.HostRoot,
-		DockerSocket:        cfg.DockerSocket,
-		LogPaths:            cfg.LogPaths,
-		IntegrityPaths:      cfg.IntegrityPaths,
+		MonitoredServices:        cfg.MonitoredServices,
+		MonitoredProcesses:       cfg.MonitoredProcesses,
+		SkipProcesses:            cfg.SkipProcesses,
+		CollectAllProcesses:      cfg.CollectAllProcesses,
+		ProcessCollectionLimit:   cfg.ProcessCollectionLimit,
+		SkipConnectionCount:      cfg.SkipConnectionCount,
+		SkipPortCollection:       cfg.SkipPortCollection,
+		PortCollectionLimit:      cfg.PortCollectionLimit,
+		SkipContainerCollection:  cfg.SkipContainerCollection,
+		ContainerCollectionLimit: cfg.ContainerCollectionLimit,
+		DiskMountpoints:          cfg.DiskMountpoints,
+		HostRoot:                 cfg.HostRoot,
+		DockerSocket:             cfg.DockerSocket,
+		LogPaths:                 cfg.LogPaths,
+		IntegrityPaths:           cfg.IntegrityPaths,
 	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -4,7 +4,7 @@
 
 ## 能力范围
 
-- Linux/Windows Agent 采集 CPU、内存、磁盘、网络、进程、温度和自定义服务状态；支持额外指定关键进程，即使其不在资源排名前列也会持续保留；Linux 可选读取 Docker socket 展示容器资源，并在具备 `smartctl` 与设备权限时采集磁盘 SMART/NVMe 健康。
+- Linux/Windows Agent 采集 CPU、内存、磁盘、网络、进程、监听端口、温度和自定义服务状态；支持额外指定关键进程，即使其不在资源排名前列也会持续保留，也可显式采集带命令行的完整进程清单；Linux 可选读取 Docker socket 展示容器资源，并在具备 `smartctl` 与设备权限时采集磁盘 SMART/NVMe 健康。
 - Agent 断线磁盘缓冲、自动重试、可配置采集周期、磁盘白名单与轻量采集模式。
 - 设备密钥接入、实时指标、历史趋势、离线检测、阈值告警和告警确认。
 - 邮件、钉钉、企业微信和通用 Webhook 通知，支持环境回退与 AES-256-GCM 加密的在线配置；通用 Webhook 可直接对接 Slack、Discord、飞书/Lark 或纯文本端点。

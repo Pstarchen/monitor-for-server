@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--process NAME] [--disk MOUNTPOINT] [--log-path PATH] [--integrity-path PATH] [--skip-processes] [--skip-connections]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--process NAME] [--disk MOUNTPOINT] [--log-path PATH] [--integrity-path PATH] [--skip-processes] [--all-processes] [--process-limit N] [--skip-connections] [--skip-ports] [--port-limit N] [--skip-containers] [--container-limit N]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -19,7 +19,13 @@ disks=()
 log_paths=()
 integrity_paths=()
 skip_processes=false
+collect_all_processes=false
+process_limit=256
 skip_connections=false
+skip_ports=false
+port_limit=512
+skip_containers=false
+container_limit=100
 allow_command_execution=false
 allow_file_operations=false
 no_docker=false
@@ -49,7 +55,13 @@ while [[ $# -gt 0 ]]; do
     --log-path) log_paths+=("${2:-}"); shift 2 ;;
     --integrity-path) integrity_paths+=("${2:-}"); shift 2 ;;
     --skip-processes) skip_processes=true; shift ;;
+    --all-processes) collect_all_processes=true; shift ;;
+    --process-limit) process_limit="${2:-}"; shift 2 ;;
     --skip-connections) skip_connections=true; shift ;;
+    --skip-ports) skip_ports=true; shift ;;
+    --port-limit) port_limit="${2:-}"; shift 2 ;;
+    --skip-containers) skip_containers=true; shift ;;
+    --container-limit) container_limit="${2:-}"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -204,6 +216,18 @@ if ((${#services[@]} > 0)); then
     service_json+="\"$(json_escape "${service}")\""
   done
 fi
+if ! [[ "${process_limit}" =~ ^[1-9][0-9]*$ ]] || ((process_limit > 256)); then
+  echo "Process limit must be an integer between 1 and 256." >&2
+  exit 2
+fi
+if ! [[ "${port_limit}" =~ ^[1-9][0-9]*$ ]] || ((port_limit > 512)); then
+  echo "Port limit must be an integer between 1 and 512." >&2
+  exit 2
+fi
+if ! [[ "${container_limit}" =~ ^[1-9][0-9]*$ ]] || ((container_limit > 100)); then
+  echo "Container limit must be an integer between 1 and 100." >&2
+  exit 2
+fi
 
 process_json=""
 if ((${#processes[@]} > 0)); then
@@ -253,7 +277,7 @@ printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  
 # reinterpret backslashes and turn valid JSON escape sequences into newlines.
 sed -i '$d' "${config_tmp}"
 sed -i '$s/$/,/' "${config_tmp}"
-printf '  "monitored_processes": [%s],\n  "log_paths": [%s],\n  "integrity_paths": [%s]\n}\n' "${process_json}" "${log_json}" "${integrity_json}" >> "${config_tmp}"
+printf '  "collect_all_processes": %s,\n  "process_collection_limit": %s,\n  "skip_port_collection": %s,\n  "port_collection_limit": %s,\n  "skip_container_collection": %s,\n  "container_collection_limit": %s,\n  "monitored_processes": [%s],\n  "log_paths": [%s],\n  "integrity_paths": [%s]\n}\n' "${collect_all_processes}" "${process_limit}" "${skip_ports}" "${port_limit}" "${skip_containers}" "${container_limit}" "${process_json}" "${log_json}" "${integrity_json}" >> "${config_tmp}"
 
 if [[ "${config_allow_insecure_http}" == true ]]; then
   sed -i 's/"allow_insecure_http": false/"allow_insecure_http": true/' "${config_tmp}"

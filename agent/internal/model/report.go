@@ -148,6 +148,7 @@ type ContainerStats struct {
 type ProcessStats struct {
 	PID           int32   `json:"pid"`
 	Name          string  `json:"name"`
+	CommandLine   string  `json:"commandLine,omitempty"`
 	Username      string  `json:"username"`
 	CPUPercent    float64 `json:"cpuPercent"`
 	MemoryPercent float32 `json:"memoryPercent"`

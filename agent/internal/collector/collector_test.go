@@ -26,7 +26,7 @@ func TestListeningPortsFiltersAndSorts(t *testing.T) {
 		{Type: 1, Status: "LISTEN", Laddr: netstat.Addr{IP: "0.0.0.0", Port: 443}, Pid: 2},
 		{Type: 2, Laddr: netstat.Addr{IP: "0.0.0.0", Port: 53}, Pid: 3},
 		{Type: 1, Status: "LISTEN", Laddr: netstat.Addr{IP: "0.0.0.0", Port: 443}, Pid: 2},
-	})
+	}, 512)
 	if len(ports) != 2 {
 		t.Fatalf("listening ports = %#v, want two unique listeners", ports)
 	}

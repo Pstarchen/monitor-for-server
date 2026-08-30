@@ -37,24 +37,41 @@ type Collector struct {
 }
 
 type Options struct {
-	MonitoredServices   []string
-	MonitoredProcesses  []string
-	SkipProcesses       bool
-	SkipConnectionCount bool
-	DiskMountpoints     []string
-	HostRoot            string
-	DockerSocket        string
-	LogPaths            []string
-	IntegrityPaths      []string
+	MonitoredServices        []string
+	MonitoredProcesses       []string
+	SkipProcesses            bool
+	CollectAllProcesses      bool
+	ProcessCollectionLimit   int
+	SkipConnectionCount      bool
+	SkipPortCollection       bool
+	PortCollectionLimit      int
+	SkipContainerCollection  bool
+	ContainerCollectionLimit int
+	DiskMountpoints          []string
+	HostRoot                 string
+	DockerSocket             string
+	LogPaths                 []string
+	IntegrityPaths           []string
 }
 
 const maxMonitoredProcesses = 32
+const maxProcessCount = 256
+const maxPortCount = 512
 
 func New(options Options) *Collector {
 	options.MonitoredServices = append([]string(nil), options.MonitoredServices...)
 	options.MonitoredProcesses = append([]string(nil), options.MonitoredProcesses...)
 	if len(options.MonitoredProcesses) > maxMonitoredProcesses {
 		options.MonitoredProcesses = options.MonitoredProcesses[:maxMonitoredProcesses]
+	}
+	if options.ProcessCollectionLimit <= 0 || options.ProcessCollectionLimit > maxProcessCount {
+		options.ProcessCollectionLimit = 12
+	}
+	if options.PortCollectionLimit <= 0 || options.PortCollectionLimit > maxPortCount {
+		options.PortCollectionLimit = maxPortCount
+	}
+	if options.ContainerCollectionLimit <= 0 || options.ContainerCollectionLimit > maxContainerCount {
+		options.ContainerCollectionLimit = maxContainerCount
 	}
 	options.DiskMountpoints = append([]string(nil), options.DiskMountpoints...)
 	options.LogPaths = append([]string(nil), options.LogPaths...)
@@ -80,8 +97,8 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 	collectDiskHealth(ctx, disks, c.options.HostRoot)
 	network, netSent, netRecv := collectNetwork(ctx, c.options.SkipConnectionCount)
 	interfaces := collectNetworkInterfaces(ctx)
-	ports := collectListeningPorts(ctx, c.options.SkipConnectionCount)
-	containers := collectContainers(ctx, c.options.DockerSocket, c.options.HostRoot)
+	ports := collectListeningPorts(ctx, c.options.SkipConnectionCount || c.options.SkipPortCollection, c.options.PortCollectionLimit)
+	containers := collectContainers(ctx, c.options.DockerSocket, c.options.HostRoot, c.options.SkipContainerCollection, c.options.ContainerCollectionLimit)
 
 	c.mu.Lock()
 	previous := c.previous
@@ -104,7 +121,11 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 
 	processes := make([]model.ProcessStats, 0)
 	if !c.options.SkipProcesses {
-		processes = collectProcesses(ctx, 12, c.options.MonitoredProcesses)
+		limit := c.options.ProcessCollectionLimit
+		if !c.options.CollectAllProcesses && limit > 12 {
+			limit = 12
+		}
+		processes = collectProcesses(ctx, limit, c.options.MonitoredProcesses)
 	}
 	return model.Report{
 		CollectedAt:       now,
@@ -148,7 +169,7 @@ func collectNetworkInterfaces(ctx context.Context) []model.NetworkInterface {
 	return result
 }
 
-func collectListeningPorts(ctx context.Context, skip bool) []model.PortStats {
+func collectListeningPorts(ctx context.Context, skip bool, limit int) []model.PortStats {
 	if skip {
 		return []model.PortStats{}
 	}
@@ -156,10 +177,10 @@ func collectListeningPorts(ctx context.Context, skip bool) []model.PortStats {
 	if err != nil {
 		return []model.PortStats{}
 	}
-	return listeningPorts(connections)
+	return listeningPorts(connections, limit)
 }
 
-func listeningPorts(connections []netstat.ConnectionStat) []model.PortStats {
+func listeningPorts(connections []netstat.ConnectionStat, limit int) []model.PortStats {
 	result := make([]model.PortStats, 0, len(connections))
 	seen := make(map[string]struct{})
 	for _, connection := range connections {
@@ -191,8 +212,11 @@ func listeningPorts(connections []netstat.ConnectionStat) []model.PortStats {
 		}
 		return result[i].Port < result[j].Port
 	})
-	if len(result) > 512 {
-		result = result[:512]
+	if limit <= 0 || limit > maxPortCount {
+		limit = maxPortCount
+	}
+	if len(result) > limit {
+		result = result[:limit]
 	}
 	return result
 }
@@ -364,12 +388,13 @@ func collectProcesses(ctx context.Context, limit int, monitored []string) []mode
 		cpuPercent, _ := item.CPUPercentWithContext(ctx)
 		memoryPercent, _ := item.MemoryPercentWithContext(ctx)
 		username, _ := item.UsernameWithContext(ctx)
+		commandLine, _ := item.CmdlineWithContext(ctx)
 		statuses, _ := item.StatusWithContext(ctx)
 		status := "unknown"
 		if len(statuses) > 0 {
 			status = statuses[0]
 		}
-		result = append(result, model.ProcessStats{PID: item.Pid, Name: name, Username: username, CPUPercent: cpuPercent, MemoryPercent: memoryPercent, Status: status})
+		result = append(result, model.ProcessStats{PID: item.Pid, Name: name, CommandLine: trimCommandLine(commandLine), Username: username, CPUPercent: cpuPercent, MemoryPercent: memoryPercent, Status: status})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].CPUPercent == result[j].CPUPercent {
@@ -379,6 +404,10 @@ func collectProcesses(ctx context.Context, limit int, monitored []string) []mode
 	})
 	if len(result) > limit {
 		selected := append([]model.ProcessStats(nil), result[:limit]...)
+		maxSelected := limit + maxMonitoredProcesses
+		if maxSelected > maxProcessCount {
+			maxSelected = maxProcessCount
+		}
 		seen := make(map[int32]struct{}, len(selected))
 		for _, item := range selected {
 			seen[item.PID] = struct{}{}
@@ -392,13 +421,22 @@ func collectProcesses(ctx context.Context, limit int, monitored []string) []mode
 			}
 			selected = append(selected, item)
 			seen[item.PID] = struct{}{}
-			if len(selected) >= limit+maxMonitoredProcesses {
+			if len(selected) >= maxSelected {
 				break
 			}
 		}
 		result = selected
 	}
 	return result
+}
+
+func trimCommandLine(value string) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) > 2048 {
+		return string(runes[:2048])
+	}
+	return value
 }
 
 func matchesMonitoredProcess(name string, monitored []string) bool {

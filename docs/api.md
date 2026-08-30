@@ -80,7 +80,7 @@ X-Agent-Key: <agent-key>
 Content-Type: application/json
 ```
 
-请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。Agent 的 `monitored_processes` 配置会让指定进程即使不在默认 CPU 前 12 名也保留在 `processes` 列表中（最多额外 32 个），便于长期观察关键但低占用的业务进程。`host.fans`、`host.batteries` 和 `host.gpus` 是可选硬件健康数据：Linux 从 hwmon/power_supply 读取风扇与电池，安装 `nvidia-smi` 时采集 NVIDIA GPU；不支持或无权限时为空数组，不影响其他指标。磁盘可包含可选 `smart` 健康对象；Agent 在 Linux 上检测到 `smartctl` 且设备权限允许时读取 SMART/NVMe 自检、温度、寿命与错误计数，否则状态为 `UNKNOWN` 或不附带对象。`containers` 是可选的 Docker/Podman 容器摘要，最多 100 条；无法访问运行时 socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
+请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。Agent 的 `monitored_processes` 配置会让指定进程即使不在默认 CPU 前 12 名也保留在 `processes` 列表中（最多额外 32 个）；显式开启 `collect_all_processes` 后最多采集 256 个进程，`process_collection_limit` 可降低上限。进程对象的 `commandLine` 最长 2048 字符，读取失败时为空。端口和容器明细分别受 `port_collection_limit`（最多 512）与 `container_collection_limit`（最多 100）限制，也可以通过 `skip_port_collection`、`skip_container_collection` 独立关闭。`host.fans`、`host.batteries` 和 `host.gpus` 是可选硬件健康数据：Linux 从 hwmon/power_supply 读取风扇与电池，安装 `nvidia-smi` 时采集 NVIDIA GPU；不支持或无权限时为空数组，不影响其他指标。磁盘可包含可选 `smart` 健康对象；Agent 在 Linux 上检测到 `smartctl` 且设备权限允许时读取 SMART/NVMe 自检、温度、寿命与错误计数，否则状态为 `UNKNOWN` 或不附带对象。`containers` 是可选的 Docker/Podman 容器摘要；无法访问运行时 socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
 
 ## Agent 任务
 

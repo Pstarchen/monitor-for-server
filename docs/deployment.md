@@ -134,7 +134,7 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
   --process java
 ```
 
-低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。使用 `--process java`（可重复指定，最多 32 个）可额外保留关键进程，即使其不在 CPU 排名前 12。Windows 安装器对应使用 `-MonitoredProcess java`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
+低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。使用 `--process java`（可重复指定，最多 32 个）可额外保留关键进程，即使其不在 CPU 排名前 12；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。Windows 安装器对应使用 `-MonitoredProcess java`、`-CollectAllProcesses`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
 `--server-url` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。也可以直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS，HTTP 仅适合没有证书的临时或内网部署。默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。可用 `--image` 或 `GUANLAN_AGENT_IMAGE` 指向固定版本/内部仓库，`--container` 可覆盖容器名。Docker 模式会以只读方式映射 `/dev` 供可选 SMART 检测使用；虚拟磁盘或未授予设备访问权限时，SMART 会显示为未采集，不影响其他指标。Docker 模式安装结果：
 
@@ -176,7 +176,7 @@ $env:GUANLAN_AGENT_KEY = '<一次性密钥>'
   -MonitoredService 'W3SVC','MSSQLSERVER'
 ```
 
-轻量采集可添加 `-SkipProcesses -SkipConnections`；如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `-AllowCommandExecution`、`-AllowFileOperations`，两项默认关闭。不传 `-DiskMountpoint` 时采集全部可用分区。
+轻量采集可添加 `-SkipProcesses -SkipConnections`；需要完整进程清单时添加 `-CollectAllProcesses -ProcessCollectionLimit 128`（上限 256）。端口和容器也可分别通过 `-SkipPorts`、`-SkipContainers` 关闭，或用 `-PortCollectionLimit`、`-ContainerCollectionLimit` 调低明细上限。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `-AllowCommandExecution`、`-AllowFileOperations`，两项默认关闭。不传 `-DiskMountpoint` 时采集全部可用分区。
 
 使用预编译程序时添加 `-BinaryPath 'C:\staging\guanlan-agent.exe'`。脚本注册自动启动的 `GuanlanAgent` Windows 服务，并将配置写入 `%ProgramData%\GuanlanMonitor\agent.json`，ACL 仅允许 SYSTEM 与管理员访问。即使已安装 Docker Desktop，Windows 也保持原生服务模式，以免采集到 Docker 的 Linux 虚拟机而不是 Windows 宿主机。
 

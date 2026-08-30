@@ -39,6 +39,7 @@ export interface SmartHealthMetric {
 export interface ProcessMetric {
   pid: number
   name: string
+  commandLine: string
   username: string
   cpuPercent: number
   memoryPercent: number

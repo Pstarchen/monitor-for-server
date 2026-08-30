@@ -15,7 +15,13 @@ param(
     [switch] $AllowFileOperations,
     [switch] $NoAutoUpdate,
     [switch] $SkipProcesses,
-    [switch] $SkipConnections
+    [switch] $CollectAllProcesses,
+    [ValidateRange(1, 256)] [int] $ProcessCollectionLimit = 256,
+    [switch] $SkipConnections,
+    [switch] $SkipPorts,
+    [ValidateRange(1, 512)] [int] $PortCollectionLimit = 512,
+    [switch] $SkipContainers,
+    [ValidateRange(1, 100)] [int] $ContainerCollectionLimit = 100
 )
 
 $ErrorActionPreference = 'Stop'
@@ -175,7 +181,13 @@ try {
         monitored_services = $MonitoredService
         monitored_processes = $MonitoredProcess
         skip_process_collection = $SkipProcesses.IsPresent
+        collect_all_processes = $CollectAllProcesses.IsPresent
+        process_collection_limit = $ProcessCollectionLimit
         skip_connection_count = $SkipConnections.IsPresent
+        skip_port_collection = $SkipPorts.IsPresent
+        port_collection_limit = $PortCollectionLimit
+        skip_container_collection = $SkipContainers.IsPresent
+        container_collection_limit = $ContainerCollectionLimit
         disk_mountpoints = $DiskMountpoint
         log_paths = $LogPath
         integrity_paths = $IntegrityPath

@@ -72,7 +72,7 @@ func TestCollectContainersFromDockerSocket(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Shutdown(context.Background()) })
 
-	items := collectContainers(context.Background(), socket, "")
+	items := collectContainers(context.Background(), socket, "", false, maxContainerCount)
 	if len(items) != 1 {
 		t.Fatalf("containers = %#v, want one item", items)
 	}
