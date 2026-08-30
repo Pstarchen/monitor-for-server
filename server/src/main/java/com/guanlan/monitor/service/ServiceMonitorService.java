@@ -62,9 +62,9 @@ public class ServiceMonitorService {
     public ServiceDtos.View update(Long id, ServiceDtos.Request request) {
         validate(request);
         ServiceCheck check = require(id);
-        apply(check, request);
+        String rawToken = apply(check, request);
         audit.record("SERVICE_UPDATE", "service:" + id, "更新服务监控 " + check.getName());
-        return view(check);
+        return view(check, rawToken);
     }
 
     @Transactional

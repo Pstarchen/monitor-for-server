@@ -32,8 +32,10 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
 cd "${project_root}"
 
-pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
-compose_timeout_seconds="${GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-360}"
+# Registry downloads can legitimately take several minutes on a constrained link.
+# Keep the timeout finite, configurable, and aligned with the Windows updater.
+pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-600}"
+compose_timeout_seconds="${GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-900}"
 if [[ ! "${pull_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${compose_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
   echo "更新超时必须是正整数秒数。" >&2
   exit 2

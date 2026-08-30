@@ -14,8 +14,10 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安�
 if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
 
 if (-not $Check -and -not $Apply) { $Check = $true }
-$pullTimeoutSeconds = if ($env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS } else { 120 }
-$composeTimeoutSeconds = if ($env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS } else { 360 }
+# Registry downloads can legitimately take several minutes on a constrained link.
+# Keep the timeout finite, configurable, and aligned with the Linux updater.
+$pullTimeoutSeconds = if ($env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS } else { 600 }
+$composeTimeoutSeconds = if ($env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS } else { 900 }
 if ($pullTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
 $env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
 $env:COMPOSE_HTTP_TIMEOUT = [string]$composeTimeoutSeconds

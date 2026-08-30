@@ -117,6 +117,38 @@ class ServiceMonitorServiceTest {
         verify(results).save(any(ServiceCheckResult.class));
     }
 
+    @Test
+    void returnsNewHeartbeatTokenWhenExistingServiceChangesType() {
+        ServiceDtos.Request request = new ServiceDtos.Request(
+                "备份任务", "", ServiceCheck.Type.HEARTBEAT, 60, 5000, false, 0, true, 1, 0, 0);
+        check.setTarget("https://example.com/health");
+        check.setType(ServiceCheck.Type.HTTP_GET);
+        when(checks.findById(42L)).thenReturn(Optional.of(check));
+
+        var updated = service.update(42L, request);
+
+        assertThat(updated.type()).isEqualTo(ServiceCheck.Type.HEARTBEAT);
+        assertThat(updated.heartbeatToken()).startsWith("hb_");
+        assertThat(updated.heartbeatPath()).isEqualTo("/api/heartbeat/42");
+        assertThat(check.getHeartbeatTokenHash()).isNotBlank();
+    }
+
+    @Test
+    void doesNotRotateHeartbeatTokenWhenEditingExistingHeartbeatService() {
+        ServiceDtos.Request request = new ServiceDtos.Request(
+                "备份任务", "", ServiceCheck.Type.HEARTBEAT, 120, 5000, false, 0, true, 1, 0, 0);
+        check.setType(ServiceCheck.Type.HEARTBEAT);
+        check.setHeartbeatTokenHash(savedHash("hb_existing_token"));
+        check.setHeartbeatTokenPrefix("hb_exis");
+        when(checks.findById(42L)).thenReturn(Optional.of(check));
+
+        var updated = service.update(42L, request);
+
+        assertThat(updated.heartbeatToken()).isNull();
+        assertThat(updated.heartbeatTokenPrefix()).isEqualTo("hb_exis");
+        assertThat(check.getHeartbeatTokenHash()).isEqualTo(savedHash("hb_existing_token"));
+    }
+
     private String savedHash(String value) {
         try {
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));

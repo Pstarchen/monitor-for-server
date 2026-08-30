@@ -75,12 +75,13 @@ async function save() {
     let saved: ServiceCheck
     if (editingId.value) saved = (await api.put<ServiceCheck>(`/services/${editingId.value}`, payload)).data
     else saved = (await api.post<ServiceCheck>('/services', payload)).data
+    const wasEditing = editingId.value !== null
     dialog.value = false
-    if (!editingId.value && saved.type === 'HEARTBEAT' && saved.heartbeatToken) {
+    if (saved.type === 'HEARTBEAT' && saved.heartbeatToken) {
       heartbeatCredential.value = saved
       heartbeatDialog.value = true
     }
-    ElMessage.success(editingId.value ? '服务监控已更新' : '服务监控已创建')
+    ElMessage.success(wasEditing ? '服务监控已更新' : '服务监控已创建')
     await load()
   } catch (cause) {
     ElMessage.error(errorMessage(cause))

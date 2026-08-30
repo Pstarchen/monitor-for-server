@@ -76,6 +76,8 @@ sudo bash ./deploy/update-controller.sh --apply
 sudo bash ./deploy/update-controller.sh --auto
 ```
 
+更新器默认允许单个镜像最多拉取 600 秒、Compose 操作最多执行 900 秒，适配带宽受限或首次下载镜像的环境。可通过 `GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS` 和 `GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；更新状态会在命令明确失败时记录错误，不会删除数据库卷。
+
 更新器默认依次尝试可用的 `ghcr.nju.edu.cn` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR；不会默认使用未将本项目加入白名单的 DaoCloud 公共镜像。首次安装和系统设置中的更新都使用这条顺序。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 传入逗号分隔的镜像前缀，或使用 `--no-mirror` 跳过镜像源；需要本地构建时使用 `--build`。`--auto` 会启用由 setup 服务执行的每日 04:00 自动更新，失败不会删除数据库卷。
 
 升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `GUANLAN_SETUP_IMAGE`、`GUANLAN_SERVER_IMAGE`、`GUANLAN_WEB_IMAGE` 和 `GUANLAN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
