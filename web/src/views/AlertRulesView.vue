@@ -78,6 +78,10 @@ function metricMax(metric: AlertMetric) {
   return 1_000_000_000_000
 }
 
+function metricMin(metric: AlertMetric) {
+  return metric === 'FIREWALL_INACTIVE' ? 1 : 0
+}
+
 function metricPrecision(metric: AlertMetric) {
   return metric === 'DEVICE_OFFLINE' || metric === 'TCP_CONNECTIONS' || metric === 'SMART_FAILURES' || metric === 'INTEGRITY_CHANGES' || metric === 'FIREWALL_INACTIVE' || metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS' || metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS' ? 0 : metric === 'LOAD_1' ? 2 : 1
 }
@@ -164,7 +168,7 @@ onMounted(load)
           <el-form-item label="监控范围"><el-select v-model="form.deviceId" placeholder="全部设备" clearable><el-option label="全部设备" value="" /><el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" /></el-select></el-form-item>
           <el-form-item label="监控指标" required><el-select v-model="form.metric" @change="metricChanged"><el-option v-for="(label, value) in metricLabels" :key="value" :label="label" :value="value" /></el-select></el-form-item>
           <el-form-item label="告警级别" required><el-select v-model="form.severity"><el-option label="提示" value="INFO" /><el-option label="警告" value="WARNING" /><el-option label="严重" value="CRITICAL" /></el-select></el-form-item>
-          <el-form-item label="触发阈值"><el-input-number v-model="form.threshold" :min="0" :max="metricMax(form.metric)" :precision="metricPrecision(form.metric)" /><span class="field-suffix">{{ metricUnit(form.metric) }}</span></el-form-item>
+          <el-form-item label="触发阈值"><el-input-number v-model="form.threshold" :min="metricMin(form.metric)" :max="metricMax(form.metric)" :precision="metricPrecision(form.metric)" /><span class="field-suffix">{{ metricUnit(form.metric) }}</span></el-form-item>
         </div>
         <el-form-item label="启用规则"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>

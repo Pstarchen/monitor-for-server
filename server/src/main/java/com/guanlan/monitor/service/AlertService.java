@@ -179,8 +179,8 @@ public class AlertService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "资源使用率阈值必须在 0-100 之间");
             }
         }
-        if (request.metric() == AlertRule.Metric.FIREWALL_INACTIVE && request.threshold() > 1) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "防火墙状态阈值必须为 0 或 1");
+        if (request.metric() == AlertRule.Metric.FIREWALL_INACTIVE && request.threshold() != 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "防火墙告警阈值必须为 1（未启用）");
         }
     }
 
