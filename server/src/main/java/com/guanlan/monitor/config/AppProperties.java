@@ -59,5 +59,7 @@ public class AppProperties {
         private String dingtalkKeyword;
         private String dingtalkSignSecret;
         private String wecomWebhookUrl;
+        private String genericWebhookUrl;
+        private String genericWebhookFormat = "GENERIC_JSON";
     }
 }

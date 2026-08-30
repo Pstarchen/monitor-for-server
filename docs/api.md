@@ -307,11 +307,14 @@ curl -fsS -X POST -H 'X-Heartbeat-Token: hb_...' 'https://monitor.example.com/ap
     "startTls": true
   },
   "dingtalk": { "enabled": false, "webhookUrl": null, "clearWebhook": false },
-  "wecom": { "enabled": false, "webhookUrl": null, "clearWebhook": false }
+  "wecom": { "enabled": false, "webhookUrl": null, "clearWebhook": false },
+  "generic": { "enabled": false, "webhookUrl": null, "clearWebhook": false, "payloadFormat": "GENERIC_JSON" }
 }
 ```
 
 敏感值使用 `null` 或空字符串表示保留当前值，`clearPassword` / `clearWebhook` 用于删除数据库覆盖值。响应只包含 `configured`、`source` 等状态字段。
+
+通用 Webhook 支持以下消息格式：`GENERIC_JSON` 和 `SLACK` 发送 `{ "text": "..." }`，`DISCORD` 发送 `{ "content": "..." }`，`LARK` 发送 `{ "msg_type": "text", "content": { "text": "..." } }`，`PLAIN_TEXT` 以 `text/plain` 发送原始消息。通用端点只要返回 HTTP 2xx 即视为成功，不要求固定响应 JSON；地址仍需使用 HTTPS（本地开发可显式开启 `ALLOW_INSECURE_HTTP`）。
 
 ## WebSocket
 

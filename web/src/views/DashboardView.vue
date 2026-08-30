@@ -31,6 +31,7 @@ const servicesRefreshing = ref(false)
 const search = ref('')
 const status = ref<DeviceStatus | ''>('')
 const group = ref('')
+const tag = ref('')
 const sort = ref<SortKey>('attention')
 const trendDeviceId = ref('')
 const trendRangeHours = ref<TrendRangeHours>(6)
@@ -43,6 +44,9 @@ let trendRequestId = 0
 const groups = computed(() => Array.from(new Set(
   (dashboard.value?.devices ?? []).map((device) => device.groupName).filter((value): value is string => Boolean(value)),
 )).sort((left, right) => left.localeCompare(right, 'zh-CN')))
+const tags = computed(() => Array.from(new Set(
+  (dashboard.value?.devices ?? []).flatMap((device) => device.tags ?? []),
+)).sort((left, right) => left.localeCompare(right, 'zh-CN')))
 
 const filteredDevices = computed(() => {
   const needle = search.value.trim().toLowerCase()
@@ -50,7 +54,8 @@ const filteredDevices = computed(() => {
   return (dashboard.value?.devices ?? [])
     .filter((device) => (!status.value || device.status === status.value)
       && (!group.value || device.groupName === group.value)
-      && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName, device.os]
+      && (!tag.value || (device.tags ?? []).includes(tag.value))
+      && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName, device.os, ...(device.tags ?? [])]
         .some((value) => value?.toLowerCase().includes(needle))))
     .slice()
     .sort((left, right) => {
@@ -303,6 +308,9 @@ onBeforeUnmount(() => {
           <el-select v-model="group" clearable placeholder="全部分组" class="compact-select">
             <el-option v-for="item in groups" :key="item" :label="item" :value="item" />
           </el-select>
+          <el-select v-model="tag" clearable placeholder="全部标签" class="compact-select">
+            <el-option v-for="item in tags" :key="item" :label="item" :value="item" />
+          </el-select>
           <el-select v-model="sort" class="sort-select" aria-label="设备排序">
             <el-option label="异常优先" value="attention" /><el-option label="CPU 从高到低" value="cpu" />
             <el-option label="内存从高到低" value="memory" /><el-option label="磁盘从高到低" value="disk" /><el-option label="按名称" value="name" />
@@ -318,6 +326,7 @@ onBeforeUnmount(() => {
             </header>
             <div class="server-meta">
               <span><MapPin :size="13" />{{ device.groupName || '未分组' }} · {{ device.location || '未设置位置' }}</span>
+              <span v-if="device.tags?.length" class="server-tags"><i v-for="item in device.tags" :key="item">{{ item }}</i></span>
               <span><Clock3 :size="13" />{{ device.status === 'ONLINE' ? `运行 ${uptime(uptimeSeconds(device))}` : relativeTime(device.lastSeenAt) }}</span>
             </div>
             <div class="server-resources">

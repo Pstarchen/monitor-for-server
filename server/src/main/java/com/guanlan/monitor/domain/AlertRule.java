@@ -15,7 +15,8 @@ import java.time.Instant;
 public class AlertRule {
     public enum Metric { CPU_USAGE, MEMORY_USAGE, DISK_USAGE, LOAD_1, DISK_READ_BPS, DISK_WRITE_BPS,
         CONTAINER_CPU_USAGE, CONTAINER_MEMORY_USAGE, GPU_USAGE, BATTERY_PERCENT, SMART_FAILURES,
-        INTEGRITY_CHANGES, FIREWALL_INACTIVE, TCP_CONNECTIONS, NETWORK_RECV_BPS, NETWORK_SENT_BPS, TEMPERATURE, DEVICE_OFFLINE }
+        INTEGRITY_CHANGES, FIREWALL_INACTIVE, TCP_CONNECTIONS, NETWORK_RECV_BPS, NETWORK_SENT_BPS,
+        TEMPERATURE, DEVICE_OFFLINE, PROCESS_MISSING, SERVICE_NOT_RUNNING }
     public enum Severity { INFO, WARNING, CRITICAL }
 
     @Id
@@ -35,6 +36,9 @@ public class AlertRule {
 
     @Column(nullable = false)
     private double threshold;
+
+    @Column(name = "target_name", length = 255)
+    private String targetName;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

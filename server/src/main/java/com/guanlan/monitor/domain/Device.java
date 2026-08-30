@@ -44,6 +44,9 @@ public class Device {
     @Column(name = "group_name", length = 80)
     private String groupName;
 
+    @Column(name = "tags_json", columnDefinition = "TEXT")
+    private String tagsJson;
+
     @Column(name = "ddns_enabled", nullable = false)
     private boolean ddnsEnabled;
 

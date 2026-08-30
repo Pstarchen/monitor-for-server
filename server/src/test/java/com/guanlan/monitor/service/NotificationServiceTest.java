@@ -75,6 +75,25 @@ class NotificationServiceTest {
         assertThat(requestBody.get()).contains("监控");
     }
 
+    @Test
+    void sendsGenericJsonPayload() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        NotificationService service = genericService("GENERIC_JSON", requestBody);
+
+        assertThat(service.test("generic").message()).isEqualTo("测试通知已发送");
+        assertThat(requestBody.get()).contains("\"text\":\"[观澜监控] 通知通道测试成功\"");
+    }
+
+    @Test
+    void sendsPlainTextPayload() throws IOException {
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        NotificationService service = genericService("PLAIN_TEXT", requestBody);
+
+        service.test("generic");
+
+        assertThat(requestBody.get()).isEqualTo("[观澜监控] 通知通道测试成功");
+    }
+
     private NotificationService service(String response, String enabledChannel) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/webhook", exchange -> {
@@ -126,4 +145,25 @@ class NotificationServiceTest {
     }
 
     private String endpoint() { return "http://127.0.0.1:1/webhook"; }
+
+    private NotificationService genericService(String format, AtomicReference<String> requestBody) throws IOException {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/webhook", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] body = "accepted".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(202, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/webhook";
+        SettingService settings = mock(SettingService.class);
+        AuditService audit = mock(AuditService.class);
+        SettingService.EmailRuntime email = new SettingService.EmailRuntime(false, "", 587, "", "", "", "", true, true, "NONE");
+        SettingService.WebhookRuntime disabled = new SettingService.WebhookRuntime(false, url, "DATABASE");
+        SettingService.WebhookRuntime generic = new SettingService.WebhookRuntime(true, url, "DATABASE", "", "", format);
+        when(settings.notificationRuntime()).thenReturn(new SettingService.NotificationRuntime(email, disabled, disabled, generic));
+        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("观澜监控", "/favicon.svg"));
+        return new NotificationService(settings, audit, RestClient.builder());
+    }
 }

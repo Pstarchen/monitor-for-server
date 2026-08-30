@@ -9,6 +9,7 @@ import org.springframework.data.domain.PageRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.scheduling.annotation.Async;
@@ -59,6 +60,7 @@ public class NotificationService {
         deliver("email", "邮件", text, config.email().enabled(), () -> sendEmail(config.email(), text));
         deliver("dingtalk", "钉钉", text, config.dingtalk().enabled(), () -> sendWebhook(config.dingtalk(), text, "钉钉"));
         deliver("wecom", "企业微信", text, config.wecom().enabled(), () -> sendWebhook(config.wecom(), text, "企业微信"));
+        deliver("generic", "通用 Webhook", text, config.generic().enabled(), () -> sendGenericWebhook(config.generic(), text));
     }
 
     public TestResult test(String channel) {
@@ -78,6 +80,10 @@ public class NotificationService {
                 case "wecom" -> {
                     requireEnabled(config.wecom().enabled());
                     deliverSync("wecom", "企业微信", text, () -> sendWebhook(config.wecom(), text, "企业微信"));
+                }
+                case "generic" -> {
+                    requireEnabled(config.generic().enabled());
+                    deliverSync("generic", "通用 Webhook", text, () -> sendGenericWebhook(config.generic(), text));
                 }
                 default -> throw new ApiException(HttpStatus.NOT_FOUND, "通知通道不存在");
             }
@@ -116,6 +122,10 @@ public class NotificationService {
             case "wecom" -> {
                 requireEnabled(config.wecom().enabled());
                 yield () -> sendWebhook(config.wecom(), delivery.getMessage(), "企业微信");
+            }
+            case "generic" -> {
+                requireEnabled(config.generic().enabled());
+                yield () -> sendGenericWebhook(config.generic(), delivery.getMessage());
             }
             default -> throw new ApiException(HttpStatus.BAD_REQUEST, "通知通道不存在");
         };
@@ -161,9 +171,35 @@ public class NotificationService {
             endpoint = dingtalkEndpoint(endpoint, config.signSecret());
         }
         WebhookResponse response = restClient.post().uri(endpoint)
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("msgtype", "text", "text", Map.of("content", content)))
                 .retrieve().body(WebhookResponse.class);
         validateWebhookResponse(channel, response);
+    }
+
+    private void sendGenericWebhook(SettingService.WebhookRuntime config, String text) {
+        if (!config.enabled()) return;
+        if (blank(config.url())) throw new ApiException(HttpStatus.BAD_REQUEST, "通用 Webhook 配置不完整");
+        URI endpoint = URI.create(config.url());
+        String format = blank(config.payloadFormat()) ? "GENERIC_JSON" : config.payloadFormat().trim().toUpperCase(java.util.Locale.ROOT);
+        if ("PLAIN_TEXT".equals(format)) {
+            restClient.post().uri(endpoint)
+                    .contentType(MediaType.parseMediaType("text/plain;charset=UTF-8"))
+                    .body(text)
+                    .retrieve().toBodilessEntity();
+            return;
+        }
+        Object payload = switch (format) {
+            case "SLACK" -> Map.of("text", text);
+            case "DISCORD" -> Map.of("content", text);
+            case "LARK" -> Map.of("msg_type", "text", "content", Map.of("text", text));
+            case "GENERIC_JSON" -> Map.of("text", text);
+            default -> throw new ApiException(HttpStatus.BAD_REQUEST, "通用 Webhook 消息格式无效");
+        };
+        restClient.post().uri(endpoint)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(payload)
+                .retrieve().toBodilessEntity();
     }
 
     private URI dingtalkEndpoint(URI endpoint, String signSecret) {

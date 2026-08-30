@@ -22,6 +22,7 @@ const loading = ref(true)
 const error = ref('')
 const search = ref('')
 const status = ref<DeviceStatus | ''>('')
+const tag = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
@@ -31,7 +32,7 @@ const agentServerUrl = ref(window.location.origin)
 const collectionSeconds = ref(3)
 const lightweight = ref(false)
 const diskMountpoints = ref('')
-const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
+const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
 const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent'
 const agentInstallerCacheKey = 'v5'
 const agentKeyElement = ref<HTMLElement | null>(null)
@@ -39,10 +40,12 @@ const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
 
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
+const knownTags = computed(() => Array.from(new Set(devices.value.flatMap((device) => device.tags ?? []))).sort((left, right) => left.localeCompare(right, 'zh-CN')))
 const filtered = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return devices.value.filter((device) => (!status.value || device.status === status.value)
-    && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName].some((value) => value?.toLowerCase().includes(needle))))
+    && (!tag.value || (device.tags ?? []).includes(tag.value))
+    && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName, ...(device.tags ?? [])].some((value) => value?.toLowerCase().includes(needle))))
 })
 const installCommand = computed(() => {
   if (!credential.value) return ''
@@ -93,13 +96,13 @@ function showCredential(value: DeviceCredential) {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { name: '', location: '', groupName: '', primaryIp: '', ddnsEnabled: false, ddnsConfigId: null, publicVisible: true })
+  Object.assign(form, { name: '', location: '', groupName: '', primaryIp: '', tags: [], ddnsEnabled: false, ddnsConfigId: null, publicVisible: true })
   dialog.value = true
 }
 
 function openEdit(device: Device) {
   editingId.value = device.id
-  Object.assign(form, { name: device.name, location: device.location ?? '', groupName: device.groupName ?? '', primaryIp: device.primaryIp ?? '', ddnsEnabled: device.ddnsEnabled, ddnsConfigId: device.ddnsConfigId, publicVisible: device.publicVisible })
+  Object.assign(form, { name: device.name, location: device.location ?? '', groupName: device.groupName ?? '', primaryIp: device.primaryIp ?? '', tags: [...(device.tags ?? [])], ddnsEnabled: device.ddnsEnabled, ddnsConfigId: device.ddnsConfigId, publicVisible: device.publicVisible })
   dialog.value = true
 }
 
@@ -110,7 +113,7 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = { name: form.name.trim(), location: form.location.trim() || null, groupName: form.groupName.trim() || null, primaryIp: form.primaryIp.trim() || null, ddnsEnabled: form.ddnsEnabled, ddnsConfigId: form.ddnsEnabled ? form.ddnsConfigId : null, publicVisible: form.publicVisible }
+    const payload = { name: form.name.trim(), location: form.location.trim() || null, groupName: form.groupName.trim() || null, primaryIp: form.primaryIp.trim() || null, tags: form.tags.map((tag) => tag.trim()).filter(Boolean), ddnsEnabled: form.ddnsEnabled, ddnsConfigId: form.ddnsEnabled ? form.ddnsConfigId : null, publicVisible: form.publicVisible }
     if (editingId.value) {
       await api.put(`/devices/${editingId.value}`, payload)
       ElMessage.success('设备信息已更新')
@@ -228,6 +231,9 @@ onBeforeUnmount(() => {
       <el-select v-model="status" clearable placeholder="全部状态" class="compact-select">
         <el-option label="在线" value="ONLINE" /><el-option label="离线" value="OFFLINE" /><el-option label="待接入" value="PENDING" />
       </el-select>
+      <el-select v-model="tag" clearable placeholder="全部标签" class="compact-select">
+        <el-option v-for="item in knownTags" :key="item" :label="item" :value="item" />
+      </el-select>
       <span class="filter-count">{{ filtered.length }} / {{ devices.length }} 台设备</span>
     </div>
 
@@ -241,7 +247,7 @@ onBeforeUnmount(() => {
             <tr v-for="device in filtered" :key="device.id">
               <td><button class="device-link" type="button" @click="router.push(`/devices/${device.id}`)"><span><Server :size="17" /></span><span><strong>{{ device.name }}</strong><small>{{ device.primaryIp || device.hostname || '等待 Agent 上报地址' }}</small></span></button></td>
               <td><StatusBadge :status="device.status" /></td>
-              <td><strong class="plain-cell">{{ device.groupName || '未分组' }}</strong><small class="cell-subtext">{{ device.location || '未设置位置' }}</small></td>
+              <td><strong class="plain-cell">{{ device.groupName || '未分组' }}</strong><small class="cell-subtext">{{ device.location || '未设置位置' }}</small><span v-if="device.tags?.length" class="tag-list"><em v-for="tag in device.tags" :key="tag">{{ tag }}</em></span></td>
               <td>{{ device.latest ? percent(device.latest.cpuUsage) : '--' }}</td>
               <td>{{ device.latest ? percent(device.latest.memoryUsage) : '--' }}</td>
               <td>{{ relativeTime(device.lastSeenAt) }}</td>
@@ -266,6 +272,7 @@ onBeforeUnmount(() => {
           <el-form-item label="主 IP"><el-input v-model="form.primaryIp" maxlength="64" placeholder="可由 Agent 上报后补充" /></el-form-item>
           <el-form-item label="设备分组"><el-input v-model="form.groupName" maxlength="80" placeholder="例如：生产环境" /></el-form-item>
           <el-form-item label="物理位置"><el-input v-model="form.location" maxlength="120" placeholder="例如：上海机房 A3" /></el-form-item>
+          <el-form-item label="设备标签"><el-select v-model="form.tags" multiple filterable allow-create default-first-option collapse-tags collapse-tags-tooltip placeholder="例如：生产、核心、华东"><el-option v-for="tag in knownTags" :key="tag" :label="tag" :value="tag" /></el-select><p class="field-help">可添加最多 20 个标签，用于搜索与总览筛选。</p></el-form-item>
           <el-form-item label="DDNS 配置"><el-checkbox v-model="form.ddnsEnabled">启用动态域名解析</el-checkbox><el-select v-if="form.ddnsEnabled" v-model="form.ddnsConfigId" clearable placeholder="选择 DDNS 配置"><el-option v-for="config in ddnsConfigs" :key="config.id" :label="config.name" :value="config.id" /></el-select></el-form-item>
           <el-form-item label="公开状态页"><el-checkbox v-model="form.publicVisible">在公开状态页展示此设备</el-checkbox></el-form-item>
         </div>

@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE' | 'PROCESS_MISSING' | 'SERVICE_NOT_RUNNING'
 
 export interface User {
   id: number
@@ -137,6 +137,7 @@ export interface Device {
   primaryIp: string | null
   location: string | null
   groupName: string | null
+  tags: string[]
   ddnsEnabled: boolean
   ddnsConfigId: number | null
   publicVisible: boolean
@@ -182,6 +183,7 @@ export interface AlertRule {
   metric: AlertMetric
   threshold: number
   severity: AlertSeverity
+  targetName: string | null
   enabled: boolean
   updatedAt: string
 }
@@ -257,7 +259,7 @@ export interface MonitorReport {
 
 export interface NotificationDelivery {
   id: number
-  channel: 'email' | 'dingtalk' | 'wecom' | string
+  channel: 'email' | 'dingtalk' | 'wecom' | 'generic' | string
   status: 'SUCCESS' | 'FAILED' | 'SKIPPED' | string
   message: string
   error: string | null
@@ -288,6 +290,7 @@ export interface WebhookSettings {
   keyword?: string
   keywordConfigured?: boolean
   signSecretConfigured?: boolean
+  payloadFormat?: 'GENERIC_JSON' | 'SLACK' | 'DISCORD' | 'LARK' | 'PLAIN_TEXT' | string
 }
 
 export interface Settings {
@@ -303,6 +306,7 @@ export interface Settings {
   email: EmailSettings
   dingtalk: WebhookSettings
   wecom: WebhookSettings
+  generic: WebhookSettings
 }
 
 export interface PublicBrand {

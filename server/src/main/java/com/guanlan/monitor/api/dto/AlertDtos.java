@@ -18,12 +18,13 @@ public final class AlertDtos {
             @NotNull AlertRule.Metric metric,
             @PositiveOrZero double threshold,
             @NotNull AlertRule.Severity severity,
-            boolean enabled
+            boolean enabled,
+            @Size(max = 255) String targetName
     ) {}
 
     public record RuleView(
             Long id, String name, String deviceId, String deviceName,
-            AlertRule.Metric metric, double threshold, AlertRule.Severity severity,
+            AlertRule.Metric metric, double threshold, AlertRule.Severity severity, String targetName,
             boolean enabled, Instant updatedAt
     ) {}
 

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -46,6 +47,7 @@ public class DeviceService {
         device.setLocation(request.location());
         device.setGroupName(request.groupName());
         device.setPrimaryIp(request.primaryIp());
+        device.setTagsJson(json(normalizeTags(request.tags())));
         device.setDdnsEnabled(request.ddnsEnabled());
         device.setDdnsConfigId(validDdnsConfig(request.ddnsEnabled(), request.ddnsConfigId()));
         device.setPublicVisible(request.publicVisible());
@@ -63,6 +65,7 @@ public class DeviceService {
         device.setLocation(request.location());
         device.setGroupName(request.groupName());
         device.setPrimaryIp(request.primaryIp());
+        device.setTagsJson(json(normalizeTags(request.tags())));
         device.setDdnsEnabled(request.ddnsEnabled());
         device.setDdnsConfigId(validDdnsConfig(request.ddnsEnabled(), request.ddnsConfigId()));
         device.setPublicVisible(request.publicVisible());
@@ -109,7 +112,7 @@ public class DeviceService {
     public DeviceDtos.View view(Device device) {
         MetricView latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).map(metric -> MetricView.from(metric, mapper)).orElse(null);
         return new DeviceDtos.View(device.getId(), device.getName(), device.getHostname(), device.getOs(), device.getArchitecture(),
-                device.getPrimaryIp(), device.getLocation(), device.getGroupName(), device.isDdnsEnabled(), device.getDdnsConfigId(), device.isPublicVisible(), device.getStatus(), device.getLastSeenAt(),
+                device.getPrimaryIp(), device.getLocation(), device.getGroupName(), readTags(device.getTagsJson()), device.isDdnsEnabled(), device.getDdnsConfigId(), device.isPublicVisible(), device.getStatus(), device.getLastSeenAt(),
                 device.getAgentKeyPrefix(), device.isControllerManaged(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest);
     }
 
@@ -130,5 +133,34 @@ public class DeviceService {
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private List<String> normalizeTags(List<String> values) {
+        if (values == null) return List.of();
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null) continue;
+            String tag = value.trim();
+            if (tag.isEmpty()) continue;
+            if (tag.length() > 40) throw new ApiException(HttpStatus.BAD_REQUEST, "设备标签不能超过 40 个字符");
+            unique.add(tag);
+            if (unique.size() >= 20) break;
+        }
+        return List.copyOf(unique);
+    }
+
+    private List<String> readTags(String value) {
+        if (value == null || value.isBlank()) return List.of();
+        try {
+            List<String> tags = mapper.readValue(value, mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+            return normalizeTags(tags);
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private String json(Object value) {
+        try { return mapper.writeValueAsString(value); }
+        catch (Exception exception) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "设备标签序列化失败"); }
     }
 }

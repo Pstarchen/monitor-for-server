@@ -1,5 +1,7 @@
 package com.guanlan.monitor.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.api.dto.AlertDtos;
 import com.guanlan.monitor.domain.AlertEvent;
@@ -10,6 +12,7 @@ import com.guanlan.monitor.realtime.RealtimeWebSocketHandler;
 import com.guanlan.monitor.repository.AlertEventRepository;
 import com.guanlan.monitor.repository.AlertRuleRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -20,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class AlertService {
     private static final List<AlertEvent.Status> ACTIVE = List.of(AlertEvent.Status.OPEN, AlertEvent.Status.ACKNOWLEDGED);
     private final AlertRuleRepository rules;
@@ -29,6 +32,13 @@ public class AlertService {
     private final NotificationService notifications;
     private final RealtimeWebSocketHandler realtime;
     private final AuditService audit;
+    private final ObjectMapper mapper;
+
+    /** Keeps isolated service tests source-compatible while Spring uses the full constructor. */
+    public AlertService(AlertRuleRepository rules, AlertEventRepository events, DeviceService devices,
+                        NotificationService notifications, RealtimeWebSocketHandler realtime, AuditService audit) {
+        this(rules, events, devices, notifications, realtime, audit, new ObjectMapper());
+    }
 
     @Transactional(readOnly = true)
     public List<AlertDtos.EventView> listEvents(int limit) {
@@ -118,6 +128,8 @@ public class AlertService {
                 case NETWORK_SENT_BPS -> metric.getNetworkSentBps();
                 case TEMPERATURE -> metric.getTemperatureMax();
                 case DEVICE_OFFLINE -> 0d;
+                case PROCESS_MISSING -> processMissing(metric, rule.getTargetName());
+                case SERVICE_NOT_RUNNING -> serviceNotRunning(metric, rule.getTargetName());
             };
             if (value == null || !Double.isFinite(value)) continue;
             evaluate(rule, device, value, value >= rule.getThreshold());
@@ -162,6 +174,7 @@ public class AlertService {
         rule.setName(request.name().trim());
         rule.setMetric(request.metric());
         rule.setThreshold(request.threshold());
+        rule.setTargetName(request.targetName() == null || request.targetName().isBlank() ? null : request.targetName().trim());
         rule.setSeverity(request.severity());
         rule.setEnabled(request.enabled());
         rule.setDevice(request.deviceId() == null || request.deviceId().isBlank() ? null : devices.require(request.deviceId()));
@@ -181,6 +194,14 @@ public class AlertService {
         }
         if (request.metric() == AlertRule.Metric.FIREWALL_INACTIVE && request.threshold() != 1) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "防火墙告警阈值必须为 1（未启用）");
+        }
+        if ((request.metric() == AlertRule.Metric.PROCESS_MISSING || request.metric() == AlertRule.Metric.SERVICE_NOT_RUNNING)
+                && (request.targetName() == null || request.targetName().isBlank())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "进程或服务告警必须填写目标名称");
+        }
+        if ((request.metric() == AlertRule.Metric.PROCESS_MISSING || request.metric() == AlertRule.Metric.SERVICE_NOT_RUNNING)
+                && request.threshold() != 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "进程或服务告警阈值必须为 1");
         }
     }
 
@@ -204,6 +225,8 @@ public class AlertService {
             case NETWORK_SENT_BPS -> "网络发送速率";
             case TEMPERATURE -> "最高温度";
             case DEVICE_OFFLINE -> "离线时长";
+            case PROCESS_MISSING -> "关键进程缺失";
+            case SERVICE_NOT_RUNNING -> "系统服务未运行";
         };
         String unit = switch (rule.getMetric()) {
             case DEVICE_OFFLINE -> " 秒";
@@ -213,10 +236,54 @@ public class AlertService {
             case DISK_READ_BPS, DISK_WRITE_BPS -> " B/s";
             case LOAD_1 -> "";
             case TEMPERATURE -> " °C";
+            case PROCESS_MISSING, SERVICE_NOT_RUNNING -> "";
             default -> "%";
         };
-        return device.getName() + " 的" + metric + "达到 " + String.format("%.1f", value) + unit + "，规则阈值 " + rule.getThreshold() + unit;
+        String target = (rule.getMetric() == AlertRule.Metric.PROCESS_MISSING || rule.getMetric() == AlertRule.Metric.SERVICE_NOT_RUNNING)
+                && !blank(rule.getTargetName()) ? "（" + rule.getTargetName().trim() + "）" : "";
+        return device.getName() + " 的" + metric + target + "达到 " + String.format("%.1f", value) + unit + "，规则阈值 " + rule.getThreshold() + unit;
     }
+
+    private Double processMissing(MetricSnapshot metric, String targetName) {
+        if (blank(targetName) || blank(metric.getProcessesJson())) return null;
+        try {
+            List<Map<String, Object>> processes = mapper.readValue(metric.getProcessesJson(), new TypeReference<>() {});
+            if (processes.isEmpty()) return null;
+            boolean present = processes.stream().anyMatch(item -> sameName(item.get("name"), targetName));
+            return present ? 0d : 1d;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Double serviceNotRunning(MetricSnapshot metric, String targetName) {
+        if (blank(targetName) || blank(metric.getServicesJson())) return null;
+        try {
+            List<Map<String, Object>> services = mapper.readValue(metric.getServicesJson(), new TypeReference<>() {});
+            if (services.isEmpty()) return null;
+            boolean running = services.stream().filter(item -> sameName(item.get("name"), targetName))
+                    .anyMatch(item -> {
+                        Object status = item.get("status");
+                        return status != null && ("running".equalsIgnoreCase(String.valueOf(status).trim())
+                                || "active".equalsIgnoreCase(String.valueOf(status).trim()));
+                    });
+            return running ? 0d : 1d;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean sameName(Object value, String targetName) {
+        if (value == null) return false;
+        String left = String.valueOf(value).trim();
+        String right = targetName.trim();
+        if (left.equalsIgnoreCase(right)) return true;
+        return left.endsWith(".exe") && right.endsWith(".exe")
+                ? left.substring(0, left.length() - 4).equalsIgnoreCase(right.substring(0, right.length() - 4))
+                : false;
+    }
+
+    private boolean blank(String value) { return value == null || value.isBlank(); }
 
     private AlertRule requireRule(Long id) {
         return rules.findById(id).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "告警规则不存在"));
@@ -225,7 +292,7 @@ public class AlertService {
     private AlertDtos.RuleView ruleView(AlertRule rule) {
         return new AlertDtos.RuleView(rule.getId(), rule.getName(), rule.getDevice() == null ? null : rule.getDevice().getId(),
                 rule.getDevice() == null ? null : rule.getDevice().getName(), rule.getMetric(), rule.getThreshold(),
-                rule.getSeverity(), rule.isEnabled(), rule.getUpdatedAt());
+                rule.getSeverity(), rule.getTargetName(), rule.isEnabled(), rule.getUpdatedAt());
     }
 
     private AlertDtos.EventView eventView(AlertEvent event) {

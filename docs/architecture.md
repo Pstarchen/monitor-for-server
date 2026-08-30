@@ -12,7 +12,7 @@ flowchart LR
     N -->|REST / WebSocket| S[Spring Boot 服务端]
     S --> M[(PostgreSQL 16)]
     S --> R[(Redis 7)]
-    S --> C[邮件 / 钉钉 / 企业微信]
+    S --> C[邮件 / 钉钉 / 企业微信 / 通用 Webhook]
 ```
 
 ## 组件职责
@@ -69,7 +69,7 @@ flowchart LR
 
 - Agent 的磁盘队列有容量上限，满载时按 FIFO 删除最旧报告，避免占满主机磁盘。
 - Agent 上报接口不使用浏览器会话和 CSRF，而使用独立设备凭据；其他写接口必须通过会话与 CSRF 双重校验。
-- SMTP 密码和机器人 Webhook 可从环境变量回退，或以 AES-256-GCM 密文保存；设置 API 永不返回明文。
+- SMTP 密码和机器人 Webhook 可从环境变量回退，或以 AES-256-GCM 密文保存；设置 API 永不返回明文。通用 Webhook 通过受限格式适配 Slack、Discord、飞书/Lark 和纯文本端点。
 - `SETTINGS_ENCRYPTION_KEY` 必须独立保管并随数据库备份保存，丢失后数据库中的通知凭据无法恢复。
 - 生产环境必须在 Web 网关前终止 TLS，并设置 `SESSION_COOKIE_SECURE=true` 与精确的 `ALLOWED_ORIGINS`。
 - PostgreSQL 与 Redis 仅位于 Docker 内部网络，不在 Compose 中发布宿主机端口；数据分别持久化到项目卷。

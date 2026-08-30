@@ -23,7 +23,7 @@ import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controll
 import { useAuthStore } from '@/stores/auth'
 import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, NotificationDelivery, Settings, WebhookSettings } from '@/types'
 
-type ChannelKey = 'email' | 'dingtalk' | 'wecom'
+type ChannelKey = 'email' | 'dingtalk' | 'wecom' | 'generic'
 type SectionKey = 'general' | 'monitoring' | ChannelKey | 'security' | 'tokens' | 'updates'
 
 const sections = [
@@ -40,6 +40,7 @@ const sections = [
       { key: 'email' as const, label: '邮件通知', description: 'SMTP 发信服务', icon: Mail },
       { key: 'dingtalk' as const, label: '钉钉机器人', description: '群机器人 Webhook', icon: MessageSquareText },
       { key: 'wecom' as const, label: '企业微信', description: '群机器人 Webhook', icon: MessageSquareText },
+      { key: 'generic' as const, label: '通用 Webhook', description: 'Slack、Discord、飞书等', icon: Send },
     ],
   },
   {
@@ -70,6 +71,7 @@ const form = reactive({
   },
   dingtalk: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false },
   wecom: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false },
+  generic: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false, payloadFormat: 'GENERIC_JSON' },
 })
 const loading = ref(true)
 const saving = ref(false)
@@ -77,7 +79,7 @@ const uploadingIcon = ref(false)
 const iconUploadProgress = ref(0)
 const siteIconInput = ref<HTMLInputElement | null>(null)
 const error = ref('')
-const testing = reactive<Record<ChannelKey, boolean>>({ email: false, dingtalk: false, wecom: false })
+const testing = reactive<Record<ChannelKey, boolean>>({ email: false, dingtalk: false, wecom: false, generic: false })
 const controllerUpdate = ref<ControllerUpdateStatus | null>(null)
 const updateLoading = ref(false)
 const updateAction = ref<'check' | 'apply' | 'auto' | ''>('')
@@ -132,6 +134,7 @@ function apply(value: Settings) {
   })
   Object.assign(form.dingtalk, { enabled: value.dingtalk.enabled, webhookUrl: '', clearWebhook: false, keyword: value.dingtalk.keyword ?? '', signSecret: '', clearSignSecret: false })
   Object.assign(form.wecom, { enabled: value.wecom.enabled, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false })
+  Object.assign(form.generic, { enabled: value.generic.enabled, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false, payloadFormat: value.generic.payloadFormat ?? 'GENERIC_JSON' })
   baseline.value = snapshot()
 }
 
@@ -336,7 +339,7 @@ async function retryDelivery(item: NotificationDelivery) {
 }
 
 function deliveryChannel(channel: string) {
-  return ({ email: '邮件', dingtalk: '钉钉', wecom: '企业微信' } as Record<string, string>)[channel] ?? channel
+  return ({ email: '邮件', dingtalk: '钉钉', wecom: '企业微信', generic: '通用 Webhook' } as Record<string, string>)[channel] ?? channel
 }
 
 function deliveryStatus(status: string) {
@@ -359,7 +362,7 @@ function navState(key: SectionKey) {
     if (!controllerUpdate.value) return ''
     return controllerUpdate.value.state === 'ERROR' || controllerUpdate.value.updateAvailable ? 'attention' : 'ready'
   }
-  if (!settings.value || !['email', 'dingtalk', 'wecom'].includes(key)) return ''
+  if (!settings.value || !['email', 'dingtalk', 'wecom', 'generic'].includes(key)) return ''
   const channel = settings.value[key as ChannelKey]
   if (!channel.enabled) return 'disabled'
   return channel.configured ? 'ready' : 'attention'
@@ -475,7 +478,7 @@ onBeforeRouteLeave(async () => {
 watch(activeSection, (section) => {
   if (section === 'updates' && !controllerUpdate.value && !updateLoading.value) loadControllerUpdate()
   if (section === 'tokens' && !apiTokens.value.length && !tokenLoading.value) loadApiTokens()
-  if ((section === 'dingtalk' || section === 'wecom' || section === 'email') && !deliveryLogs.value.length && !deliveryLoading.value) loadDeliveries()
+  if ((section === 'dingtalk' || section === 'wecom' || section === 'generic' || section === 'email') && !deliveryLogs.value.length && !deliveryLoading.value) loadDeliveries()
 })
 
 onMounted(() => {
@@ -609,18 +612,18 @@ onBeforeUnmount(() => {
             </el-form>
           </template>
 
-          <template v-else-if="activeSection === 'dingtalk' || activeSection === 'wecom'">
+          <template v-else-if="activeSection === 'dingtalk' || activeSection === 'wecom' || activeSection === 'generic'">
             <header class="settings-editor-head channel-editor-head">
               <span><MessageSquareText :size="18" /></span>
-              <div><h2>{{ activeSection === 'dingtalk' ? '钉钉机器人' : '企业微信机器人' }}</h2><p>{{ sourceText(settings[activeSection].source) }} · 群机器人通知</p></div>
-              <StatusBadge :status="channelStatus(settings[activeSection])" /><el-switch v-model="form[activeSection].enabled" :aria-label="`启用${activeSection === 'dingtalk' ? '钉钉' : '企业微信'}通知`" />
+              <div><h2>{{ activeSection === 'dingtalk' ? '钉钉机器人' : activeSection === 'wecom' ? '企业微信机器人' : '通用 Webhook' }}</h2><p>{{ sourceText(settings[activeSection].source) }} · {{ activeSection === 'generic' ? '可连接 Slack、Discord、飞书等服务' : '群机器人通知' }}</p></div>
+              <StatusBadge :status="channelStatus(settings[activeSection])" /><el-switch v-model="form[activeSection].enabled" :aria-label="`启用${activeSection === 'dingtalk' ? '钉钉' : activeSection === 'wecom' ? '企业微信' : '通用 Webhook'}通知`" />
             </header>
             <el-form class="settings-editor-body" @submit.prevent="save">
               <div class="setting-list">
                 <div class="setting-row">
                   <div class="setting-copy"><label :for="`${activeSection}-webhook`">Webhook 地址</label><p>地址将加密保存，读取设置时不会返回明文。</p></div>
                   <div class="setting-control secret-control">
-                    <el-input :id="`${activeSection}-webhook`" v-model="form[activeSection].webhookUrl" type="password" show-password autocomplete="new-password" :disabled="!settings.secretStorageReady" :placeholder="settings[activeSection].webhookConfigured ? '输入新地址以替换' : activeSection === 'dingtalk' ? 'https://oapi.dingtalk.com/...' : 'https://qyapi.weixin.qq.com/...'" />
+                    <el-input :id="`${activeSection}-webhook`" v-model="form[activeSection].webhookUrl" type="password" show-password autocomplete="new-password" :disabled="!settings.secretStorageReady" :placeholder="settings[activeSection].webhookConfigured ? '输入新地址以替换' : activeSection === 'dingtalk' ? 'https://oapi.dingtalk.com/...' : activeSection === 'wecom' ? 'https://qyapi.weixin.qq.com/...' : 'https://hooks.example.com/...'" />
                     <el-checkbox v-if="settings[activeSection].source === 'DATABASE'" v-model="form[activeSection].clearWebhook">清除已保存地址</el-checkbox>
                   </div>
                 </div>
@@ -631,6 +634,18 @@ onBeforeUnmount(() => {
                 <div v-if="activeSection === 'dingtalk'" class="setting-row">
                   <div class="setting-copy"><label for="dingtalk-sign-secret">加签密钥（可选）</label><p>{{ settings.dingtalk.signSecretConfigured ? '已保存加签密钥，留空不会覆盖。' : '从钉钉机器人安全设置复制加签密钥。' }}</p></div>
                   <div class="setting-control secret-control"><el-input id="dingtalk-sign-secret" v-model="form.dingtalk.signSecret" type="password" show-password autocomplete="new-password" :disabled="!settings.secretStorageReady" :placeholder="settings.dingtalk.signSecretConfigured ? '输入新密钥以替换' : 'SEC... '" /><el-checkbox v-if="settings.dingtalk.signSecretConfigured" v-model="form.dingtalk.clearSignSecret">清除已保存密钥</el-checkbox></div>
+                </div>
+                <div v-if="activeSection === 'generic'" class="setting-row">
+                  <div class="setting-copy"><label for="generic-format">消息格式</label><p>选择目标平台需要的请求体格式；纯文本会以 text/plain 发送。</p></div>
+                  <div class="setting-control">
+                    <el-select id="generic-format" v-model="form.generic.payloadFormat" style="width: min(100%, 320px)">
+                      <el-option label="通用 JSON（{ text }）" value="GENERIC_JSON" />
+                      <el-option label="Slack（{ text }）" value="SLACK" />
+                      <el-option label="Discord（{ content }）" value="DISCORD" />
+                      <el-option label="飞书 / Lark（文本消息）" value="LARK" />
+                      <el-option label="纯文本（text/plain）" value="PLAIN_TEXT" />
+                    </el-select>
+                  </div>
                 </div>
               </div>
               <div class="settings-section-actions"><p>{{ hasChanges ? '保存当前修改后可测试通道。' : '测试将发送一条验证消息。' }}</p><el-button :disabled="!canTest(activeSection)" :loading="testing[activeSection]" @click="testChannel(activeSection)"><Send :size="15" />发送测试消息</el-button></div>
@@ -679,6 +694,7 @@ onBeforeUnmount(() => {
                 <div><dt><KeyRound :size="15" />邮件凭据</dt><dd><strong>{{ sourceText(settings.email.source) }}</strong><span>{{ settings.email.passwordConfigured ? '密码已配置' : '未配置密码' }}</span></dd></div>
                 <div><dt><MessageSquareText :size="15" />钉钉 Webhook</dt><dd><strong>{{ sourceText(settings.dingtalk.source) }}</strong><span>{{ settings.dingtalk.webhookConfigured ? '地址已配置' : '未配置地址' }}{{ settings.dingtalk.keywordConfigured ? ' · 关键词已配置' : '' }}{{ settings.dingtalk.signSecretConfigured ? ' · 加签已配置' : '' }}</span></dd></div>
                 <div><dt><MessageSquareText :size="15" />企业微信 Webhook</dt><dd><strong>{{ sourceText(settings.wecom.source) }}</strong><span>{{ settings.wecom.webhookConfigured ? '地址已配置' : '未配置地址' }}</span></dd></div>
+                <div><dt><Send :size="15" />通用 Webhook</dt><dd><strong>{{ sourceText(settings.generic.source) }}</strong><span>{{ settings.generic.webhookConfigured ? `地址已配置 · ${settings.generic.payloadFormat ?? 'GENERIC_JSON'}` : '未配置地址' }}</span></dd></div>
               </dl>
               <div class="security-footnote"><ShieldCheck :size="16" /><p>设置接口只返回配置状态。保存和测试操作均写入审计日志。</p></div>
             </div>

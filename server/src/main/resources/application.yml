@@ -98,6 +98,8 @@ app:
     dingtalk-keyword: ${DINGTALK_KEYWORD:}
     dingtalk-sign-secret: ${DINGTALK_SIGN_SECRET:}
     wecom-webhook-url: ${WECOM_WEBHOOK_URL:}
+    generic-webhook-url: ${GENERIC_WEBHOOK_URL:}
+    generic-webhook-format: ${GENERIC_WEBHOOK_FORMAT:GENERIC_JSON}
 
 ---
 spring:

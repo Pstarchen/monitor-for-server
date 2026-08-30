@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 public final class DeviceDtos {
@@ -17,10 +18,11 @@ public final class DeviceDtos {
             @Size(max = 64) String primaryIp,
             boolean ddnsEnabled,
             Long ddnsConfigId,
-            boolean publicVisible
+            boolean publicVisible,
+            @Size(max = 20) List<@Size(max = 40) String> tags
     ) {
         public CreateRequest(String name, String location, String groupName, String primaryIp) {
-            this(name, location, groupName, primaryIp, false, null, true);
+            this(name, location, groupName, primaryIp, false, null, true, List.of());
         }
     }
 
@@ -31,19 +33,23 @@ public final class DeviceDtos {
             @Size(max = 64) String primaryIp,
             boolean ddnsEnabled,
             Long ddnsConfigId,
-            boolean publicVisible
+            boolean publicVisible,
+            @Size(max = 20) List<@Size(max = 40) String> tags
     ) {
         public UpdateRequest(String name, String location, String groupName, String primaryIp) {
-            this(name, location, groupName, primaryIp, false, null, true);
+            this(name, location, groupName, primaryIp, false, null, true, List.of());
         }
         public UpdateRequest(String name, String location, String groupName, String primaryIp, boolean ddnsEnabled, Long ddnsConfigId) {
-            this(name, location, groupName, primaryIp, ddnsEnabled, ddnsConfigId, true);
+            this(name, location, groupName, primaryIp, ddnsEnabled, ddnsConfigId, true, List.of());
+        }
+        public UpdateRequest(String name, String location, String groupName, String primaryIp, boolean ddnsEnabled, Long ddnsConfigId, boolean publicVisible) {
+            this(name, location, groupName, primaryIp, ddnsEnabled, ddnsConfigId, publicVisible, List.of());
         }
     }
 
     public record View(
             String id, String name, String hostname, String os, String architecture,
-            String primaryIp, String location, String groupName, boolean ddnsEnabled, Long ddnsConfigId, boolean publicVisible, Device.Status status,
+            String primaryIp, String location, String groupName, List<String> tags, boolean ddnsEnabled, Long ddnsConfigId, boolean publicVisible, Device.Status status,
             Instant lastSeenAt, String agentKeyPrefix, boolean controllerManaged, Instant createdAt, Map<String, Object> hardware, MetricView latest
     ) {}
 

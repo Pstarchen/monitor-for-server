@@ -45,6 +45,9 @@ public class SettingService {
     private static final String WECOM_WEBHOOK = "notification.wecom.webhook";
     private static final String WECOM_KEYWORD = "notification.wecom.keyword";
     private static final String WECOM_SIGN_SECRET = "notification.wecom.sign_secret";
+    private static final String GENERIC_ENABLED = "notification.generic.enabled";
+    private static final String GENERIC_WEBHOOK = "notification.generic.webhook";
+    private static final String GENERIC_FORMAT = "notification.generic.format";
 
     private final SystemSettingRepository settings;
     private final AppProperties properties;
@@ -67,7 +70,8 @@ public class SettingService {
                 secretCodec.available(),
                 emailView(notification.email()),
                 webhookView(notification.dingtalk()),
-                webhookView(notification.wecom())
+                webhookView(notification.wecom()),
+                webhookView(notification.generic())
         );
     }
 
@@ -87,6 +91,8 @@ public class SettingService {
         updateEmail(request.email());
         updateWebhook(DINGTALK_ENABLED, DINGTALK_WEBHOOK, DINGTALK_KEYWORD, DINGTALK_SIGN_SECRET, request.dingtalk());
         updateWebhook(WECOM_ENABLED, WECOM_WEBHOOK, WECOM_KEYWORD, WECOM_SIGN_SECRET, request.wecom());
+        updateWebhook(GENERIC_ENABLED, GENERIC_WEBHOOK, null, null, request.generic());
+        save(GENERIC_FORMAT, normalizeWebhookFormat(request.generic().payloadFormat()));
         audit.record("SETTINGS_UPDATE", "system", "更新系统策略与通知通道配置");
         return get();
     }
@@ -127,7 +133,13 @@ public class SettingService {
                 source(WECOM_WEBHOOK, fallback.getWecomWebhookUrl()),
                 stringValue(WECOM_KEYWORD, ""), secretValue(WECOM_SIGN_SECRET, "")
         );
-        return new NotificationRuntime(email, dingtalk, wecom);
+        WebhookRuntime generic = new WebhookRuntime(
+                booleanValue(GENERIC_ENABLED, configured(fallback.getGenericWebhookUrl())),
+                secretValue(GENERIC_WEBHOOK, fallback.getGenericWebhookUrl()),
+                source(GENERIC_WEBHOOK, fallback.getGenericWebhookUrl()),
+                "", "", normalizeWebhookFormat(stringValue(GENERIC_FORMAT, fallback.getGenericWebhookFormat()))
+        );
+        return new NotificationRuntime(email, dingtalk, wecom, generic);
     }
 
     public int retentionDays() { return intValue(RETENTION_DAYS, properties.getMetricRetentionDays()); }
@@ -175,6 +187,7 @@ public class SettingService {
     }
 
     private void updateSecret(String key, String replacement, boolean clear) {
+        if (key == null || key.isBlank()) return;
         if (clear) {
             if (settings.existsById(key)) settings.deleteById(key);
             return;
@@ -187,7 +200,7 @@ public class SettingService {
     }
 
     private void validate(Update request) {
-        if (request == null || request.email() == null || request.dingtalk() == null || request.wecom() == null) {
+        if (request == null || request.email() == null || request.dingtalk() == null || request.wecom() == null || request.generic() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "设置内容不完整");
         }
         if (request.metricRetentionDays() < 1 || request.metricRetentionDays() > 3650
@@ -223,6 +236,7 @@ public class SettingService {
         if (request.dingtalk().signSecret() != null && request.dingtalk().signSecret().length() > 255) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "钉钉加签密钥长度无效");
         }
+        normalizeWebhookFormat(request.generic().payloadFormat());
     }
 
     private void validateBaseUrl(String value) {
@@ -272,6 +286,19 @@ public class SettingService {
     }
 
     private void validateWebhook(String key, String value) {
+        if (GENERIC_WEBHOOK.equals(key)) {
+            try {
+                URI uri = URI.create(value.trim());
+                boolean localHttp = "http".equalsIgnoreCase(uri.getScheme())
+                        && Set.of("localhost", "127.0.0.1", "::1").contains(uri.getHost());
+                boolean insecureHttp = "http".equalsIgnoreCase(uri.getScheme()) && properties.isAllowInsecureHttp();
+                if (uri.getHost() == null || (!"https".equalsIgnoreCase(uri.getScheme()) && !insecureHttp && !localHttp)
+                        || uri.getUserInfo() != null || uri.getFragment() != null) throw new IllegalArgumentException();
+            } catch (IllegalArgumentException exception) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "通用 Webhook 地址必须是 HTTPS 地址");
+            }
+            return;
+        }
         String requiredHost = key.equals(DINGTALK_WEBHOOK) ? "oapi.dingtalk.com" : "qyapi.weixin.qq.com";
         try {
             URI uri = URI.create(value.trim());
@@ -293,7 +320,7 @@ public class SettingService {
 
     private WebhookView webhookView(WebhookRuntime webhook) {
         return new WebhookView(webhook.enabled(), configured(webhook.url()), webhook.source(), configured(webhook.url()),
-                webhook.keyword(), configured(webhook.keyword()), configured(webhook.signSecret()));
+                webhook.keyword(), configured(webhook.keyword()), configured(webhook.signSecret()), webhook.payloadFormat());
     }
 
     private void save(String key, int value) { save(key, Integer.toString(value)); }
@@ -333,39 +360,64 @@ public class SettingService {
     private boolean configured(String value) { return !blank(value); }
     private boolean blank(String value) { return value == null || value.isBlank(); }
 
+    private String normalizeWebhookFormat(String value) {
+        String format = blank(value) ? "GENERIC_JSON" : value.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!Set.of("GENERIC_JSON", "SLACK", "DISCORD", "LARK", "PLAIN_TEXT").contains(format)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "通用 Webhook 消息格式无效");
+        }
+        return format;
+    }
+
     public record View(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                        String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, boolean secretStorageReady,
-                       EmailView email, WebhookView dingtalk, WebhookView wecom) {}
+                       EmailView email, WebhookView dingtalk, WebhookView wecom, WebhookView generic) {}
     public record EmailView(boolean enabled, boolean configured, String source, String host, int port,
                             String username, String from, String recipients, boolean auth, boolean startTls,
                             boolean passwordConfigured) {}
     public record WebhookView(boolean enabled, boolean configured, String source, boolean webhookConfigured,
-                              String keyword, boolean keywordConfigured, boolean signSecretConfigured) {}
+                              String keyword, boolean keywordConfigured, boolean signSecretConfigured,
+                              String payloadFormat) {}
     public record Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                          String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, EmailUpdate email,
-                         WebhookUpdate dingtalk, WebhookUpdate wecom) {
+                         WebhookUpdate dingtalk, WebhookUpdate wecom, WebhookUpdate generic) {
         public Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                       String siteName, String siteIconUrl, String publicBaseUrl, String timezone, EmailUpdate email,
                       WebhookUpdate dingtalk, WebhookUpdate wecom) {
-            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, false, email, dingtalk, wecom);
+            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, false, email, dingtalk, wecom, new WebhookUpdate(false, null, false));
+        }
+        public Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
+                      String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, EmailUpdate email,
+                      WebhookUpdate dingtalk, WebhookUpdate wecom) {
+            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, enableMcp, email, dingtalk, wecom, new WebhookUpdate(false, null, false));
         }
     }
     public record EmailUpdate(boolean enabled, String host, int port, String username, String password,
                               boolean clearPassword, String from, String recipients, boolean auth, boolean startTls) {}
     public record WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook, String keyword,
-                                String signSecret, boolean clearSignSecret) {
+                                String signSecret, boolean clearSignSecret, String payloadFormat) {
         public WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook) {
-            this(enabled, webhookUrl, clearWebhook, null, null, false);
+            this(enabled, webhookUrl, clearWebhook, null, null, false, "GENERIC_JSON");
+        }
+        public WebhookUpdate(boolean enabled, String webhookUrl, boolean clearWebhook, String keyword,
+                             String signSecret, boolean clearSignSecret) {
+            this(enabled, webhookUrl, clearWebhook, keyword, signSecret, clearSignSecret, "GENERIC_JSON");
         }
     }
-    public record NotificationRuntime(EmailRuntime email, WebhookRuntime dingtalk, WebhookRuntime wecom) {}
+    public record NotificationRuntime(EmailRuntime email, WebhookRuntime dingtalk, WebhookRuntime wecom, WebhookRuntime generic) {
+        public NotificationRuntime(EmailRuntime email, WebhookRuntime dingtalk, WebhookRuntime wecom) {
+            this(email, dingtalk, wecom, new WebhookRuntime(false, "", "NONE"));
+        }
+    }
     public record AgentBootstrapView(String publicBaseUrl, int defaultCollectionSeconds) {}
     public record PublicBrandView(String siteName, String siteIconUrl) {}
     public record EmailRuntime(boolean enabled, String host, int port, String username, String password,
                                String from, String recipients, boolean auth, boolean startTls, String source) {}
-    public record WebhookRuntime(boolean enabled, String url, String source, String keyword, String signSecret) {
+    public record WebhookRuntime(boolean enabled, String url, String source, String keyword, String signSecret, String payloadFormat) {
         public WebhookRuntime(boolean enabled, String url, String source) {
-            this(enabled, url, source, "", "");
+            this(enabled, url, source, "", "", "GENERIC_JSON");
+        }
+        public WebhookRuntime(boolean enabled, String url, String source, String keyword, String signSecret) {
+            this(enabled, url, source, keyword, signSecret, "GENERIC_JSON");
         }
     }
 }
