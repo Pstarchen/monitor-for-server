@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity, BellRing, ChevronDown, CircleGauge, ClipboardList, Globe2, Github, LogOut,
+  Activity, BarChart3, BellRing, ChevronDown, CircleGauge, ClipboardList, Globe2, Github, LogOut,
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
@@ -30,6 +30,7 @@ const navigation = [
   { label: '告警事件', path: '/alerts', icon: BellRing },
   { label: '告警规则', path: '/alert-rules', icon: SlidersHorizontal },
   { label: '服务监控', path: '/services', icon: Globe2 },
+  { label: '运行报告', path: '/reports', icon: BarChart3 },
   { label: '动态域名解析', path: '/ddns', icon: Globe2 },
   { label: '任务执行', path: '/tasks', icon: Terminal },
   { label: 'API Token', path: '/tokens', icon: KeyRound },

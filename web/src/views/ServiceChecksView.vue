@@ -30,7 +30,7 @@ const historyCheck = ref<ServiceCheck | null>(null)
 const history = ref<ServiceCheckResult[]>([])
 const heartbeatDialog = ref(false)
 const heartbeatCredential = ref<ServiceCheck | null>(null)
-const form = reactive({ name: '', target: '', type: 'HTTP_GET' as ServiceCheckType, intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14 })
+const form = reactive({ name: '', target: '', type: 'HTTP_GET' as ServiceCheckType, intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null as number | null, bodyContains: '' })
 const labels: Record<ServiceCheckType, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', HEARTBEAT: '外部心跳' }
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
 const historyLabels = computed(() => history.value.map((item) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.checkedAt))))
@@ -50,13 +50,13 @@ async function load(background = false) {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { name: '', target: '', type: 'HTTP_GET', intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14 })
+  Object.assign(form, { name: '', target: '', type: 'HTTP_GET', intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null, bodyContains: '' })
   dialog.value = true
 }
 
 function openEdit(check: ServiceCheck) {
   editingId.value = check.id
-  Object.assign(form, { name: check.name, target: check.target, type: check.type, intervalSeconds: check.intervalSeconds, timeoutMs: check.timeoutMs, publicVisible: check.publicVisible, sortOrder: check.sortOrder, enabled: check.enabled, failureThreshold: check.failureThreshold, latencyThresholdMs: check.latencyThresholdMs, certificateThresholdDays: check.certificateThresholdDays })
+  Object.assign(form, { name: check.name, target: check.target, type: check.type, intervalSeconds: check.intervalSeconds, timeoutMs: check.timeoutMs, publicVisible: check.publicVisible, sortOrder: check.sortOrder, enabled: check.enabled, failureThreshold: check.failureThreshold, latencyThresholdMs: check.latencyThresholdMs, certificateThresholdDays: check.certificateThresholdDays, expectedStatus: check.expectedStatus, bodyContains: check.bodyContains ?? '' })
   dialog.value = true
 }
 
@@ -178,6 +178,8 @@ useVisibilityPolling(() => load(true))
           <span class="availability-detail" :data-state="check.enabled ? 'success' : 'warning'"><CheckCircle2 v-if="check.enabled" :size="12" /><XCircle v-else :size="12" />{{ check.enabled ? '自动探测中' : '已暂停' }}</span>
           <span class="availability-detail">失败 {{ check.failureThreshold }} 次</span>
           <span v-if="check.latencyThresholdMs" class="availability-detail">延迟 ≥ {{ check.latencyThresholdMs }} ms</span>
+          <span v-if="check.expectedStatus" class="availability-detail">状态码 = {{ check.expectedStatus }}</span>
+          <span v-if="check.bodyContains" class="availability-detail">包含 “{{ check.bodyContains }}”</span>
           <span v-if="check.type === 'HEARTBEAT'" class="availability-detail">超时判定为 {{ Math.max(30, check.intervalSeconds * 2) }} 秒</span>
         </template>
       </ServiceAvailabilityCard>
@@ -197,6 +199,10 @@ useVisibilityPolling(() => load(true))
           <el-form-item label="连续失败告警"><el-input-number v-model="form.failureThreshold" :min="1" :max="20" /><span class="field-suffix">次</span></el-form-item>
           <el-form-item label="延迟告警阈值"><el-input-number v-model="form.latencyThresholdMs" :min="0" :max="30000" :step="100" /><span class="field-suffix">毫秒，0 为关闭</span></el-form-item>
           <el-form-item label="证书到期告警"><el-input-number v-model="form.certificateThresholdDays" :min="0" :max="3650" /><span class="field-suffix">天，0 为关闭</span></el-form-item>
+          <template v-if="form.type === 'HTTP_GET'">
+            <el-form-item label="期望状态码"><el-input-number v-model="form.expectedStatus" :min="100" :max="599" :step="1" controls-position="right" /><span class="field-suffix">留空表示接受 2xx/3xx</span></el-form-item>
+            <el-form-item label="响应体包含"><el-input v-model="form.bodyContains" maxlength="200" placeholder="例如：status:ok" /><span class="field-suffix">可选，区分大小写</span></el-form-item>
+          </template>
         </div>
         <div class="form-inline-options"><el-checkbox v-model="form.publicVisible">在公开状态页展示</el-checkbox><el-checkbox v-model="form.enabled">启用自动探测</el-checkbox></div>
         <p class="form-help"><Wifi :size="14" />HTTPS 会记录证书到期时间；HTTP 会记录响应状态码；Ping 与 TCPing 会记录连接延迟；外部心跳用于 cron、CI 等任务的存活监控。告警会在首次达到阈值时发送，恢复后再发送一条恢复通知。</p>

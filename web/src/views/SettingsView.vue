@@ -21,7 +21,7 @@ import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
 import { createMobileBindingQrCode, resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
 import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controller-update'
 import { useAuthStore } from '@/stores/auth'
-import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, Settings, WebhookSettings } from '@/types'
+import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, NotificationDelivery, Settings, WebhookSettings } from '@/types'
 
 type ChannelKey = 'email' | 'dingtalk' | 'wecom'
 type SectionKey = 'general' | 'monitoring' | ChannelKey | 'security' | 'tokens' | 'updates'
@@ -92,6 +92,9 @@ const tokenCopied = ref(false)
 const tokenQrCode = ref('')
 const tokenQrCodeError = ref('')
 const tokenForm = reactive(createDefaultApiTokenForm())
+const deliveryLogs = ref<NotificationDelivery[]>([])
+const deliveryLoading = ref(false)
+const retryingDelivery = ref<number | null>(null)
 const auth = useAuthStore()
 const canAdmin = computed(() => auth.user?.role === 'ADMIN')
 const mobileBindingBaseUrl = computed(() => resolveMobileBindingBaseUrl(settings.value?.publicBaseUrl, window.location.origin))
@@ -303,6 +306,41 @@ async function testChannel(channel: ChannelKey) {
   } finally {
     testing[channel] = false
   }
+  await loadDeliveries()
+}
+
+async function loadDeliveries() {
+  if (!canAdmin.value) return
+  deliveryLoading.value = true
+  try {
+    deliveryLogs.value = (await api.get<NotificationDelivery[]>('/settings/notifications/deliveries')).data
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    deliveryLoading.value = false
+  }
+}
+
+async function retryDelivery(item: NotificationDelivery) {
+  retryingDelivery.value = item.id
+  try {
+    const updated = (await api.post<NotificationDelivery>(`/settings/notifications/deliveries/${item.id}/retry`)).data
+    deliveryLogs.value = deliveryLogs.value.map((entry) => entry.id === updated.id ? updated : entry)
+    ElMessage.success('通知已重试')
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+    await loadDeliveries()
+  } finally {
+    retryingDelivery.value = null
+  }
+}
+
+function deliveryChannel(channel: string) {
+  return ({ email: '邮件', dingtalk: '钉钉', wecom: '企业微信' } as Record<string, string>)[channel] ?? channel
+}
+
+function deliveryStatus(status: string) {
+  return status === 'SUCCESS' ? 'ONLINE' : status === 'FAILED' ? 'CRITICAL' : 'PENDING'
 }
 
 function channelStatus(channel: { enabled: boolean; configured: boolean }) {
@@ -437,12 +475,14 @@ onBeforeRouteLeave(async () => {
 watch(activeSection, (section) => {
   if (section === 'updates' && !controllerUpdate.value && !updateLoading.value) loadControllerUpdate()
   if (section === 'tokens' && !apiTokens.value.length && !tokenLoading.value) loadApiTokens()
+  if ((section === 'dingtalk' || section === 'wecom' || section === 'email') && !deliveryLogs.value.length && !deliveryLoading.value) loadDeliveries()
 })
 
 onMounted(() => {
   load()
   loadApiTokens()
   loadControllerUpdate()
+  loadDeliveries()
 })
 onBeforeUnmount(() => {
   if (updatePollTimer) clearTimeout(updatePollTimer)
@@ -595,6 +635,16 @@ onBeforeUnmount(() => {
               </div>
               <div class="settings-section-actions"><p>{{ hasChanges ? '保存当前修改后可测试通道。' : '测试将发送一条验证消息。' }}</p><el-button :disabled="!canTest(activeSection)" :loading="testing[activeSection]" @click="testChannel(activeSection)"><Send :size="15" />发送测试消息</el-button></div>
             </el-form>
+            <section class="notification-delivery-panel" aria-labelledby="notification-delivery-title">
+              <div class="notification-delivery-head"><div><h3 id="notification-delivery-title">最近投递记录</h3><p>显示服务器实际收到的发送结果；失败项可以使用当前已保存配置重试。</p></div><el-button text :loading="deliveryLoading" @click="loadDeliveries"><RefreshCw :size="14" />刷新记录</el-button></div>
+              <LoadingState v-if="deliveryLoading && !deliveryLogs.length" />
+              <div v-else-if="deliveryLogs.filter((item) => item.channel === activeSection).length" class="notification-delivery-list">
+                <div v-for="item in deliveryLogs.filter((entry) => entry.channel === activeSection).slice(0, 20)" :key="item.id" class="notification-delivery-row">
+                  <StatusBadge :status="deliveryStatus(item.status)" /><strong>{{ deliveryChannel(item.channel) }}</strong><time>{{ dateTime(item.createdAt) }}</time><span class="notification-delivery-message" :title="item.error || item.message">{{ item.error || (item.status === 'SUCCESS' ? '已收到通道成功响应' : item.status === 'SKIPPED' ? '通道未启用，已跳过' : '发送失败') }}</span><el-button v-if="item.status === 'FAILED'" text size="small" :loading="retryingDelivery === item.id" @click="retryDelivery(item)">重试</el-button>
+                </div>
+              </div>
+              <p v-else class="notification-delivery-empty">暂无 {{ deliveryChannel(activeSection) }} 投递记录。</p>
+            </section>
           </template>
 
           <template v-else-if="activeSection === 'tokens'">

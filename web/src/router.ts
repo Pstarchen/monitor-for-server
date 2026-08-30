@@ -21,6 +21,7 @@ const router = createRouter({
         { path: 'alerts', name: 'alerts', component: () => import('@/views/AlertsView.vue') },
         { path: 'alert-rules', name: 'alert-rules', component: () => import('@/views/AlertRulesView.vue') },
         { path: 'services', name: 'services', component: () => import('@/views/ServiceChecksView.vue') },
+        { path: 'reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
         { path: 'ddns', name: 'ddns', component: () => import('@/views/DdnsView.vue') },
         { path: 'tasks', name: 'tasks', component: () => import('@/views/AgentTasksView.vue') },
         { path: 'tokens', name: 'tokens', component: () => import('@/views/ApiTokensView.vue') },

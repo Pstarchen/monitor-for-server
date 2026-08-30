@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.*;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -51,9 +52,20 @@ public class ServiceProbe {
                 .header("User-Agent", "Guanlan-Monitor-ServiceProbe/1.0")
                 .GET()
                 .build();
-        HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
+        HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         int status = response.statusCode();
-        return new Result(status >= 200 && status < 400, 0, status, status >= 400 ? "HTTP " + status : null, certificateExpiresAt(response));
+        String body;
+        try (InputStream stream = response.body()) {
+            body = new String(stream.readNBytes(64 * 1024), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        boolean statusOk = check.getExpectedStatus() == null
+                ? status >= 200 && status < 400
+                : status == check.getExpectedStatus();
+        boolean bodyOk = check.getBodyContains() == null || check.getBodyContains().isBlank()
+                || body.contains(check.getBodyContains());
+        String error = !statusOk ? "HTTP 状态码 " + status + "（期望 " + (check.getExpectedStatus() == null ? "2xx/3xx" : check.getExpectedStatus()) + "）"
+                : !bodyOk ? "响应体未包含期望文本" : null;
+        return new Result(statusOk && bodyOk, 0, status, error, certificateExpiresAt(response));
     }
 
     private Result ping(ServiceCheck check) throws IOException {

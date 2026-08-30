@@ -177,6 +177,9 @@ public class ServiceMonitorService {
             } catch (IllegalArgumentException exception) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "HTTP 目标必须是有效的 http/https 地址");
             }
+            if (request.expectedStatus() != null && (request.expectedStatus() < 100 || request.expectedStatus() > 599)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "期望 HTTP 状态码必须在 100-599 之间");
+            }
         }
         if (request.type() == ServiceCheck.Type.TCPING) {
             if (!target.matches("^\\[?[A-Za-z0-9:.%-]+\\]?:[0-9]{1,5}$")) {
@@ -205,6 +208,9 @@ public class ServiceMonitorService {
         check.setFailureThreshold(request.failureThreshold() == null ? 1 : request.failureThreshold());
         check.setLatencyThresholdMs(request.latencyThresholdMs() == null ? 0 : request.latencyThresholdMs());
         check.setCertificateThresholdDays(request.certificateThresholdDays() == null ? 14 : request.certificateThresholdDays());
+        check.setExpectedStatus(request.type() == ServiceCheck.Type.HTTP_GET ? request.expectedStatus() : null);
+        check.setBodyContains(request.type() == ServiceCheck.Type.HTTP_GET && request.bodyContains() != null && !request.bodyContains().isBlank()
+                ? request.bodyContains().trim() : null);
         if (request.type() != ServiceCheck.Type.HEARTBEAT) {
             check.setHeartbeatTokenHash(null);
             check.setHeartbeatTokenPrefix(null);
@@ -222,7 +228,7 @@ public class ServiceMonitorService {
     }
 
     private ServiceDtos.View view(ServiceCheck check, String rawToken) {
-        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check), availabilityPercent(check), historyViews(check), check.getHeartbeatTokenPrefix(), rawToken, check.getType() == ServiceCheck.Type.HEARTBEAT ? "/api/heartbeat/" + check.getId() : null);
+        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.getExpectedStatus(), check.getBodyContains(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check), availabilityPercent(check), historyViews(check), check.getHeartbeatTokenPrefix(), rawToken, check.getType() == ServiceCheck.Type.HEARTBEAT ? "/api/heartbeat/" + check.getId() : null);
     }
 
     private ServiceDtos.PublicView publicView(ServiceCheck check) {

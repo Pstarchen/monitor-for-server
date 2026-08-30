@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 
 public interface AlertEventRepository extends JpaRepository<AlertEvent, Long> {
     List<AlertEvent> findAllByOrderByStartedAtDesc(Pageable pageable);
@@ -15,4 +16,5 @@ public interface AlertEventRepository extends JpaRepository<AlertEvent, Long> {
     long countByStatusIn(Collection<AlertEvent.Status> statuses);
     long countByDeviceIdInAndStatusIn(Collection<String> deviceIds, Collection<AlertEvent.Status> statuses);
     long countByRuleId(Long ruleId);
+    List<AlertEvent> findByStartedAtBetweenOrderByStartedAtDesc(Instant from, Instant to);
 }

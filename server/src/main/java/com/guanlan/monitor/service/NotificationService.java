@@ -2,6 +2,10 @@ package com.guanlan.monitor.service;
 
 import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.domain.AlertEvent;
+import com.guanlan.monitor.domain.NotificationDelivery;
+import com.guanlan.monitor.repository.NotificationDeliveryRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -28,11 +32,20 @@ public class NotificationService {
     private final SettingService settings;
     private final AuditService audit;
     private final RestClient restClient;
+    private final NotificationDeliveryRepository deliveries;
 
+    /** Kept for isolated unit tests that do not start a JPA context. */
     public NotificationService(SettingService settings, AuditService audit, RestClient.Builder builder) {
+        this(settings, audit, builder, null);
+    }
+
+    @Autowired
+    public NotificationService(SettingService settings, AuditService audit, RestClient.Builder builder,
+                               NotificationDeliveryRepository deliveries) {
         this.settings = settings;
         this.audit = audit;
         this.restClient = builder.requestFactory(requestFactory()).build();
+        this.deliveries = deliveries;
     }
 
     @Async
@@ -43,9 +56,9 @@ public class NotificationService {
     @Async
     public void sendMessage(String text) {
         SettingService.NotificationRuntime config = settings.notificationRuntime();
-        runSafely("邮件", () -> sendEmail(config.email(), text));
-        runSafely("钉钉", () -> sendWebhook(config.dingtalk(), text, "钉钉"));
-        runSafely("企业微信", () -> sendWebhook(config.wecom(), text, "企业微信"));
+        deliver("email", "邮件", text, config.email().enabled(), () -> sendEmail(config.email(), text));
+        deliver("dingtalk", "钉钉", text, config.dingtalk().enabled(), () -> sendWebhook(config.dingtalk(), text, "钉钉"));
+        deliver("wecom", "企业微信", text, config.wecom().enabled(), () -> sendWebhook(config.wecom(), text, "企业微信"));
     }
 
     public TestResult test(String channel) {
@@ -56,15 +69,15 @@ public class NotificationService {
             switch (normalized) {
                 case "email" -> {
                     requireEnabled(config.email().enabled());
-                    sendEmail(config.email(), text);
+                    deliverSync("email", "邮件", text, () -> sendEmail(config.email(), text));
                 }
                 case "dingtalk" -> {
                     requireEnabled(config.dingtalk().enabled());
-                    sendWebhook(config.dingtalk(), text, "钉钉");
+                    deliverSync("dingtalk", "钉钉", text, () -> sendWebhook(config.dingtalk(), text, "钉钉"));
                 }
                 case "wecom" -> {
                     requireEnabled(config.wecom().enabled());
-                    sendWebhook(config.wecom(), text, "企业微信");
+                    deliverSync("wecom", "企业微信", text, () -> sendWebhook(config.wecom(), text, "企业微信"));
                 }
                 default -> throw new ApiException(HttpStatus.NOT_FOUND, "通知通道不存在");
             }
@@ -76,6 +89,39 @@ public class NotificationService {
         }
         audit.record("NOTIFICATION_TEST", "channel:" + normalized, "测试通知通道");
         return new TestResult(normalized, "测试通知已发送");
+    }
+
+    public java.util.List<NotificationDeliveryView> listDeliveries(int limit) {
+        if (deliveries == null) return java.util.List.of();
+        return deliveries.findAllByOrderByCreatedAtDesc(PageRequest.of(0, Math.min(Math.max(limit, 1), 200))).stream()
+                .map(item -> new NotificationDeliveryView(item.getId(), item.getChannel(), item.getStatus().name(), item.getMessage(), item.getError(), item.getAttempts(), item.getCreatedAt(), item.getFinishedAt()))
+                .toList();
+    }
+
+    public NotificationDeliveryView retry(long id) {
+        if (deliveries == null) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "通知投递记录不可用");
+        NotificationDelivery delivery = deliveries.findById(id)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "通知投递记录不存在"));
+        SettingService.NotificationRuntime config = settings.notificationRuntime();
+        String channel = delivery.getChannel();
+        Runnable action = switch (channel) {
+            case "email" -> {
+                requireEnabled(config.email().enabled());
+                yield () -> sendEmail(config.email(), delivery.getMessage());
+            }
+            case "dingtalk" -> {
+                requireEnabled(config.dingtalk().enabled());
+                yield () -> sendWebhook(config.dingtalk(), delivery.getMessage(), "钉钉");
+            }
+            case "wecom" -> {
+                requireEnabled(config.wecom().enabled());
+                yield () -> sendWebhook(config.wecom(), delivery.getMessage(), "企业微信");
+            }
+            default -> throw new ApiException(HttpStatus.BAD_REQUEST, "通知通道不存在");
+        };
+        deliverSync(delivery, channel, channel, action);
+        audit.record("NOTIFICATION_RETRY", "delivery:" + id, "重试通知投递");
+        return new NotificationDeliveryView(delivery.getId(), delivery.getChannel(), delivery.getStatus().name(), delivery.getMessage(), delivery.getError(), delivery.getAttempts(), delivery.getCreatedAt(), delivery.getFinishedAt());
     }
 
     private void sendEmail(SettingService.EmailRuntime config, String text) {
@@ -155,14 +201,57 @@ public class NotificationService {
         return normalized.length() > 160 ? normalized.substring(0, 160) : normalized;
     }
 
-    private void runSafely(String channel, Runnable action) {
+    private void deliver(String channelKey, String channel, String text, boolean enabled, Runnable action) {
+        if (!enabled) {
+            saveDelivery(new NotificationDelivery(channelKey, text), NotificationDelivery.Status.SKIPPED, null);
+            return;
+        }
         try {
             action.run();
+            saveDelivery(new NotificationDelivery(channelKey, text), NotificationDelivery.Status.SUCCESS, null);
         } catch (ApiException exception) {
+            saveDelivery(new NotificationDelivery(channelKey, text), NotificationDelivery.Status.FAILED, safeProviderMessage(exception.getMessage()));
             log.warn("{} notification failed: {}", channel, exception.getMessage());
         } catch (Exception exception) {
+            saveDelivery(new NotificationDelivery(channelKey, text), NotificationDelivery.Status.FAILED, exception.getClass().getSimpleName());
             log.warn("{} notification failed: {}", channel, exception.getClass().getSimpleName());
         }
+    }
+
+    private void deliverSync(String channelKey, String channel, String text, Runnable action) {
+        NotificationDelivery delivery = new NotificationDelivery(channelKey, text);
+        try {
+            action.run();
+            saveDelivery(delivery, NotificationDelivery.Status.SUCCESS, null);
+        } catch (ApiException exception) {
+            saveDelivery(delivery, NotificationDelivery.Status.FAILED, safeProviderMessage(exception.getMessage()));
+            throw exception;
+        } catch (Exception exception) {
+            saveDelivery(delivery, NotificationDelivery.Status.FAILED, exception.getClass().getSimpleName());
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "通知发送失败，请检查通道配置和网络连通性");
+        }
+    }
+
+    private void deliverSync(NotificationDelivery delivery, String channelKey, String channel, Runnable action) {
+        delivery.setAttempts(delivery.getAttempts() + 1);
+        try {
+            action.run();
+            saveDelivery(delivery, NotificationDelivery.Status.SUCCESS, null);
+        } catch (ApiException exception) {
+            saveDelivery(delivery, NotificationDelivery.Status.FAILED, safeProviderMessage(exception.getMessage()));
+            throw exception;
+        } catch (Exception exception) {
+            saveDelivery(delivery, NotificationDelivery.Status.FAILED, exception.getClass().getSimpleName());
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "通知重试失败，请检查通道配置和网络连通性");
+        }
+    }
+
+    private void saveDelivery(NotificationDelivery delivery, NotificationDelivery.Status status, String error) {
+        if (deliveries == null) return;
+        delivery.setStatus(status);
+        delivery.setError(error);
+        delivery.setFinishedAt(java.time.Instant.now());
+        deliveries.save(delivery);
     }
 
     private void requireEnabled(boolean enabled) {
@@ -184,5 +273,7 @@ public class NotificationService {
     }
 
     public record TestResult(String channel, String message) {}
+    public record NotificationDeliveryView(Long id, String channel, String status, String message, String error,
+                                           int attempts, java.time.Instant createdAt, java.time.Instant finishedAt) {}
     private record WebhookResponse(Integer errcode, String errmsg) {}
 }

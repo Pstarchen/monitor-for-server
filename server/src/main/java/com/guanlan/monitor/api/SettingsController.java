@@ -65,4 +65,12 @@ public class SettingsController {
     @PostMapping("/notifications/{channel}/test")
     @PreAuthorize("hasRole('ADMIN')")
     NotificationService.TestResult test(@PathVariable String channel) { return notifications.test(channel); }
+
+    @GetMapping("/notifications/deliveries")
+    @PreAuthorize("hasRole('ADMIN')")
+    java.util.List<NotificationService.NotificationDeliveryView> deliveries() { return notifications.listDeliveries(100); }
+
+    @PostMapping("/notifications/deliveries/{id}/retry")
+    @PreAuthorize("hasRole('ADMIN')")
+    NotificationService.NotificationDeliveryView retry(@PathVariable long id) { return notifications.retry(id); }
 }

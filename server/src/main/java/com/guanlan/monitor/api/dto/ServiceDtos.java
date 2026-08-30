@@ -24,8 +24,17 @@ public final class ServiceDtos {
             boolean enabled,
             @Min(1) @Max(20) Integer failureThreshold,
             @Min(0) @Max(30000) Integer latencyThresholdMs,
-            @Min(0) @Max(3650) Integer certificateThresholdDays
-    ) {}
+            @Min(0) @Max(3650) Integer certificateThresholdDays,
+            @Min(100) @Max(599) Integer expectedStatus,
+            @Size(max = 200) String bodyContains
+    ) {
+        public Request(String name, String target, ServiceCheck.Type type, int intervalSeconds, int timeoutMs,
+                       boolean publicVisible, int sortOrder, boolean enabled, Integer failureThreshold,
+                       Integer latencyThresholdMs, Integer certificateThresholdDays) {
+            this(name, target, type, intervalSeconds, timeoutMs, publicVisible, sortOrder, enabled,
+                    failureThreshold, latencyThresholdMs, certificateThresholdDays, null, null);
+        }
+    }
 
     public record ResultView(
             Instant checkedAt,
@@ -57,6 +66,8 @@ public final class ServiceDtos {
             int failureThreshold,
             int latencyThresholdMs,
             int certificateThresholdDays,
+            Integer expectedStatus,
+            String bodyContains,
             boolean alertActive,
             Instant createdAt,
             Instant updatedAt,

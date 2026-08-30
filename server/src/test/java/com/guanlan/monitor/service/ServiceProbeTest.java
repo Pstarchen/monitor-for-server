@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
@@ -45,6 +46,31 @@ class ServiceProbeTest {
         assertThat(result.statusCode()).isEqualTo(204);
         assertThat(result.latencyMs()).isGreaterThanOrEqualTo(0);
         assertThat(result.error()).isNull();
+    }
+
+    @Test
+    void httpProbeAppliesExpectedStatusAndBodyCondition() throws Exception {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/health", exchange -> {
+            byte[] body = "{\"status\":\"ok\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+
+        ServiceCheck check = new ServiceCheck();
+        check.setType(ServiceCheck.Type.HTTP_GET);
+        check.setTarget("http://127.0.0.1:" + server.getAddress().getPort() + "/api/health");
+        check.setTimeoutMs(2000);
+        check.setExpectedStatus(200);
+        check.setBodyContains("status\":\"ok");
+
+        ServiceProbe.Result result = new ServiceProbe().check(check);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.statusCode()).isEqualTo(200);
     }
 
     @Test

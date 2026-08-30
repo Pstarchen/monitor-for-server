@@ -55,6 +55,12 @@ public class ServiceCheck {
     @Column(name = "certificate_threshold_days", nullable = false)
     private int certificateThresholdDays = 14;
 
+    @Column(name = "expected_status")
+    private Integer expectedStatus;
+
+    @Column(name = "body_contains", length = 200)
+    private String bodyContains;
+
     @Column(name = "heartbeat_token_hash", length = 64)
     private String heartbeatTokenHash;
 

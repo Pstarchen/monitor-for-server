@@ -150,6 +150,10 @@ Agent 端配置：
 | POST | `/api/admin/controller-update/apply` | ADMIN | 异步更新并重启总控服务 |
 | PUT | `/api/admin/controller-update/auto` | ADMIN | 启用或关闭每日 04:00 自动更新 |
 | POST | `/api/settings/notifications/{channel}/test` | ADMIN | 测试 `email`、`dingtalk` 或 `wecom` 通道 |
+| GET | `/api/settings/notifications/deliveries` | ADMIN | 查看最近通知投递结果和失败原因 |
+| POST | `/api/settings/notifications/deliveries/{id}/retry` | ADMIN | 使用当前配置重试失败投递 |
+| GET | `/api/reports/summary` | 登录 | 查询 1-31 天节点、服务和告警汇总报告 |
+| GET | `/api/reports/summary.csv` | 登录 | 下载同一时间窗口的 CSV 报告 |
 | GET | `/api/admin/users` | ADMIN | 账号列表 |
 | POST | `/api/admin/users` | ADMIN | 创建账号，密码至少 12 位 |
 | PUT | `/api/admin/users/{id}` | ADMIN | 更新名称、角色、状态和可选新密码 |
@@ -214,7 +218,7 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 | DELETE | `/api/ddns/{id}` | ADMIN / OPERATOR | 删除配置 |
 | POST | `/api/ddns/{id}/test?ip=` | ADMIN / OPERATOR | 使用指定地址执行一次测试更新 |
 
-服务监控由总控服务执行 HTTP GET、ICMP Ping 或 TCPing 探测，结果按指标留存策略保存。另支持 `HEARTBEAT` 外部心跳类型：总控不主动连接目标，而是由 cron、CI、备份脚本等任务定时调用心跳地址；超过两个配置周期未收到上报会记录失败并触发通知。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
+服务监控由总控服务执行 HTTP GET、ICMP Ping 或 TCPing 探测，结果按指标留存策略保存。HTTP GET 可额外设置 `expectedStatus` 精确匹配状态码，以及 `bodyContains` 检查响应体是否包含业务标记（响应体最多读取 64 KiB）。另支持 `HEARTBEAT` 外部心跳类型：总控不主动连接目标，而是由 cron、CI、备份脚本等任务定时调用心跳地址；超过两个配置周期未收到上报会记录失败并触发通知。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -240,7 +244,9 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
   "publicVisible": true,
   "sortOrder": 10,
   "enabled": true,
-  "certificateThresholdDays": 14
+  "certificateThresholdDays": 14,
+  "expectedStatus": 200,
+  "bodyContains": "status:ok"
 }
 ```
 

@@ -221,6 +221,51 @@ export interface Dashboard {
   recentAlerts: AlertEvent[]
 }
 
+export interface ReportDevice {
+  id: string
+  name: string
+  status: DeviceStatus
+  samples: number
+  averageCpu: number
+  averageMemory: number
+  averageDisk: number
+  peakPressure: number
+}
+
+export interface ReportService {
+  id: number
+  name: string
+  type: ServiceCheckType
+  samples: number
+  availabilityPercent: number
+  averageLatencyMs: number
+  incidents: number
+}
+
+export interface MonitorReport {
+  from: string
+  to: string
+  generatedAt: string
+  totalDevices: number
+  onlineDevices: number
+  offlineDevices: number
+  alertCount: number
+  activeAlertCount: number
+  devices: ReportDevice[]
+  services: ReportService[]
+}
+
+export interface NotificationDelivery {
+  id: number
+  channel: 'email' | 'dingtalk' | 'wecom' | string
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED' | string
+  message: string
+  error: string | null
+  attempts: number
+  createdAt: string
+  finishedAt: string | null
+}
+
 export interface EmailSettings {
   enabled: boolean
   configured: boolean
@@ -382,6 +427,8 @@ export interface ServiceCheck {
   failureThreshold: number
   latencyThresholdMs: number
   certificateThresholdDays: number
+  expectedStatus: number | null
+  bodyContains: string | null
   alertActive: boolean
   createdAt: string
   updatedAt: string
