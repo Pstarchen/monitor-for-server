@@ -69,6 +69,9 @@ public class MetricSnapshot {
     @Column(name = "tcp_connections", nullable = false)
     private int tcpConnections;
 
+    @Column(name = "temperature_max", nullable = false)
+    private double temperatureMax;
+
     @Column(name = "disks_json", columnDefinition = "TEXT")
     private String disksJson;
 
@@ -77,4 +80,10 @@ public class MetricSnapshot {
 
     @Column(name = "services_json", columnDefinition = "TEXT")
     private String servicesJson;
+
+    @Column(name = "network_interfaces_json", columnDefinition = "TEXT")
+    private String networkInterfacesJson;
+
+    @Column(name = "ports_json", columnDefinition = "TEXT")
+    private String portsJson;
 }

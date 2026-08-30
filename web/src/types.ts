@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'TCP_CONNECTIONS' | 'DEVICE_OFFLINE'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE'
 
 export interface User {
   id: number
@@ -36,6 +36,21 @@ export interface ProcessMetric {
 
 export interface ServiceMetric { name: string; status: string }
 
+export interface NetworkInterfaceMetric {
+  name: string
+  mtu: number
+  hardwareAddr: string
+  flags: string[]
+  addresses: string[]
+}
+
+export interface PortMetric {
+  protocol: string
+  address: string
+  port: number
+  pid: number
+}
+
 export interface Metric {
   id: number
   deviceId: string
@@ -54,6 +69,9 @@ export interface Metric {
   networkSentBytes: number
   networkRecvBytes: number
   tcpConnections: number
+  temperatureMax: number
+  networkInterfaces: NetworkInterfaceMetric[]
+  ports: PortMetric[]
   disks: DiskMetric[]
   processes: ProcessMetric[]
   services: ServiceMetric[]

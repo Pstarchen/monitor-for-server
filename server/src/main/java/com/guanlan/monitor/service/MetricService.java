@@ -62,9 +62,14 @@ public class MetricService {
         metric.setNetworkSentBytes(Math.max(0, report.network().bytesSent()));
         metric.setNetworkRecvBytes(Math.max(0, report.network().bytesRecv()));
         metric.setTcpConnections(Math.max(0, report.network().tcpConnections()));
+        metric.setTemperatureMax(report.host().temperatures() == null ? 0 : report.host().temperatures().stream()
+                .mapToDouble(temperature -> Double.isFinite(temperature.value()) ? Math.max(0, temperature.value()) : 0)
+                .max().orElse(0));
         metric.setDisksJson(json(disks));
         metric.setProcessesJson(json(report.processes() == null ? List.of() : report.processes()));
         metric.setServicesJson(json(report.services() == null ? List.of() : report.services()));
+        metric.setNetworkInterfacesJson(json(report.networkInterfaces() == null ? List.of() : report.networkInterfaces()));
+        metric.setPortsJson(json(report.ports() == null ? List.of() : report.ports()));
         metrics.save(metric);
 
         MetricView view = MetricView.from(metric, mapper);

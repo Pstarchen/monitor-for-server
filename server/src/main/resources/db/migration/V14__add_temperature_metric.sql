@@ -1,0 +1,2 @@
+ALTER TABLE metric_snapshots
+    ADD COLUMN temperature_max DOUBLE PRECISION NOT NULL DEFAULT 0;

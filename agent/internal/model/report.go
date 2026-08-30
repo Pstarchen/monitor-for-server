@@ -3,14 +3,16 @@ package model
 import "time"
 
 type Report struct {
-	CollectedAt time.Time       `json:"collectedAt"`
-	Host        HostInfo        `json:"host"`
-	CPU         CPUStats        `json:"cpu"`
-	Memory      MemoryStats     `json:"memory"`
-	Disks       []DiskStats     `json:"disks"`
-	Network     NetworkStats    `json:"network"`
-	Processes   []ProcessStats  `json:"processes"`
-	Services    []ServiceStatus `json:"services"`
+	CollectedAt       time.Time          `json:"collectedAt"`
+	Host              HostInfo           `json:"host"`
+	CPU               CPUStats           `json:"cpu"`
+	Memory            MemoryStats        `json:"memory"`
+	Disks             []DiskStats        `json:"disks"`
+	Network           NetworkStats       `json:"network"`
+	NetworkInterfaces []NetworkInterface `json:"networkInterfaces"`
+	Ports             []PortStats        `json:"ports"`
+	Processes         []ProcessStats     `json:"processes"`
+	Services          []ServiceStatus    `json:"services"`
 }
 
 type HostInfo struct {
@@ -70,6 +72,21 @@ type NetworkStats struct {
 	BytesSent       uint64  `json:"bytesSent"`
 	BytesRecv       uint64  `json:"bytesRecv"`
 	TCPConnections  int     `json:"tcpConnections"`
+}
+
+type NetworkInterface struct {
+	Name         string   `json:"name"`
+	MTU          int      `json:"mtu"`
+	HardwareAddr string   `json:"hardwareAddr"`
+	Flags        []string `json:"flags"`
+	Addresses    []string `json:"addresses"`
+}
+
+type PortStats struct {
+	Protocol string `json:"protocol"`
+	Address  string `json:"address"`
+	Port     uint32 `json:"port"`
+	PID      int32  `json:"pid"`
 }
 
 type ProcessStats struct {

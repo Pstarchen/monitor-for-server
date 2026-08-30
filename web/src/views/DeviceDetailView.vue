@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Copy, Cpu, HardDrive, KeyRound, MemoryStick, RefreshCw, ServerCog, Waypoints } from 'lucide-vue-next'
+import { ArrowLeft, Copy, Cpu, Gauge, HardDrive, KeyRound, MemoryStick, Network, RefreshCw, ServerCog, Thermometer, Waypoints } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -45,6 +45,22 @@ const ioSeries = computed(() => [
   { name: '磁盘读取', data: history.value.map((item) => item.diskReadBps / ioScale.value.divisor), color: '#986400' },
   { name: '磁盘写入', data: history.value.map((item) => item.diskWriteBps / ioScale.value.divisor), color: '#c73832' },
 ])
+const temperatures = computed(() => {
+  const values = section('host').temperatures
+  if (!Array.isArray(values)) return []
+  return values.map((value) => {
+    const item = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+    return { sensor: text(item.sensor, '温度传感器'), value: Number(item.value ?? 0) }
+  }).filter((item) => Number.isFinite(item.value))
+})
+const perCoreUsage = computed(() => {
+  const values = section('cpu').perCorePercent
+  if (!Array.isArray(values)) return []
+  return values.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+})
+const maxTemperature = computed(() => temperatures.value.reduce((max, item) => Math.max(max, item.value), 0))
+const networkInterfaces = computed(() => latest.value?.networkInterfaces ?? [])
+const ports = computed(() => latest.value?.ports ?? [])
 
 function section(name: string): Record<string, unknown> {
   const value = device.value?.hardware?.[name]
@@ -61,6 +77,12 @@ function uptime(value: unknown) {
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor(seconds % 86400 / 3600)
   return days ? `${days} 天 ${hours} 小时` : `${hours} 小时`
+}
+
+function temperatureTone(value: number) {
+  if (value >= 85) return 'critical'
+  if (value >= 70) return 'warning'
+  return 'normal'
 }
 
 async function load(background = false) {
@@ -153,6 +175,18 @@ onBeforeUnmount(() => {
           </div>
           <article v-else class="panel"><EmptyState title="暂无趋势数据" description="Agent 首次上报后即可查看所选时间范围内的指标曲线。" /></article>
 
+          <article class="panel host-health-panel">
+            <div class="panel-head"><div><h2>主机健康</h2><p>温度、每核负载与交换分区状态</p></div><Gauge :size="17" /></div>
+            <div class="host-health-grid">
+              <div><span><Thermometer :size="14" />最高温度</span><strong :data-level="temperatureTone(maxTemperature)">{{ temperatures.length ? `${maxTemperature.toFixed(1)} °C` : '--' }}</strong><small>{{ temperatures.length ? `${temperatures.length} 个传感器` : 'Agent 未返回温度传感器' }}</small></div>
+              <div><span><Cpu :size="14" />每核 CPU 峰值</span><strong>{{ perCoreUsage.length ? percent(Math.max(...perCoreUsage)) : '--' }}</strong><small>{{ perCoreUsage.length ? `${perCoreUsage.length} 个逻辑核心` : '暂无每核数据' }}</small></div>
+              <div><span><MemoryStick :size="14" />交换分区</span><strong>{{ latest ? percent(latest.swapUsage) : '--' }}</strong><small>{{ latest?.swapUsage && latest.swapUsage >= 80 ? '使用率偏高' : '当前使用情况' }}</small></div>
+              <div><span><Waypoints :size="14" />TCP 连接</span><strong>{{ latest?.tcpConnections ?? '--' }}</strong><small>最近一次采集</small></div>
+            </div>
+            <div v-if="temperatures.length" class="temperature-list"><span v-for="item in temperatures" :key="item.sensor" :data-level="temperatureTone(item.value)"><Thermometer :size="12" />{{ item.sensor }} {{ item.value.toFixed(1) }} °C</span></div>
+            <div v-if="perCoreUsage.length" class="core-usage-list" aria-label="每核 CPU 使用率"><span v-for="(value, index) in perCoreUsage" :key="index" :title="`核心 ${index + 1}: ${percent(value)}`"><i><b :data-level="temperatureTone(value)" :style="{ height: `${Math.min(100, value)}%` }" /></i><small>{{ index + 1 }}</small></span></div>
+          </article>
+
           <div class="section two-column detail-summary-grid">
             <article class="panel detail-list">
               <div class="panel-head"><div><h2>主机信息</h2><p>最近一次 Agent 上报</p></div><ServerCog :size="17" /></div>
@@ -191,6 +225,14 @@ onBeforeUnmount(() => {
 
         <el-tab-pane :label="`服务 (${latest?.services.length ?? 0})`" name="services">
           <article class="panel"><div v-if="latest?.services.length" class="service-grid"><div v-for="service in latest.services" :key="service.name"><span><ServerCog :size="16" /><strong>{{ service.name }}</strong></span><StatusBadge :status="service.status" /></div></div><EmptyState v-else title="未配置服务检查" description="在 Agent 配置的 services 数组中声明需要检查的系统服务。" /></article>
+        </el-tab-pane>
+
+        <el-tab-pane :label="`端口 (${ports.length})`" name="ports">
+          <article class="panel"><div v-if="ports.length" class="table-wrap"><table class="data-table"><thead><tr><th>协议</th><th>监听地址</th><th>端口</th><th>进程 PID</th></tr></thead><tbody><tr v-for="port in ports" :key="`${port.protocol}-${port.address}-${port.port}-${port.pid}`"><td><StatusBadge :status="port.protocol === 'TCP' ? 'ONLINE' : 'INFO'" /></td><td class="mono-value">{{ port.address }}</td><td><strong class="mono-value">{{ port.port }}</strong></td><td class="mono-value">{{ port.pid || '--' }}</td></tr></tbody></table></div><EmptyState v-else title="暂无监听端口" description="Agent 未返回监听端口，或已在轻量采集配置中跳过连接枚举。" /></article>
+        </el-tab-pane>
+
+        <el-tab-pane :label="`网卡 (${networkInterfaces.length})`" name="network">
+          <article class="panel"><div class="panel-head"><div><h2>网络接口</h2><p>接口地址、链路状态与 MTU</p></div><Network :size="17" /></div><div v-if="networkInterfaces.length" class="table-wrap"><table class="data-table"><thead><tr><th>接口</th><th>地址</th><th>MAC</th><th>MTU</th><th>状态</th></tr></thead><tbody><tr v-for="item in networkInterfaces" :key="item.name"><td><strong>{{ item.name }}</strong></td><td><span v-if="item.addresses.length" class="interface-addresses">{{ item.addresses.join('、') }}</span><span v-else>--</span></td><td class="mono-value">{{ item.hardwareAddr || '--' }}</td><td>{{ item.mtu || '--' }}</td><td><StatusBadge :status="item.flags.includes('up') ? 'ONLINE' : 'OFFLINE'" /></td></tr></tbody></table></div><EmptyState v-else title="暂无网卡数据" description="Agent 首次上报后会展示接口地址、MAC 和链路状态。" /></article>
         </el-tab-pane>
       </el-tabs>
 

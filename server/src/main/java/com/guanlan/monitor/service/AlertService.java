@@ -104,6 +104,9 @@ public class AlertService {
                 case MEMORY_USAGE -> metric.getMemoryUsage();
                 case DISK_USAGE -> metric.getDiskUsage();
                 case TCP_CONNECTIONS -> metric.getTcpConnections();
+                case NETWORK_RECV_BPS -> metric.getNetworkRecvBps();
+                case NETWORK_SENT_BPS -> metric.getNetworkSentBps();
+                case TEMPERATURE -> metric.getTemperatureMax();
                 case DEVICE_OFFLINE -> 0;
             };
             evaluate(rule, device, value, value >= rule.getThreshold());
@@ -171,9 +174,18 @@ public class AlertService {
             case MEMORY_USAGE -> "内存使用率";
             case DISK_USAGE -> "磁盘使用率";
             case TCP_CONNECTIONS -> "TCP 连接数";
+            case NETWORK_RECV_BPS -> "网络接收速率";
+            case NETWORK_SENT_BPS -> "网络发送速率";
+            case TEMPERATURE -> "最高温度";
             case DEVICE_OFFLINE -> "离线时长";
         };
-        String unit = rule.getMetric() == AlertRule.Metric.DEVICE_OFFLINE ? " 秒" : rule.getMetric() == AlertRule.Metric.TCP_CONNECTIONS ? " 个" : "%";
+        String unit = switch (rule.getMetric()) {
+            case DEVICE_OFFLINE -> " 秒";
+            case TCP_CONNECTIONS -> " 个";
+            case NETWORK_RECV_BPS, NETWORK_SENT_BPS -> " B/s";
+            case TEMPERATURE -> " °C";
+            default -> "%";
+        };
         return device.getName() + " 的" + metric + "达到 " + String.format("%.1f", value) + unit + "，规则阈值 " + rule.getThreshold() + unit;
     }
 

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -65,6 +66,8 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 	}
 	disks, diskRead, diskWrite := collectDisks(ctx, c.options.DiskMountpoints, c.options.HostRoot)
 	network, netSent, netRecv := collectNetwork(ctx, c.options.SkipConnectionCount)
+	interfaces := collectNetworkInterfaces(ctx)
+	ports := collectListeningPorts(ctx, c.options.SkipConnectionCount)
 
 	c.mu.Lock()
 	previous := c.previous
@@ -90,15 +93,96 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		processes = collectProcesses(ctx, 12)
 	}
 	return model.Report{
-		CollectedAt: now,
-		Host:        hostInfo,
-		CPU:         cpuInfo,
-		Memory:      memory,
-		Disks:       disks,
-		Network:     network,
-		Processes:   processes,
-		Services:    collectServices(ctx, c.options.MonitoredServices, c.options.HostRoot),
+		CollectedAt:       now,
+		Host:              hostInfo,
+		CPU:               cpuInfo,
+		Memory:            memory,
+		Disks:             disks,
+		Network:           network,
+		NetworkInterfaces: interfaces,
+		Ports:             ports,
+		Processes:         processes,
+		Services:          collectServices(ctx, c.options.MonitoredServices, c.options.HostRoot),
 	}, nil
+}
+
+func collectNetworkInterfaces(ctx context.Context) []model.NetworkInterface {
+	items, err := netstat.InterfacesWithContext(ctx)
+	if err != nil {
+		return []model.NetworkInterface{}
+	}
+	result := make([]model.NetworkInterface, 0, len(items))
+	for _, item := range items {
+		addresses := make([]string, 0, len(item.Addrs))
+		for _, address := range item.Addrs {
+			value := strings.TrimSpace(address.Addr)
+			if value != "" {
+				addresses = append(addresses, value)
+			}
+		}
+		result = append(result, model.NetworkInterface{
+			Name: item.Name, MTU: maxInt(item.MTU, 0), HardwareAddr: item.HardwareAddr,
+			Flags: append([]string(nil), item.Flags...), Addresses: addresses,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
+}
+
+func collectListeningPorts(ctx context.Context, skip bool) []model.PortStats {
+	if skip {
+		return []model.PortStats{}
+	}
+	connections, err := netstat.ConnectionsWithContext(ctx, "inet")
+	if err != nil {
+		return []model.PortStats{}
+	}
+	return listeningPorts(connections)
+}
+
+func listeningPorts(connections []netstat.ConnectionStat) []model.PortStats {
+	result := make([]model.PortStats, 0, len(connections))
+	seen := make(map[string]struct{})
+	for _, connection := range connections {
+		protocol := "TCP"
+		if connection.Type == 2 {
+			protocol = "UDP"
+		}
+		if protocol == "TCP" && !strings.EqualFold(connection.Status, "LISTEN") {
+			continue
+		}
+		address := strings.TrimSpace(connection.Laddr.IP)
+		if address == "" {
+			address = "*"
+		}
+		key := protocol + ":" + address + ":" + fmt.Sprint(connection.Laddr.Port) + ":" + fmt.Sprint(connection.Pid)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		pid := connection.Pid
+		if pid < 0 {
+			pid = 0
+		}
+		result = append(result, model.PortStats{Protocol: protocol, Address: address, Port: connection.Laddr.Port, PID: pid})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Port == result[j].Port {
+			return result[i].Protocol < result[j].Protocol
+		}
+		return result[i].Port < result[j].Port
+	})
+	if len(result) > 512 {
+		result = result[:512]
+	}
+	return result
+}
+
+func maxInt(value, minimum int) int {
+	if value < minimum {
+		return minimum
+	}
+	return value
 }
 
 func collectHost(ctx context.Context) (model.HostInfo, error) {

@@ -20,6 +20,21 @@ func TestNetworkCountersAggregateAllInterfaces(t *testing.T) {
 	}
 }
 
+func TestListeningPortsFiltersAndSorts(t *testing.T) {
+	ports := listeningPorts([]netstat.ConnectionStat{
+		{Type: 1, Status: "ESTABLISHED", Laddr: netstat.Addr{IP: "127.0.0.1", Port: 9000}, Pid: 8},
+		{Type: 1, Status: "LISTEN", Laddr: netstat.Addr{IP: "0.0.0.0", Port: 443}, Pid: 2},
+		{Type: 2, Laddr: netstat.Addr{IP: "0.0.0.0", Port: 53}, Pid: 3},
+		{Type: 1, Status: "LISTEN", Laddr: netstat.Addr{IP: "0.0.0.0", Port: 443}, Pid: 2},
+	})
+	if len(ports) != 2 {
+		t.Fatalf("listening ports = %#v, want two unique listeners", ports)
+	}
+	if ports[0].Port != 53 || ports[0].Protocol != "UDP" || ports[1].Port != 443 || ports[1].Protocol != "TCP" {
+		t.Fatalf("listening ports = %#v, want UDP 53 then TCP 443", ports)
+	}
+}
+
 func TestAllowedMountpoint(t *testing.T) {
 	if !allowedMountpoint("/data", nil) {
 		t.Fatal("empty allowlist should include every mountpoint")

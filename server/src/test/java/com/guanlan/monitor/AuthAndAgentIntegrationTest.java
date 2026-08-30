@@ -282,6 +282,24 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    void agentPersistsNetworkInventoryAndTemperature() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("inventory-node", "lab", "tests", "127.0.0.4"));
+        String report = sampleReport()
+                .replace("\"temperatures\":[]", "\"temperatures\":[{\"sensor\":\"cpu-package\",\"value\":72.5}]")
+                .replace("\"processes\":[]", "\"networkInterfaces\":[{\"name\":\"eth0\",\"mtu\":1500,\"hardwareAddr\":\"00:11:22:33:44:55\",\"flags\":[\"up\"],\"addresses\":[\"10.0.0.4\"]}],\"ports\":[{\"protocol\":\"TCP\",\"address\":\"0.0.0.0\",\"port\":443,\"pid\":12}],\"processes\":[]");
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(report))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.temperatureMax").value(72.5))
+                .andExpect(jsonPath("$.networkInterfaces[0].name").value("eth0"))
+                .andExpect(jsonPath("$.ports[0].port").value(443));
+    }
+
+    @Test
     void agentRejectsNegativeMemoryCounters() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("invalid-memory-node", "lab", "tests", "127.0.0.4"));
         String report = sampleReport().replace("\"totalBytes\":1024", "\"totalBytes\":-1");

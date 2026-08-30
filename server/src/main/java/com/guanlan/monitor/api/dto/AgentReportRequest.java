@@ -20,6 +20,8 @@ public record AgentReportRequest(
         @NotNull @Valid MemoryStats memory,
         @Size(max = 256) List<@Valid DiskStats> disks,
         @NotNull @Valid NetworkStats network,
+        @Size(max = 512) List<@Valid NetworkInterface> networkInterfaces,
+        @Size(max = 512) List<@Valid PortStats> ports,
         @Size(max = 256) List<@Valid ProcessStats> processes,
         @Size(max = 128) List<@Valid ServiceStatus> services
 ) {
@@ -56,6 +58,13 @@ public record AgentReportRequest(
     public record NetworkStats(@PositiveOrZero double bytesSentPerSec, @PositiveOrZero double bytesRecvPerSec,
                                @PositiveOrZero long bytesSent, @PositiveOrZero long bytesRecv,
                                @PositiveOrZero int tcpConnections) {}
+
+    public record NetworkInterface(@NotBlank @Size(max = 255) String name, @PositiveOrZero int mtu,
+                                   @Size(max = 32) String hardwareAddr, @Size(max = 16) List<@NotBlank @Size(max = 40) String> flags,
+                                   @Size(max = 64) List<@NotBlank @Size(max = 128) String> addresses) {}
+
+    public record PortStats(@NotBlank @Size(max = 8) String protocol, @NotBlank @Size(max = 128) String address,
+                            @PositiveOrZero int port, @PositiveOrZero int pid) {}
 
     public record ProcessStats(@PositiveOrZero int pid, @Size(max = 255) String name, @Size(max = 255) String username,
                                @PositiveOrZero double cpuPercent, @Min(0) @Max(100) double memoryPercent,
