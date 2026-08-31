@@ -254,6 +254,13 @@ func collectLogs(ctx context.Context, paths []string, hostRoot string) []model.L
 	return result
 }
 
+func collectSystemLogs(ctx context.Context, enabled bool, hostRoot string) []model.LogFile {
+	if !enabled || runtime.GOOS != "linux" {
+		return []model.LogFile{}
+	}
+	return collectLogs(ctx, []string{"/var/log/syslog", "/var/log/messages", "/var/log/auth.log", "/var/log/secure"}, hostRoot)
+}
+
 func tailLines(value string, limit int) []string {
 	parts := strings.Split(strings.TrimRight(value, "\r\n"), "\n")
 	if len(parts) > limit {

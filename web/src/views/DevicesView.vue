@@ -35,8 +35,8 @@ const collectAllProcesses = ref(false)
 const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
-const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.7.2/deploy/install-agent'
-const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.7.2/deploy/install-agent'
+const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.8.0/deploy/install-agent'
+const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.8.0/deploy/install-agent'
 const agentInstallerCacheKey = 'v8'
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
@@ -65,7 +65,7 @@ const installCommand = computed(() => {
   const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
   const processArgs = !lightweight.value && collectAllProcesses.value ? ` --all-processes --process-limit ${processCollectionLimit.value}` : ''
   return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
-    `installer_script="$(mktemp)"; trap 'rm -f "$installer_script"' EXIT; if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}' -o "$installer_script"; then curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' -o "$installer_script" || { echo '无法下载 Agent 安装器，请检查服务器网络。' >&2; exit 1; }; fi; sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
+    `installer_script="$(mktemp)"; trap 'rm -f "$installer_script"' EXIT; download_installer() { curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" || curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script"; }; if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载 Agent 安装器，请检查服务器网络或使用 IPv4 出口。' >&2; exit 1; }; fi; sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
 })
 
 async function load(background = false) {

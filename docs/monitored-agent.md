@@ -10,12 +10,15 @@
 export GUANLAN_AGENT_KEY='<一次性密钥>'
 installer_script="$(mktemp)"
 trap 'rm -f "$installer_script"' EXIT
-if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
-  'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.7.2/deploy/install-agent.sh' \
-  -o "$installer_script"; then
-  curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
-    'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.7.2/deploy/install-agent.sh' \
-    -o "$installer_script" || { echo '无法下载 Agent 安装器，请检查服务器网络。' >&2; exit 1; }
+download_installer() {
+  curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
+    || curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script"
+}
+if ! download_installer \
+  'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.8.0/deploy/install-agent.sh'; then
+  download_installer \
+    'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.8.0/deploy/install-agent.sh' \
+    || { echo '无法下载 Agent 安装器，请检查服务器网络。' >&2; exit 1; }
 fi
 sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
   --server-url monitor.example.com \
@@ -42,7 +45,7 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
 
 如果主机存在 `/var/run/docker.sock` 或 Docker 兼容的 Podman socket，Agent 会额外读取容器状态、CPU、内存和累计网络流量；受管 Docker Agent 也会尝试 `/host` 对应路径。没有 socket 或权限不足时自动跳过，不影响其他主机指标。运行时 socket 具备高权限，只应在受信任主机上挂载。
 
-安全巡检默认启用防火墙状态和计划任务摘要，但不会读取日志或文件内容。需要日志尾部或文件完整性检测时，显式添加一个或多个 `--log-path`、`--integrity-path`；路径必须为绝对路径，且只读取白名单范围。Windows 安装器对应参数为 `-LogPath` 和 `-IntegrityPath`。
+安全巡检默认启用防火墙状态和计划任务摘要，但不会读取日志或文件内容。需要读取 Linux 标准系统日志（syslog、messages、auth.log、secure）时添加 `--system-logs`；需要日志尾部或文件完整性检测时，显式添加一个或多个 `--log-path`、`--integrity-path`；路径必须为绝对路径，且只读取白名单范围。Windows 安装器对应参数为 `-LogPath` 和 `-IntegrityPath`。
 
 安装器会自动探测这两个标准路径；使用非标准 Docker/Podman socket 时，显式传入 `--docker-socket /path/to/runtime.sock`（或设置 `GUANLAN_DOCKER_SOCKET`）。Docker 模式会把它以只读方式映射到 Agent 容器的固定路径，自动更新时也会保留映射；本机 systemd 模式会将 Agent 服务加入 socket 所属组，避免常见的 `root:docker 0660` 权限导致容器列表为空。若指定路径不存在或不是 Unix socket，安装器会直接报错并停止。
 

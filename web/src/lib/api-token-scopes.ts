@@ -58,6 +58,14 @@ export const apiTokenScopeGroups: readonly ApiTokenScopeGroup[] = [
     ],
   },
   {
+    key: 'maintenance', label: '维护静默', description: '查看或维护告警静默窗口。',
+    options: [
+      ['nezha:maintenance:read', '维护窗口读取'],
+      ['nezha:maintenance:write', '维护窗口写入'],
+      ['nezha:maintenance:delete', '维护窗口删除'],
+    ],
+  },
+  {
     key: 'admin', label: '管理员', description: '完整管理权限，仅管理员可签发。',
     options: [[ADMIN_SCOPE, '管理员权限']],
   },

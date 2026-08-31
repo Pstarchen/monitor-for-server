@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE' | 'PROCESS_MISSING' | 'SERVICE_NOT_RUNNING'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE' | 'PROCESS_MISSING' | 'SERVICE_NOT_RUNNING' | 'CUSTOM_METRIC'
 
 export interface User {
   id: number
@@ -85,6 +85,7 @@ export interface FirewallMetric { provider: string; state: 'ACTIVE' | 'INACTIVE'
 export interface CronJobMetric { source: string; user: string; schedule: string; command: string }
 export interface LogFileMetric { path: string; sizeBytes: number; modifiedAt: string; lines: string[] }
 export interface IntegrityMetric { path: string; sha256: string; sizeBytes: number; modifiedAt: string }
+export interface CustomMetricResult { name: string; kind: string; value: number | null; text: string | null; exitCode: number; success: boolean; error: string | null }
 
 export interface Metric {
   id: number
@@ -126,7 +127,9 @@ export interface Metric {
   firewall: FirewallMetric | null
   cronJobs: CronJobMetric[]
   logs: LogFileMetric[]
+  systemLogs: LogFileMetric[]
   integrity: IntegrityMetric[]
+  customMetrics: CustomMetricResult[]
 }
 
 export interface Device {
@@ -203,6 +206,28 @@ export interface AlertEvent {
   acknowledgedAt: string | null
   acknowledgedBy: string | null
   resolvedAt: string | null
+  notificationSuppressed: boolean
+  notifiedAt: string | null
+}
+
+export type MaintenanceRecurrence = 'NONE' | 'DAILY' | 'WEEKLY'
+
+export interface MaintenanceWindow {
+  id: number
+  name: string
+  deviceId: string | null
+  deviceName: string | null
+  ruleId: number | null
+  ruleName: string | null
+  startsAt: string
+  endsAt: string
+  timezone: string
+  recurrence: MaintenanceRecurrence
+  repeatUntil: string | null
+  reason: string | null
+  enabled: boolean
+  active: boolean
+  updatedAt: string
 }
 
 export interface Dashboard {
@@ -308,6 +333,37 @@ export interface Settings {
   dingtalk: WebhookSettings
   wecom: WebhookSettings
   generic: WebhookSettings
+}
+
+export interface TopologyNode {
+  id: string
+  label: string
+  kind: 'CONTROLLER' | 'DEVICE' | 'EXTERNAL' | string
+  status: string
+  hostname: string | null
+  address: string | null
+  cpuUsage: number | null
+  memoryUsage: number | null
+  diskUsage: number | null
+  serviceCount: number
+}
+
+export interface TopologyEdge {
+  id: string
+  source: string
+  target: string
+  label: string
+  type: ServiceCheckType
+  status: 'UP' | 'DOWN' | 'UNKNOWN' | 'DISABLED' | string
+  latencyMs: number | null
+  targetHost: string
+}
+
+export interface Topology {
+  nodes: TopologyNode[]
+  edges: TopologyEdge[]
+  monitoredServices: number
+  unresolvedServices: number
 }
 
 export interface PublicBrand {

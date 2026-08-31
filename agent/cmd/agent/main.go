@@ -47,7 +47,9 @@ func main() {
 		HostRoot:                 cfg.HostRoot,
 		DockerSocket:             cfg.DockerSocket,
 		LogPaths:                 cfg.LogPaths,
+		CollectSystemLogs:        cfg.CollectSystemLogs,
 		IntegrityPaths:           cfg.IntegrityPaths,
+		CustomMetrics:            customMetricOptions(cfg.CustomMetrics),
 	})
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -78,6 +80,14 @@ func main() {
 			timer.Reset(interval)
 		}
 	}
+}
+
+func customMetricOptions(values []config.CustomMetric) []collector.CustomMetricConfig {
+	result := make([]collector.CustomMetricConfig, 0, len(values))
+	for _, value := range values {
+		result = append(result, collector.CustomMetricConfig{Name: value.Name, Command: value.Command, Args: value.Args, Kind: value.Kind})
+	}
+	return result
 }
 
 func collectAndSend(ctx context.Context, logger *slog.Logger, metrics *collector.Collector, queue *spool.Queue, client *api.Client) time.Duration {

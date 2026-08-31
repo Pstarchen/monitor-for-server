@@ -53,7 +53,9 @@ public class MetricService {
         List<AgentReportRequest.Gpu> gpus = report.host().gpus() == null ? List.of() : report.host().gpus();
         List<AgentReportRequest.CronJob> cronJobs = report.cronJobs() == null ? List.of() : report.cronJobs();
         List<AgentReportRequest.LogFile> logs = report.logs() == null ? List.of() : report.logs();
+        List<AgentReportRequest.LogFile> systemLogs = report.systemLogs() == null ? List.of() : report.systemLogs();
         List<AgentReportRequest.IntegrityItem> integrity = report.integrity() == null ? List.of() : report.integrity();
+        List<AgentReportRequest.CustomMetricResult> customMetrics = report.customMetrics() == null ? List.of() : report.customMetrics();
         MetricSnapshot previous = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).orElse(null);
         MetricSnapshot metric = new MetricSnapshot();
         metric.setDevice(device);
@@ -96,7 +98,9 @@ public class MetricService {
         metric.setFirewallJson(json(report.firewall()));
         metric.setCronJobsJson(json(cronJobs));
         metric.setLogsJson(json(logs));
+        metric.setSystemLogsJson(json(systemLogs));
         metric.setIntegrityJson(json(integrity));
+        metric.setCustomMetricsJson(json(customMetrics));
         metrics.save(metric);
 
         MetricView view = MetricView.from(metric, mapper);

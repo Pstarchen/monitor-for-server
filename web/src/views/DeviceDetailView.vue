@@ -132,7 +132,9 @@ const gpus = computed(() => latest.value?.gpus ?? [])
 const firewall = computed(() => latest.value?.firewall ?? null)
 const cronJobs = computed(() => latest.value?.cronJobs ?? [])
 const logs = computed(() => latest.value?.logs ?? [])
+const systemLogs = computed(() => latest.value?.systemLogs ?? [])
 const integrity = computed(() => latest.value?.integrity ?? [])
+const customMetrics = computed(() => latest.value?.customMetrics ?? [])
 const smartSummary = computed(() => ({
   passed: latest.value?.smartPassed ?? 0,
   failed: latest.value?.smartFailed ?? 0,
@@ -366,7 +368,7 @@ onBeforeUnmount(() => {
           <article class="panel"><div class="panel-head"><div><h2>网络接口</h2><p>接口地址、链路状态与 MTU</p></div><Network :size="17" /></div><div v-if="networkInterfaces.length" class="table-wrap"><table class="data-table"><thead><tr><th>接口</th><th>地址</th><th>MAC</th><th>MTU</th><th>状态</th></tr></thead><tbody><tr v-for="item in networkInterfaces" :key="item.name"><td><strong>{{ item.name }}</strong></td><td><span v-if="item.addresses.length" class="interface-addresses">{{ item.addresses.join('、') }}</span><span v-else>--</span></td><td class="mono-value">{{ item.hardwareAddr || '--' }}</td><td>{{ item.mtu || '--' }}</td><td><StatusBadge :status="item.flags.includes('up') ? 'ONLINE' : 'OFFLINE'" /></td></tr></tbody></table></div><EmptyState v-else title="暂无网卡数据" description="Agent 首次上报后会展示接口地址、MAC 和链路状态。" /></article>
         </el-tab-pane>
 
-        <el-tab-pane :label="`安全巡检 (${cronJobs.length + logs.length + integrity.length})`" name="security">
+        <el-tab-pane :label="`安全巡检 (${cronJobs.length + logs.length + systemLogs.length + integrity.length})`" name="security">
           <div class="security-inspection-grid">
             <article class="panel security-status-panel">
               <div class="panel-head"><div><h2>防火墙状态</h2><p>Agent 自动识别主机上的防火墙服务</p></div><ShieldAlert :size="17" /></div>
@@ -387,8 +389,20 @@ onBeforeUnmount(() => {
             <div v-if="logs.length" class="security-log-list"><div v-for="log in logs" :key="log.path" class="security-log-item"><header><strong class="mono-value">{{ log.path }}</strong><span>{{ bytes(log.sizeBytes) }} · {{ dateTime(log.modifiedAt) }}</span></header><pre><code v-for="(line, index) in log.lines" :key="index">{{ line }}{{ index < log.lines.length - 1 ? '\n' : '' }}</code></pre></div></div><EmptyState v-else title="未配置日志采集" description="出于隐私和性能考虑，日志默认不读取。通过 --log-path 指定需要巡检的文件。" />
           </article>
           <article class="panel security-list-panel">
+            <div class="panel-head"><div><h2>系统日志</h2><p>Linux 标准系统日志的最近 20 行</p></div><FileWarning :size="17" /></div>
+            <div v-if="systemLogs.length" class="security-log-list"><div v-for="log in systemLogs" :key="log.path" class="security-log-item"><header><strong class="mono-value">{{ log.path }}</strong><span>{{ bytes(log.sizeBytes) }} · {{ dateTime(log.modifiedAt) }}</span></header><pre><code v-for="(line, index) in log.lines" :key="index">{{ line }}{{ index < log.lines.length - 1 ? '\n' : '' }}</code></pre></div></div><EmptyState v-else title="未启用系统日志" description="在 Agent 配置中将 collect_system_logs 设为 true，或使用 log_paths 指定应用日志。" />
+          </article>
+          <article class="panel security-list-panel">
             <div class="panel-head"><div><h2>完整性文件</h2><p>SHA-256、大小和修改时间</p></div><ShieldCheck :size="17" /></div>
             <div v-if="integrity.length" class="table-wrap"><table class="data-table"><thead><tr><th>路径</th><th>SHA-256</th><th>大小</th><th>修改时间</th></tr></thead><tbody><tr v-for="item in integrity" :key="item.path"><td class="mono-value">{{ item.path }}</td><td class="mono-value security-hash">{{ item.sha256 }}</td><td>{{ bytes(item.sizeBytes) }}</td><td>{{ dateTime(item.modifiedAt) }}</td></tr></tbody></table></div><EmptyState v-else title="未配置完整性路径" description="通过 --integrity-path 指定文件或目录后，Agent 会建立基线并检测后续变更。" />
+          </article>
+        </el-tab-pane>
+
+        <el-tab-pane :label="`自定义采集 (${customMetrics.length})`" name="custom-metrics">
+          <article class="panel custom-metrics-panel">
+            <div class="panel-head"><div><h2>自定义监控项</h2><p>Agent 按配置执行无 Shell 参数化程序，结果受超时与输出上限保护</p></div><Gauge :size="17" /></div>
+            <div v-if="customMetrics.length" class="table-wrap"><table class="data-table"><thead><tr><th>名称</th><th>类型</th><th>当前值</th><th>退出码</th><th>状态</th><th>错误</th></tr></thead><tbody><tr v-for="item in customMetrics" :key="item.name"><td><strong class="mono-value">{{ item.name }}</strong></td><td>{{ item.kind === 'number' ? '数值' : item.kind === 'exit_code' ? '退出码' : '文本' }}</td><td class="mono-value custom-metric-value">{{ item.value != null ? item.value : item.text || '--' }}</td><td class="mono-value">{{ item.exitCode }}</td><td><StatusBadge :status="item.success ? 'SUCCEEDED' : 'FAILED'" /></td><td><span class="custom-metric-error">{{ item.error || '--' }}</span></td></tr></tbody></table></div>
+            <EmptyState v-else title="暂无自定义采集项" description="在 Agent 配置文件的 custom_metrics 数组中添加受限程序后，下一次上报会显示结果。" />
           </article>
         </el-tab-pane>
       </el-tabs>

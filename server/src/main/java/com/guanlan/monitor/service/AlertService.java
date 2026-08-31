@@ -33,11 +33,17 @@ public class AlertService {
     private final RealtimeWebSocketHandler realtime;
     private final AuditService audit;
     private final ObjectMapper mapper;
+    private MaintenanceWindowService maintenanceWindows;
 
     /** Keeps isolated service tests source-compatible while Spring uses the full constructor. */
     public AlertService(AlertRuleRepository rules, AlertEventRepository events, DeviceService devices,
                         NotificationService notifications, RealtimeWebSocketHandler realtime, AuditService audit) {
         this(rules, events, devices, notifications, realtime, audit, new ObjectMapper());
+    }
+
+    @Autowired
+    void setMaintenanceWindows(MaintenanceWindowService maintenanceWindows) {
+        this.maintenanceWindows = maintenanceWindows;
     }
 
     @Transactional(readOnly = true)
@@ -130,6 +136,7 @@ public class AlertService {
                 case DEVICE_OFFLINE -> 0d;
                 case PROCESS_MISSING -> processMissing(metric, rule.getTargetName());
                 case SERVICE_NOT_RUNNING -> serviceNotRunning(metric, rule.getTargetName());
+                case CUSTOM_METRIC -> customMetric(metric, rule.getTargetName());
             };
             if (value == null || !Double.isFinite(value)) continue;
             evaluate(rule, device, value, value >= rule.getThreshold());
@@ -147,6 +154,7 @@ public class AlertService {
 
     private void evaluate(AlertRule rule, Device device, double value, boolean breached) {
         var active = events.findFirstByDeviceIdAndRuleIdAndStatusInOrderByStartedAtDesc(device.getId(), rule.getId(), ACTIVE);
+        boolean muted = maintenanceWindows != null && maintenanceWindows.isMuted(device, rule, Instant.now());
         if (breached && active.isEmpty()) {
             AlertEvent event = new AlertEvent();
             event.setDevice(device);
@@ -155,9 +163,19 @@ public class AlertService {
             event.setStartedAt(Instant.now());
             event.setStatus(AlertEvent.Status.OPEN);
             event.setMessage(message(rule, device, value));
+            event.setNotificationSuppressed(muted);
             events.save(event);
-            notifications.send(event);
+            if (!muted) {
+                notifications.send(event);
+                event.setNotifiedAt(Instant.now());
+            }
             realtime.broadcast(Map.of("type", "alert.opened", "payload", eventView(event)));
+        } else if (breached && active.isPresent() && active.get().isNotificationSuppressed() && !muted) {
+            AlertEvent event = active.get();
+            event.setNotificationSuppressed(false);
+            event.setNotifiedAt(Instant.now());
+            notifications.send(event);
+            realtime.broadcast(Map.of("type", "alert.updated", "payload", eventView(event)));
         } else if (!breached && active.isPresent()) {
             AlertEvent event = active.get();
             event.setStatus(AlertEvent.Status.RESOLVED);
@@ -195,9 +213,10 @@ public class AlertService {
         if (request.metric() == AlertRule.Metric.FIREWALL_INACTIVE && request.threshold() != 1) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "防火墙告警阈值必须为 1（未启用）");
         }
-        if ((request.metric() == AlertRule.Metric.PROCESS_MISSING || request.metric() == AlertRule.Metric.SERVICE_NOT_RUNNING)
+        if ((request.metric() == AlertRule.Metric.PROCESS_MISSING || request.metric() == AlertRule.Metric.SERVICE_NOT_RUNNING
+                || request.metric() == AlertRule.Metric.CUSTOM_METRIC)
                 && (request.targetName() == null || request.targetName().isBlank())) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "进程或服务告警必须填写目标名称");
+            throw new ApiException(HttpStatus.BAD_REQUEST, "目标型告警必须填写目标名称");
         }
         if ((request.metric() == AlertRule.Metric.PROCESS_MISSING || request.metric() == AlertRule.Metric.SERVICE_NOT_RUNNING)
                 && request.threshold() != 1) {
@@ -227,6 +246,7 @@ public class AlertService {
             case DEVICE_OFFLINE -> "离线时长";
             case PROCESS_MISSING -> "关键进程缺失";
             case SERVICE_NOT_RUNNING -> "系统服务未运行";
+            case CUSTOM_METRIC -> "自定义监控项";
         };
         String unit = switch (rule.getMetric()) {
             case DEVICE_OFFLINE -> " 秒";
@@ -236,10 +256,11 @@ public class AlertService {
             case DISK_READ_BPS, DISK_WRITE_BPS -> " B/s";
             case LOAD_1 -> "";
             case TEMPERATURE -> " °C";
-            case PROCESS_MISSING, SERVICE_NOT_RUNNING -> "";
+            case PROCESS_MISSING, SERVICE_NOT_RUNNING, CUSTOM_METRIC -> "";
             default -> "%";
         };
-        String target = (rule.getMetric() == AlertRule.Metric.PROCESS_MISSING || rule.getMetric() == AlertRule.Metric.SERVICE_NOT_RUNNING)
+        String target = (rule.getMetric() == AlertRule.Metric.PROCESS_MISSING || rule.getMetric() == AlertRule.Metric.SERVICE_NOT_RUNNING
+                || rule.getMetric() == AlertRule.Metric.CUSTOM_METRIC)
                 && !blank(rule.getTargetName()) ? "（" + rule.getTargetName().trim() + "）" : "";
         return device.getName() + " 的" + metric + target + "达到 " + String.format("%.1f", value) + unit + "，规则阈值 " + rule.getThreshold() + unit;
     }
@@ -273,6 +294,22 @@ public class AlertService {
         }
     }
 
+    private Double customMetric(MetricSnapshot metric, String targetName) {
+        if (blank(targetName) || blank(metric.getCustomMetricsJson())) return null;
+        try {
+            List<Map<String, Object>> values = mapper.readValue(metric.getCustomMetricsJson(), new TypeReference<>() {});
+            for (Map<String, Object> item : values) {
+                if (!sameName(item.get("name"), targetName)) continue;
+                Object value = item.get("value");
+                if (value instanceof Number number && Double.isFinite(number.doubleValue())) return number.doubleValue();
+                return null;
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
+    }
+
     private boolean sameName(Object value, String targetName) {
         if (value == null) return false;
         String left = String.valueOf(value).trim();
@@ -299,6 +336,6 @@ public class AlertService {
         return new AlertDtos.EventView(event.getId(), event.getDevice().getId(), event.getDevice().getName(),
                 event.getRule().getId(), event.getRule().getName(), event.getRule().getSeverity(), event.getStatus(),
                 event.getValue(), event.getMessage(), event.getStartedAt(), event.getAcknowledgedAt(),
-                event.getAcknowledgedBy(), event.getResolvedAt());
+                event.getAcknowledgedBy(), event.getResolvedAt(), event.isNotificationSuppressed(), event.getNotifiedAt());
     }
 }

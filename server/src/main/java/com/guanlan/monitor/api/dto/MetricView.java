@@ -47,7 +47,9 @@ public record MetricView(
         AgentReportRequest.FirewallStatus firewall,
         List<AgentReportRequest.CronJob> cronJobs,
         List<AgentReportRequest.LogFile> logs,
-        List<AgentReportRequest.IntegrityItem> integrity
+        List<AgentReportRequest.LogFile> systemLogs,
+        List<AgentReportRequest.IntegrityItem> integrity,
+        List<AgentReportRequest.CustomMetricResult> customMetrics
 ) {
     public static MetricView from(MetricSnapshot metric, ObjectMapper mapper) {
         return new MetricView(
@@ -71,7 +73,9 @@ public record MetricView(
                 readObject(mapper, metric.getFirewallJson(), AgentReportRequest.FirewallStatus.class),
                 readList(mapper, metric.getCronJobsJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getLogsJson(), new TypeReference<>() {}),
-                readList(mapper, metric.getIntegrityJson(), new TypeReference<>() {})
+                readList(mapper, metric.getSystemLogsJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getIntegrityJson(), new TypeReference<>() {}),
+                readList(mapper, metric.getCustomMetricsJson(), new TypeReference<>() {})
         );
     }
 

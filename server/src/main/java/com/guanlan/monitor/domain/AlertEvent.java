@@ -51,4 +51,10 @@ public class AlertEvent {
 
     @Column(name = "resolved_at")
     private Instant resolvedAt;
+
+    @Column(name = "notification_suppressed", nullable = false)
+    private boolean notificationSuppressed;
+
+    @Column(name = "notified_at")
+    private Instant notifiedAt;
 }

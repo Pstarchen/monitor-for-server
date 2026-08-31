@@ -11,6 +11,7 @@ describe('api token scopes', () => {
       'nezha:ddns:read', 'nezha:ddns:write', 'nezha:ddns:delete',
       'nezha:alertrule:read', 'nezha:alertrule:write', 'nezha:alertrule:delete',
       'nezha:alert:read', 'nezha:alert:write',
+      'nezha:maintenance:read', 'nezha:maintenance:write', 'nezha:maintenance:delete',
     ]))
   })
 
@@ -21,7 +22,7 @@ describe('api token scopes', () => {
 
   it('groups scopes by resource while keeping the least-privilege read scope available first', () => {
     const groups = visibleApiTokenScopeGroups(false)
-    expect(groups.map((group) => group.key)).toEqual(['inventory', 'server', 'service', 'ddns', 'alertrule', 'alert'])
+    expect(groups.map((group) => group.key)).toEqual(['inventory', 'server', 'service', 'ddns', 'alertrule', 'alert', 'maintenance'])
     expect(groups[0].options[0]).toEqual(['nezha:inventory:read', '设备清单读取'])
     expect(apiTokenScopeLabel('nezha:server:exec')).toBe('远程任务执行')
   })

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--process NAME] [--disk MOUNTPOINT] [--log-path PATH] [--integrity-path PATH] [--skip-processes] [--all-processes] [--process-limit N] [--skip-connections] [--skip-ports] [--port-limit N] [--skip-containers] [--container-limit N]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--process NAME] [--disk MOUNTPOINT] [--log-path PATH] [--system-logs] [--integrity-path PATH] [--skip-processes] [--all-processes] [--process-limit N] [--skip-connections] [--skip-ports] [--port-limit N] [--skip-containers] [--container-limit N]"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
@@ -17,6 +17,7 @@ services=()
 processes=()
 disks=()
 log_paths=()
+collect_system_logs=false
 integrity_paths=()
 skip_processes=false
 collect_all_processes=false
@@ -53,6 +54,7 @@ while [[ $# -gt 0 ]]; do
     --process) processes+=("${2:-}"); shift 2 ;;
     --disk) disks+=("${2:-}"); shift 2 ;;
     --log-path) log_paths+=("${2:-}"); shift 2 ;;
+    --system-logs) collect_system_logs=true; shift ;;
     --integrity-path) integrity_paths+=("${2:-}"); shift 2 ;;
     --skip-processes) skip_processes=true; shift ;;
     --all-processes) collect_all_processes=true; shift ;;
@@ -97,8 +99,12 @@ is_local_host() {
 probe_server_url() {
   local scheme="$1"
   local candidate="$2"
-  curl --fail --silent --show-error --location --max-time 10 --connect-timeout 5 \
-    --proto "=${scheme}" --tlsv1.2 "${candidate%/}/healthz" >/dev/null
+  local url="${candidate%/}/healthz"
+  local args=(--fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto "=${scheme}")
+  [[ "${scheme}" == "https" ]] && args+=(--tlsv1.2)
+  # Some hosts publish IPv6 DNS records without a working IPv6 route. Try IPv4
+  # first, then fall back to the normal resolver for IPv6-only networks.
+  curl -4 "${args[@]}" "${url}" >/dev/null 2>&1 || curl "${args[@]}" "${url}" >/dev/null
 }
 
 resolve_server_url() {
@@ -277,7 +283,7 @@ printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  
 # reinterpret backslashes and turn valid JSON escape sequences into newlines.
 sed -i '$d' "${config_tmp}"
 sed -i '$s/$/,/' "${config_tmp}"
-printf '  "collect_all_processes": %s,\n  "process_collection_limit": %s,\n  "skip_port_collection": %s,\n  "port_collection_limit": %s,\n  "skip_container_collection": %s,\n  "container_collection_limit": %s,\n  "monitored_processes": [%s],\n  "log_paths": [%s],\n  "integrity_paths": [%s]\n}\n' "${collect_all_processes}" "${process_limit}" "${skip_ports}" "${port_limit}" "${skip_containers}" "${container_limit}" "${process_json}" "${log_json}" "${integrity_json}" >> "${config_tmp}"
+printf '  "collect_all_processes": %s,\n  "process_collection_limit": %s,\n  "skip_port_collection": %s,\n  "port_collection_limit": %s,\n  "skip_container_collection": %s,\n  "container_collection_limit": %s,\n  "monitored_processes": [%s],\n  "log_paths": [%s],\n  "collect_system_logs": %s,\n  "integrity_paths": [%s]\n}\n' "${collect_all_processes}" "${process_limit}" "${skip_ports}" "${port_limit}" "${skip_containers}" "${container_limit}" "${process_json}" "${log_json}" "${collect_system_logs}" "${integrity_json}" >> "${config_tmp}"
 
 if [[ "${config_allow_insecure_http}" == true ]]; then
   sed -i 's/"allow_insecure_http": false/"allow_insecure_http": true/' "${config_tmp}"

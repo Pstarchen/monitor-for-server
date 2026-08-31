@@ -213,6 +213,10 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/api/ddns` | 登录 / PAT `nezha:ddns:read` | 查看 DDNS 配置状态，不返回密文 |
+| GET | `/api/maintenance-windows` | 登录 / PAT `nezha:maintenance:read` | 查看维护静默窗口；受服务器白名单约束 |
+| POST | `/api/maintenance-windows` | ADMIN / OPERATOR / PAT `nezha:maintenance:write` | 创建维护静默窗口 |
+| PUT | `/api/maintenance-windows/{id}` | ADMIN / OPERATOR / PAT `nezha:maintenance:write` | 更新维护静默窗口 |
+| DELETE | `/api/maintenance-windows/{id}` | ADMIN / OPERATOR / PAT `nezha:maintenance:delete` | 删除维护静默窗口 |
 | POST | `/api/ddns` | ADMIN / OPERATOR | 创建 DDNS 配置 |
 | PUT | `/api/ddns/{id}` | ADMIN / OPERATOR | 更新配置；敏感字段留空保留原值 |
 | DELETE | `/api/ddns/{id}` | ADMIN / OPERATOR | 删除配置 |

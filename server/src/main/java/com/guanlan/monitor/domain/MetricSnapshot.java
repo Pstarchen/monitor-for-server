@@ -135,6 +135,12 @@ public class MetricSnapshot {
     @Column(name = "logs_json", columnDefinition = "TEXT")
     private String logsJson;
 
+    @Column(name = "system_logs_json", columnDefinition = "TEXT")
+    private String systemLogsJson;
+
     @Column(name = "integrity_json", columnDefinition = "TEXT")
     private String integrityJson;
+
+    @Column(name = "custom_metrics_json", columnDefinition = "TEXT")
+    private String customMetricsJson;
 }

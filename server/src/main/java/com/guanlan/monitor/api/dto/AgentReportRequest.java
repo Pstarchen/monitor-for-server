@@ -28,7 +28,9 @@ public record AgentReportRequest(
         @Valid FirewallStatus firewall,
         @Size(max = 256) List<@Valid CronJob> cronJobs,
         @Size(max = 64) List<@Valid LogFile> logs,
-        @Size(max = 512) List<@Valid IntegrityItem> integrity
+        @Size(max = 8) List<@Valid LogFile> systemLogs,
+        @Size(max = 512) List<@Valid IntegrityItem> integrity,
+        @Size(max = 32) List<@Valid CustomMetricResult> customMetrics
 ) {
     public record HostInfo(
             @NotBlank @Size(max = 255) String hostname, @Size(max = 80) String os, @Size(max = 80) String platform,
@@ -118,4 +120,9 @@ public record AgentReportRequest(
 
     public record IntegrityItem(@NotBlank @Size(max = 1024) String path, @Size(max = 64) String sha256,
                                 @PositiveOrZero long sizeBytes, @Size(max = 40) String modifiedAt) {}
+
+    public record CustomMetricResult(@NotBlank @Size(max = 80) String name,
+                                     @NotBlank @Size(max = 20) String kind,
+                                     Double value, @Size(max = 4096) String text,
+                                     int exitCode, boolean success, @Size(max = 4096) String error) {}
 }

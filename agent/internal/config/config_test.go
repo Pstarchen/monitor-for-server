@@ -140,6 +140,22 @@ func TestCommandExecutionIsOptIn(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesCustomMetrics(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.json")
+	body := []byte(`{"server_url":"https://monitor.example.com","device_id":"device","agent_key":"secret","custom_metrics":[{"name":" queue ","command":"printf","args":["42"],"kind":"number"},{"name":"release","command":"release-name","kind":"text"}]}`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load([]string{"-config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CustomMetrics) != 2 || cfg.CustomMetrics[0].Name != "queue" || cfg.CustomMetrics[0].Kind != "number" || cfg.CustomMetrics[1].Kind != "text" {
+		t.Fatalf("unexpected custom metrics: %#v", cfg.CustomMetrics)
+	}
+}
+
 func TestLoadRejectsUnsafeResourceLimits(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.json")

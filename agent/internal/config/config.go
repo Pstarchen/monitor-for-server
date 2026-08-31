@@ -36,7 +36,9 @@ type Config struct {
 	HostRoot                 string
 	DockerSocket             string
 	LogPaths                 []string
+	CollectSystemLogs        bool
 	IntegrityPaths           []string
+	CustomMetrics            []CustomMetric
 	AllowCommandExecution    bool
 	AllowFileOperations      bool
 	CommandPollInterval      time.Duration
@@ -44,33 +46,42 @@ type Config struct {
 }
 
 type fileConfig struct {
-	ServerURL                string   `json:"server_url"`
-	DeviceID                 string   `json:"device_id"`
-	AgentKey                 string   `json:"agent_key"`
-	Interval                 string   `json:"interval"`
-	RequestTimeout           string   `json:"request_timeout"`
-	SpoolDir                 string   `json:"spool_dir"`
-	MaxBufferedReports       int      `json:"max_buffered_reports"`
-	AllowInsecureHTTP        bool     `json:"allow_insecure_http"`
-	MonitoredServices        []string `json:"monitored_services"`
-	MonitoredProcesses       []string `json:"monitored_processes"`
-	SkipProcesses            bool     `json:"skip_process_collection"`
-	CollectAllProcesses      bool     `json:"collect_all_processes"`
-	ProcessCollectionLimit   int      `json:"process_collection_limit"`
-	SkipConnectionCount      bool     `json:"skip_connection_count"`
-	SkipPortCollection       bool     `json:"skip_port_collection"`
-	PortCollectionLimit      int      `json:"port_collection_limit"`
-	SkipContainerCollection  bool     `json:"skip_container_collection"`
-	ContainerCollectionLimit int      `json:"container_collection_limit"`
-	DiskMountpoints          []string `json:"disk_mountpoints"`
-	HostRoot                 string   `json:"host_root"`
-	DockerSocket             string   `json:"docker_socket"`
-	LogPaths                 []string `json:"log_paths"`
-	IntegrityPaths           []string `json:"integrity_paths"`
-	AllowCommandExecution    bool     `json:"allow_command_execution"`
-	AllowFileOperations      bool     `json:"allow_file_operations"`
-	CommandPollInterval      string   `json:"command_poll_interval"`
-	MaxCommandOutputBytes    int      `json:"max_command_output_bytes"`
+	ServerURL                string         `json:"server_url"`
+	DeviceID                 string         `json:"device_id"`
+	AgentKey                 string         `json:"agent_key"`
+	Interval                 string         `json:"interval"`
+	RequestTimeout           string         `json:"request_timeout"`
+	SpoolDir                 string         `json:"spool_dir"`
+	MaxBufferedReports       int            `json:"max_buffered_reports"`
+	AllowInsecureHTTP        bool           `json:"allow_insecure_http"`
+	MonitoredServices        []string       `json:"monitored_services"`
+	MonitoredProcesses       []string       `json:"monitored_processes"`
+	SkipProcesses            bool           `json:"skip_process_collection"`
+	CollectAllProcesses      bool           `json:"collect_all_processes"`
+	ProcessCollectionLimit   int            `json:"process_collection_limit"`
+	SkipConnectionCount      bool           `json:"skip_connection_count"`
+	SkipPortCollection       bool           `json:"skip_port_collection"`
+	PortCollectionLimit      int            `json:"port_collection_limit"`
+	SkipContainerCollection  bool           `json:"skip_container_collection"`
+	ContainerCollectionLimit int            `json:"container_collection_limit"`
+	DiskMountpoints          []string       `json:"disk_mountpoints"`
+	HostRoot                 string         `json:"host_root"`
+	DockerSocket             string         `json:"docker_socket"`
+	LogPaths                 []string       `json:"log_paths"`
+	CollectSystemLogs        bool           `json:"collect_system_logs"`
+	IntegrityPaths           []string       `json:"integrity_paths"`
+	CustomMetrics            []CustomMetric `json:"custom_metrics"`
+	AllowCommandExecution    bool           `json:"allow_command_execution"`
+	AllowFileOperations      bool           `json:"allow_file_operations"`
+	CommandPollInterval      string         `json:"command_poll_interval"`
+	MaxCommandOutputBytes    int            `json:"max_command_output_bytes"`
+}
+
+type CustomMetric struct {
+	Name    string   `json:"name"`
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	Kind    string   `json:"kind"`
 }
 
 func Load(args []string) (Config, error) {
@@ -116,19 +127,19 @@ func Load(args []string) (Config, error) {
 	}
 
 	cfg := Config{
-		ServerURL:                strings.TrimRight(strings.TrimSpace(file.ServerURL), "/"),
-		DeviceID:                 strings.TrimSpace(file.DeviceID),
-		AgentKey:                 strings.TrimSpace(file.AgentKey),
-		Interval:                 interval,
-		RequestTimeout:           timeout,
-		SpoolDir:                 spoolDir,
-		MaxBufferedReports:       maxBuffered,
-		AllowInsecureHTTP:        file.AllowInsecureHTTP,
-		MonitoredServices:        file.MonitoredServices,
-		MonitoredProcesses:       cleanList(file.MonitoredProcesses),
-		SkipProcesses:            file.SkipProcesses,
-		CollectAllProcesses:      file.CollectAllProcesses,
-		ProcessCollectionLimit:   positiveOrDefault(file.ProcessCollectionLimit, func() int {
+		ServerURL:           strings.TrimRight(strings.TrimSpace(file.ServerURL), "/"),
+		DeviceID:            strings.TrimSpace(file.DeviceID),
+		AgentKey:            strings.TrimSpace(file.AgentKey),
+		Interval:            interval,
+		RequestTimeout:      timeout,
+		SpoolDir:            spoolDir,
+		MaxBufferedReports:  maxBuffered,
+		AllowInsecureHTTP:   file.AllowInsecureHTTP,
+		MonitoredServices:   file.MonitoredServices,
+		MonitoredProcesses:  cleanList(file.MonitoredProcesses),
+		SkipProcesses:       file.SkipProcesses,
+		CollectAllProcesses: file.CollectAllProcesses,
+		ProcessCollectionLimit: positiveOrDefault(file.ProcessCollectionLimit, func() int {
 			if file.CollectAllProcesses {
 				return 256
 			}
@@ -143,13 +154,51 @@ func Load(args []string) (Config, error) {
 		HostRoot:                 strings.TrimSpace(file.HostRoot),
 		DockerSocket:             strings.TrimSpace(file.DockerSocket),
 		LogPaths:                 cleanList(file.LogPaths),
+		CollectSystemLogs:        file.CollectSystemLogs,
 		IntegrityPaths:           cleanList(file.IntegrityPaths),
+		CustomMetrics:            cleanCustomMetrics(file.CustomMetrics),
 		AllowCommandExecution:    file.AllowCommandExecution,
 		AllowFileOperations:      file.AllowFileOperations,
 		CommandPollInterval:      pollInterval,
 		MaxCommandOutputBytes:    maxCommandOutput,
 	}
 	return cfg, cfg.Validate()
+}
+
+func cleanCustomMetrics(values []CustomMetric) []CustomMetric {
+	if len(values) > 32 {
+		values = values[:32]
+	}
+	result := make([]CustomMetric, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value.Name = strings.TrimSpace(value.Name)
+		value.Command = strings.TrimSpace(value.Command)
+		value.Kind = strings.ToLower(strings.TrimSpace(value.Kind))
+		if value.Kind == "" {
+			value.Kind = "number"
+		}
+		value.Args = cleanList(value.Args)
+		if value.Name == "" || value.Command == "" || len(value.Name) > 80 || len(value.Command) > 128 || len(value.Args) > 16 || (value.Kind != "number" && value.Kind != "text" && value.Kind != "exit_code") {
+			continue
+		}
+		validArgs := true
+		for _, arg := range value.Args {
+			if len(arg) > 256 || strings.ContainsRune(arg, '\x00') {
+				validArgs = false
+				break
+			}
+		}
+		if !validArgs {
+			continue
+		}
+		if _, exists := seen[value.Name]; exists {
+			continue
+		}
+		seen[value.Name] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func positiveOrDefault(value, fallback int) int {
@@ -219,6 +268,22 @@ func (c Config) Validate() error {
 	}
 	if c.ContainerCollectionLimit < 1 || c.ContainerCollectionLimit > 100 {
 		return errors.New("container_collection_limit must be between 1 and 100")
+	}
+	if len(c.CustomMetrics) > 32 {
+		return errors.New("custom_metrics must contain at most 32 items")
+	}
+	for _, metric := range c.CustomMetrics {
+		if metric.Name == "" || metric.Command == "" || len(metric.Name) > 80 || len(metric.Command) > 128 || len(metric.Args) > 16 {
+			return errors.New("custom metric definition is invalid")
+		}
+		if metric.Kind != "number" && metric.Kind != "text" && metric.Kind != "exit_code" {
+			return errors.New("custom metric kind must be number, text or exit_code")
+		}
+		for _, arg := range metric.Args {
+			if len(arg) > 256 || strings.ContainsRune(arg, '\x00') {
+				return errors.New("custom metric argument is invalid")
+			}
+		}
 	}
 	return nil
 }

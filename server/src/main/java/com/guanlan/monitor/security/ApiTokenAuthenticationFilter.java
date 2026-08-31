@@ -79,6 +79,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
                 || path.equals("/actuator/info"))) return null;
         if (path.startsWith("/api/admin/")) return "nezha:admin:*";
         if (path.equals("/api/dashboard")) return "nezha:inventory:read";
+        if (path.equals("/api/topology")) return "nezha:inventory:read";
         if (path.equals("/api/devices")) return method.equals("GET") ? "nezha:inventory:read" : method.equals("POST") ? "nezha:server:write" : null;
         if (path.startsWith("/api/devices/")) {
             if (path.endsWith("/rotate-key")) return "nezha:server:write";
@@ -95,6 +96,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/tasks")) return method.equals("GET") ? "nezha:server:read" : "nezha:server:exec";
         if (path.startsWith("/api/alert-rules")) return resourceScope("alertrule", method);
         if (path.startsWith("/api/alerts")) return method.equals("GET") ? "nezha:alert:read" : "nezha:alert:write";
+        if (path.startsWith("/api/maintenance-windows")) return resourceScope("maintenance", method);
         if (path.startsWith("/api/settings")) return "nezha:admin:*";
         return DENY_SCOPE;
     }

@@ -21,7 +21,12 @@
   "host_root": "",
   "docker_socket": "",
   "log_paths": [],
+  "collect_system_logs": false,
   "integrity_paths": [],
+  "custom_metrics": [
+    {"name": "queue_depth", "command": "/usr/local/bin/queue-depth", "args": [], "kind": "number"},
+    {"name": "release", "command": "/usr/local/bin/release-name", "args": [], "kind": "text"}
+  ],
   "allow_command_execution": false,
   "allow_file_operations": false,
   "command_poll_interval": "1s",

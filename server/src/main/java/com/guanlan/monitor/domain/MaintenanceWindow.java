@@ -11,13 +11,13 @@ import java.time.Instant;
 @Setter
 @NoArgsConstructor
 @Entity
-@Table(name = "alert_rules")
-public class AlertRule {
-    public enum Metric { CPU_USAGE, MEMORY_USAGE, DISK_USAGE, LOAD_1, DISK_READ_BPS, DISK_WRITE_BPS,
-        CONTAINER_CPU_USAGE, CONTAINER_MEMORY_USAGE, GPU_USAGE, BATTERY_PERCENT, SMART_FAILURES,
-        INTEGRITY_CHANGES, FIREWALL_INACTIVE, TCP_CONNECTIONS, NETWORK_RECV_BPS, NETWORK_SENT_BPS,
-        TEMPERATURE, DEVICE_OFFLINE, PROCESS_MISSING, SERVICE_NOT_RUNNING, CUSTOM_METRIC }
-    public enum Severity { INFO, WARNING, CRITICAL }
+@Table(name = "maintenance_windows", indexes = {
+        @Index(name = "idx_maintenance_enabled_time", columnList = "enabled,starts_at,ends_at"),
+        @Index(name = "idx_maintenance_device", columnList = "device_id"),
+        @Index(name = "idx_maintenance_rule", columnList = "rule_id")
+})
+public class MaintenanceWindow {
+    public enum Recurrence { NONE, DAILY, WEEKLY }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -30,19 +30,28 @@ public class AlertRule {
     @JoinColumn(name = "device_id")
     private Device device;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
-    private Metric metric;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rule_id")
+    private AlertRule rule;
 
-    @Column(nullable = false)
-    private double threshold;
+    @Column(name = "starts_at", nullable = false)
+    private Instant startsAt;
 
-    @Column(name = "target_name", length = 255)
-    private String targetName;
+    @Column(name = "ends_at", nullable = false)
+    private Instant endsAt;
+
+    @Column(nullable = false, length = 64)
+    private String timezone = "UTC";
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private Severity severity = Severity.WARNING;
+    private Recurrence recurrence = Recurrence.NONE;
+
+    @Column(name = "repeat_until")
+    private Instant repeatUntil;
+
+    @Column(length = 300)
+    private String reason;
 
     @Column(nullable = false)
     private boolean enabled = true;

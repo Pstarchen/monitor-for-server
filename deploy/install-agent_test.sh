@@ -5,8 +5,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 installer="${script_dir}/install-agent.sh"
 grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run' "${installer}" >/dev/null
 grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
-grep -F 'cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.7.2/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F -- '--retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F 'cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.8.0/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F -- 'curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 fake_bin="${temp_dir}/bin"
@@ -153,6 +153,11 @@ fi
 
 : > "${log_file}"
 server_url=https://monitor.example.com
+run_installer 1 --system-logs
+grep -F '"collect_system_logs": true' "${config_file}" >/dev/null
+
+: > "${log_file}"
+server_url=https://monitor.example.com
 run_installer 0
 grep -F 'go build -trimpath' "${log_file}" >/dev/null
 grep -F 'systemctl enable --now guanlan-agent.service' "${log_file}" >/dev/null
@@ -200,7 +205,7 @@ server_url=monitor.example.com
 TEST_HTTPS_PROBE=1
 TEST_HTTP_PROBE=0
 run_installer 1
-grep -F 'curl --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =https' "${log_file}" >/dev/null
+grep -F 'curl -4 --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =https' "${log_file}" >/dev/null
 grep -F '"server_url": "https://monitor.example.com"' "${config_file}" >/dev/null
 
 : > "${log_file}"
@@ -234,7 +239,7 @@ server_url=monitor.example.com
 TEST_HTTPS_PROBE=0
 TEST_HTTP_PROBE=1
 run_installer 1
-grep -F 'curl --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =http' "${log_file}" >/dev/null
+grep -F 'curl -4 --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =http' "${log_file}" >/dev/null
 grep -F '"server_url": "http://monitor.example.com"' "${config_file}" >/dev/null
 grep -F '"allow_insecure_http": true' "${config_file}" >/dev/null
 

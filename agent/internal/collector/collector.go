@@ -51,7 +51,9 @@ type Options struct {
 	HostRoot                 string
 	DockerSocket             string
 	LogPaths                 []string
+	CollectSystemLogs        bool
 	IntegrityPaths           []string
+	CustomMetrics            []CustomMetricConfig
 }
 
 const maxMonitoredProcesses = 32
@@ -142,7 +144,9 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		Firewall:          collectFirewall(ctx, c.options.HostRoot),
 		CronJobs:          collectCronJobs(ctx, c.options.HostRoot),
 		Logs:              collectLogs(ctx, c.options.LogPaths, c.options.HostRoot),
+		SystemLogs:        collectSystemLogs(ctx, c.options.CollectSystemLogs, c.options.HostRoot),
 		Integrity:         collectIntegrity(ctx, c.options.IntegrityPaths, c.options.HostRoot),
+		CustomMetrics:     collectCustomMetrics(ctx, c.options.CustomMetrics),
 	}, nil
 }
 

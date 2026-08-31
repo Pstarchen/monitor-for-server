@@ -32,7 +32,7 @@ public final class AlertDtos {
             Long id, String deviceId, String deviceName, Long ruleId, String ruleName,
             AlertRule.Severity severity, AlertEvent.Status status, double value,
             String message, Instant startedAt, Instant acknowledgedAt,
-            String acknowledgedBy, Instant resolvedAt
+            String acknowledgedBy, Instant resolvedAt, boolean notificationSuppressed, Instant notifiedAt
     ) {}
 }
 

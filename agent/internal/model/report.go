@@ -3,21 +3,23 @@ package model
 import "time"
 
 type Report struct {
-	CollectedAt       time.Time          `json:"collectedAt"`
-	Host              HostInfo           `json:"host"`
-	CPU               CPUStats           `json:"cpu"`
-	Memory            MemoryStats        `json:"memory"`
-	Disks             []DiskStats        `json:"disks"`
-	Network           NetworkStats       `json:"network"`
-	NetworkInterfaces []NetworkInterface `json:"networkInterfaces"`
-	Ports             []PortStats        `json:"ports"`
-	Containers        []ContainerStats   `json:"containers"`
-	Processes         []ProcessStats     `json:"processes"`
-	Services          []ServiceStatus    `json:"services"`
-	Firewall          FirewallStatus     `json:"firewall"`
-	CronJobs          []CronJob          `json:"cronJobs"`
-	Logs              []LogFile          `json:"logs"`
-	Integrity         []IntegrityItem    `json:"integrity"`
+	CollectedAt       time.Time            `json:"collectedAt"`
+	Host              HostInfo             `json:"host"`
+	CPU               CPUStats             `json:"cpu"`
+	Memory            MemoryStats          `json:"memory"`
+	Disks             []DiskStats          `json:"disks"`
+	Network           NetworkStats         `json:"network"`
+	NetworkInterfaces []NetworkInterface   `json:"networkInterfaces"`
+	Ports             []PortStats          `json:"ports"`
+	Containers        []ContainerStats     `json:"containers"`
+	Processes         []ProcessStats       `json:"processes"`
+	Services          []ServiceStatus      `json:"services"`
+	Firewall          FirewallStatus       `json:"firewall"`
+	CronJobs          []CronJob            `json:"cronJobs"`
+	Logs              []LogFile            `json:"logs"`
+	SystemLogs        []LogFile            `json:"systemLogs"`
+	Integrity         []IntegrityItem      `json:"integrity"`
+	CustomMetrics     []CustomMetricResult `json:"customMetrics"`
 }
 
 type HostInfo struct {
@@ -185,4 +187,14 @@ type IntegrityItem struct {
 	SHA256     string `json:"sha256"`
 	SizeBytes  int64  `json:"sizeBytes"`
 	ModifiedAt string `json:"modifiedAt"`
+}
+
+type CustomMetricResult struct {
+	Name     string   `json:"name"`
+	Kind     string   `json:"kind"`
+	Value    *float64 `json:"value,omitempty"`
+	Text     string   `json:"text,omitempty"`
+	ExitCode int      `json:"exitCode"`
+	Success  bool     `json:"success"`
+	Error    string   `json:"error,omitempty"`
 }

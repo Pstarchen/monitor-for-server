@@ -21,8 +21,9 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive<{ name: string; deviceId: string; metric: AlertMetric; targetName: string; threshold: number; severity: AlertSeverity; enabled: boolean }>({ name: '', deviceId: '', metric: 'CPU_USAGE', targetName: '', threshold: 80, severity: 'WARNING', enabled: true })
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
-const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', LOAD_1: '1 分钟负载', DISK_READ_BPS: '磁盘读取速率', DISK_WRITE_BPS: '磁盘写入速率', CONTAINER_CPU_USAGE: '容器 CPU 使用率', CONTAINER_MEMORY_USAGE: '容器内存使用率', GPU_USAGE: 'GPU 使用率', BATTERY_PERCENT: '电池电量', SMART_FAILURES: 'SMART 失败磁盘数', INTEGRITY_CHANGES: '完整性变更文件数', FIREWALL_INACTIVE: '防火墙未启用', TCP_CONNECTIONS: 'TCP 连接数', NETWORK_RECV_BPS: '网络接收速率', NETWORK_SENT_BPS: '网络发送速率', TEMPERATURE: '最高温度', DEVICE_OFFLINE: '设备离线', PROCESS_MISSING: '关键进程缺失', SERVICE_NOT_RUNNING: '系统服务未运行' }
-const targetMetrics: AlertMetric[] = ['PROCESS_MISSING', 'SERVICE_NOT_RUNNING']
+const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', LOAD_1: '1 分钟负载', DISK_READ_BPS: '磁盘读取速率', DISK_WRITE_BPS: '磁盘写入速率', CONTAINER_CPU_USAGE: '容器 CPU 使用率', CONTAINER_MEMORY_USAGE: '容器内存使用率', GPU_USAGE: 'GPU 使用率', BATTERY_PERCENT: '电池电量', SMART_FAILURES: 'SMART 失败磁盘数', INTEGRITY_CHANGES: '完整性变更文件数', FIREWALL_INACTIVE: '防火墙未启用', TCP_CONNECTIONS: 'TCP 连接数', NETWORK_RECV_BPS: '网络接收速率', NETWORK_SENT_BPS: '网络发送速率', TEMPERATURE: '最高温度', DEVICE_OFFLINE: '设备离线', PROCESS_MISSING: '关键进程缺失', SERVICE_NOT_RUNNING: '系统服务未运行', CUSTOM_METRIC: '自定义监控项' }
+const targetMetrics: AlertMetric[] = ['PROCESS_MISSING', 'SERVICE_NOT_RUNNING', 'CUSTOM_METRIC']
+const presenceTargetMetrics: AlertMetric[] = ['PROCESS_MISSING', 'SERVICE_NOT_RUNNING']
 
 async function load() {
   loading.value = true
@@ -51,7 +52,7 @@ function defaultThreshold(metric: AlertMetric) {
   if (metric === 'SMART_FAILURES') return 1
   if (metric === 'INTEGRITY_CHANGES') return 1
   if (metric === 'FIREWALL_INACTIVE') return 1
-  if (targetMetrics.includes(metric)) return 1
+  if (presenceTargetMetrics.includes(metric)) return 1
   if (metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS') return 10 * 1024 * 1024
   return 80
 }
@@ -62,7 +63,8 @@ function thresholdText(rule: AlertRule) {
   if (rule.metric === 'SMART_FAILURES') return `${rule.threshold.toFixed(0)} 个`
   if (rule.metric === 'INTEGRITY_CHANGES') return `${rule.threshold.toFixed(0)} 个`
   if (rule.metric === 'FIREWALL_INACTIVE') return rule.threshold >= 1 ? '未启用' : '已启用'
-  if (targetMetrics.includes(rule.metric)) return `${rule.targetName || '未设置目标'} 不存在或未运行`
+  if (rule.metric === 'CUSTOM_METRIC') return `${rule.targetName || '未设置目标'} ≥ ${rule.threshold}`
+  if (presenceTargetMetrics.includes(rule.metric)) return `${rule.targetName || '未设置目标'} 不存在或未运行`
   if (rule.metric === 'TEMPERATURE') return `${rule.threshold.toFixed(1)} °C`
   if (rule.metric === 'LOAD_1') return rule.threshold.toFixed(2)
   if (rule.metric === 'DISK_READ_BPS' || rule.metric === 'DISK_WRITE_BPS') return rate(rule.threshold)
@@ -77,7 +79,7 @@ function metricMax(metric: AlertMetric) {
   if (metric === 'SMART_FAILURES') return 100
   if (metric === 'INTEGRITY_CHANGES') return 512
   if (metric === 'FIREWALL_INACTIVE') return 1
-  if (targetMetrics.includes(metric)) return 1
+  if (presenceTargetMetrics.includes(metric)) return 1
   if (metric === 'CPU_USAGE' || metric === 'MEMORY_USAGE' || metric === 'DISK_USAGE' || metric === 'CONTAINER_CPU_USAGE' || metric === 'CONTAINER_MEMORY_USAGE' || metric === 'GPU_USAGE' || metric === 'BATTERY_PERCENT') return 100
   return 1_000_000_000_000
 }
@@ -96,7 +98,7 @@ function metricUnit(metric: AlertMetric) {
   if (metric === 'SMART_FAILURES') return '个'
   if (metric === 'INTEGRITY_CHANGES') return '个'
   if (metric === 'FIREWALL_INACTIVE') return ''
-  if (targetMetrics.includes(metric)) return ''
+  if (presenceTargetMetrics.includes(metric)) return ''
   if (metric === 'TEMPERATURE') return '°C'
   if (metric === 'LOAD_1') return ''
   if (metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS') return 'B/s'
@@ -131,7 +133,7 @@ async function save() {
     return
   }
   saving.value = true
-  const payload = { ...form, name: form.name.trim(), deviceId: form.deviceId || null, targetName: targetMetrics.includes(form.metric) ? form.targetName.trim() : null, threshold: targetMetrics.includes(form.metric) ? 1 : form.threshold }
+  const payload = { ...form, name: form.name.trim(), deviceId: form.deviceId || null, targetName: targetMetrics.includes(form.metric) ? form.targetName.trim() : null, threshold: presenceTargetMetrics.includes(form.metric) ? 1 : form.threshold }
   try {
     if (editingId.value) await api.put(`/alert-rules/${editingId.value}`, payload)
     else await api.post('/alert-rules', payload)
@@ -178,9 +180,9 @@ onMounted(load)
           <el-form-item label="监控范围"><el-select v-model="form.deviceId" placeholder="全部设备" clearable><el-option label="全部设备" value="" /><el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" /></el-select></el-form-item>
           <el-form-item label="监控指标" required><el-select v-model="form.metric" @change="metricChanged"><el-option v-for="(label, value) in metricLabels" :key="value" :label="label" :value="value" /></el-select></el-form-item>
           <el-form-item label="告警级别" required><el-select v-model="form.severity"><el-option label="提示" value="INFO" /><el-option label="警告" value="WARNING" /><el-option label="严重" value="CRITICAL" /></el-select></el-form-item>
-          <el-form-item v-if="!targetMetrics.includes(form.metric)" label="触发阈值"><el-input-number v-model="form.threshold" :min="metricMin(form.metric)" :max="metricMax(form.metric)" :precision="metricPrecision(form.metric)" /><span class="field-suffix">{{ metricUnit(form.metric) }}</span></el-form-item>
+        <el-form-item v-if="!presenceTargetMetrics.includes(form.metric)" label="触发阈值"><el-input-number v-model="form.threshold" :min="metricMin(form.metric)" :max="metricMax(form.metric)" :precision="metricPrecision(form.metric)" /><span class="field-suffix">{{ metricUnit(form.metric) }}</span></el-form-item>
         </div>
-        <el-form-item v-if="targetMetrics.includes(form.metric)" label="目标名称" required><el-input v-model="form.targetName" maxlength="255" :placeholder="form.metric === 'PROCESS_MISSING' ? '例如：java 或 nginx' : '例如：nginx.service'" /><p class="field-help">Agent 必须在配置中采集对应进程或系统服务；轻量采集未返回清单时不会误报。</p></el-form-item>
+        <el-form-item v-if="targetMetrics.includes(form.metric)" label="目标名称" required><el-input v-model="form.targetName" maxlength="255" :placeholder="form.metric === 'PROCESS_MISSING' ? '例如：java 或 nginx' : form.metric === 'CUSTOM_METRIC' ? '例如：queue_depth' : '例如：nginx.service'" /><p class="field-help">进程或服务需要在 Agent 清单中采集；自定义监控项需要在 Agent 的 custom_metrics 中配置同名项目。</p></el-form-item>
         <el-form-item label="启用规则"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存规则</el-button></template>
