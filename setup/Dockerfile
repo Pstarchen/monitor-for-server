@@ -3,7 +3,7 @@ WORKDIR /src
 ENV GOPROXY=https://goproxy.cn,direct
 COPY go.mod go.sum* ./
 RUN go mod download
-COPY main.go controller_update.go ./
+COPY main.go controller_update.go controller_backup.go ./
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/setup .
