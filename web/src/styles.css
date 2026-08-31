@@ -298,6 +298,8 @@ p, h1, h2, h3 { margin: 0; }
 .auth-startup-status .spinner { width: 14px; height: 14px; flex: 0 0 14px; }
 .auth-card .primary-command { width: 100%; margin-top: 20px; }
 .auth-security { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 15px; color: var(--muted); font-size: 10px; }
+.auth-back-link { align-self: flex-start; margin-top: -2px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 11px; cursor: pointer; }
+.auth-back-link:hover { color: var(--foreground); }
 .auth-help-link { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 18px; color: var(--muted); font-size: 11px; }
 .auth-help-link:hover { color: var(--foreground); }
 
@@ -724,6 +726,24 @@ p, h1, h2, h3 { margin: 0; }
 .settings-section-actions { min-height: 70px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 20px; }
 .settings-section-actions p { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .security-settings { padding-top: 24px; }
+.two-factor-settings { display: grid; gap: 12px; margin-top: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-subtle); }
+.two-factor-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.two-factor-settings-head > div { display: grid; gap: 3px; }
+.two-factor-settings-head strong { font-size: 13px; }
+.two-factor-settings-head small, .two-factor-help, .two-factor-secret small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.two-factor-help { margin: 0; }
+.two-factor-enroll { display: flex; align-items: center; gap: 16px; }
+.two-factor-qr { width: 132px; height: 132px; flex: 0 0 auto; padding: 6px; background: #fff; }
+.two-factor-secret { min-width: 0; display: grid; gap: 8px; }
+.two-factor-secret code { overflow-wrap: anywhere; color: var(--foreground); font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.two-factor-disable { display: flex; align-items: center; gap: 8px; }
+.two-factor-disable .el-input { min-width: 0; }
+.table-secondary-text { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+@media (max-width: 560px) {
+  .two-factor-enroll { align-items: stretch; flex-direction: column; }
+  .two-factor-qr { align-self: center; }
+  .two-factor-disable { align-items: stretch; flex-direction: column; }
+}
 .token-settings { padding-top: 20px; }
 .token-security-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface-subtle); }
 .token-security-item { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 9px; padding: 14px 15px; border-right: 1px solid var(--border); }

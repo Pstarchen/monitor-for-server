@@ -83,6 +83,7 @@ public class UserService {
     }
 
     private UserDtos.View view(UserAccount user) {
-        return new UserDtos.View(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole(), user.isEnabled(), user.getCreatedAt());
+        return new UserDtos.View(user.getId(), user.getUsername(), user.getDisplayName(), user.getRole(), user.isEnabled(),
+                user.isTotpEnabled(), user.getCreatedAt());
     }
 }

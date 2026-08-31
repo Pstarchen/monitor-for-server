@@ -9,7 +9,7 @@
 - 设备密钥接入、实时指标、历史趋势、离线检测、阈值告警和告警确认。
 - 邮件、钉钉、企业微信和通用 Webhook 通知，支持环境回退与 AES-256-GCM 加密的在线配置；通用 Webhook 可直接对接 Slack、Discord、飞书/Lark 或纯文本端点。
 - 告警规则支持 CPU、内存、磁盘、SMART 失败磁盘数、TCP 连接数和设备离线阈值。
-- 基于会话 Cookie 的用户认证、ADMIN/OPERATOR/VIEWER 权限和操作审计。
+- 基于会话 Cookie 的用户认证、ADMIN/OPERATOR/VIEWER 权限和操作审计；支持基于 TOTP 的双因素认证，密钥以 AES-256-GCM 密文保存。
 - 当前用户可自助修改显示名和密码，修改密码必须校验当前密码并轮换会话 ID。
 - 响应式 Web 控制台、WebSocket 实时更新、浅色/深色模式和减少动态效果适配。
 - HTTP GET、ICMP Ping、TCPing、Redis PING、PostgreSQL 和 MySQL 协议握手服务监控，支持最近结果留存、排序、公开可见性和立即探测；数据库探测只发送最小协议握手，不需要保存数据库密码。

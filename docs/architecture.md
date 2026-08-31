@@ -31,7 +31,7 @@ flowchart LR
 
 - 基于 Spring Boot 3、Spring Security、JPA 与 Flyway。
 - 设备密钥只存 BCrypt 哈希；明文仅在创建和轮换响应中返回一次。
-- 会话使用 `HttpOnly`、`SameSite=Lax` Cookie，写操作要求 CSRF Token，登录有速率限制并在成功后轮换会话 ID。
+- 会话使用 `HttpOnly`、`SameSite=Lax` Cookie，写操作要求 CSRF Token，登录有速率限制并在成功后轮换会话 ID；启用 TOTP 的账号必须完成 5 分钟内的验证码挑战。TOTP 密钥使用设置加密密钥以 AES-256-GCM 密文保存，不进入日志或用户列表。
 - 指标写入 PostgreSQL，在线状态可通过 Redis 缓存；PostgreSQL 是最终数据源。
 - 每 10 秒执行离线检测，每天清理过期指标。离线规则会持续评估，Agent 恢复后自动关闭对应告警。
 - WebSocket 仅向已登录会话广播 `metric.updated`、`alert.opened` 和 `alert.resolved`；客户端断线时以 REST 轮询为准。

@@ -21,13 +21,36 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(username: string, password: string, returnTo: string) {
     const csrf = await refreshCsrf()
-    const response = await api.post<{ user: User; returnTo: string }>('/auth/login', { username, password, returnTo }, {
+    const response = await api.post<{ user: User | null; returnTo: string; requiresTwoFactor: boolean }>('/auth/login', { username, password, returnTo }, {
       headers: { [csrf.headerName]: csrf.token },
     })
+    if (response.data.requiresTwoFactor) {
+      user.value = null
+      initialized.value = false
+    } else {
+      user.value = response.data.user
+      initialized.value = true
+    }
+    await refreshCsrf()
+    return { returnTo: response.data.returnTo, requiresTwoFactor: response.data.requiresTwoFactor }
+  }
+
+  async function verifyTwoFactor(code: string, returnTo: string) {
+    const response = await api.post<{ user: User; returnTo: string; requiresTwoFactor: false }>('/auth/2fa/verify', { code, returnTo })
     user.value = response.data.user
     initialized.value = true
     await refreshCsrf()
     return response.data.returnTo
+  }
+
+  async function reload() {
+    try {
+      user.value = (await api.get<User>('/auth/me')).data
+    } catch {
+      user.value = null
+    }
+    initialized.value = true
+    return user.value
   }
 
   async function logout() {
@@ -47,5 +70,5 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data
   }
 
-  return { user, initialized, initialize, login, logout, updateProfile }
+  return { user, initialized, initialize, login, verifyTwoFactor, reload, logout, updateProfile }
 })

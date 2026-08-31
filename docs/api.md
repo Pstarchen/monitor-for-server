@@ -5,9 +5,10 @@
 ## 认证约定
 
 1. 浏览器先调用 `GET /api/auth/csrf`，Axios 会从 `XSRF-TOKEN` Cookie 读取值并在写请求中发送 `X-XSRF-TOKEN`。
-2. 调用 `POST /api/auth/login` 建立会话。认证失败只返回通用错误，连续失败会触发限流。
-3. 后续请求携带会话 Cookie。退出使用 `POST /api/auth/logout`。
-4. Agent 调用上报接口时发送 `X-Device-Id` 和 `X-Agent-Key`。不要把 Agent 密钥放入 URL、日志或 Web 前端。
+2. 调用 `POST /api/auth/login` 建立会话。认证失败只返回通用错误，连续失败会触发限流；启用 TOTP 的账号会返回 `requiresTwoFactor: true`，此时不会建立最终认证上下文。
+3. 对挑战会话调用 `POST /api/auth/2fa/verify`，验证码正确后才建立会话。挑战有效期为 5 分钟，验证码允许前后一个 30 秒周期。
+4. 后续请求携带会话 Cookie。退出使用 `POST /api/auth/logout`。
+5. Agent 调用上报接口时发送 `X-Device-Id` 和 `X-Agent-Key`。不要把 Agent 密钥放入 URL、日志或 Web 前端。
 
 错误响应格式：
 
@@ -22,9 +23,14 @@
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/api/auth/csrf` | 公开 | 初始化 CSRF Cookie |
-| POST | `/api/auth/login` | 公开 | 用户名、密码、可选本地 `returnTo` |
+| POST | `/api/auth/login` | 公开 | 用户名、密码、可选本地 `returnTo`；启用 2FA 时返回验证码挑战 |
+| POST | `/api/auth/2fa/verify` | 公开（挑战会话） | 使用 6 位 TOTP 验证码完成登录 |
 | GET | `/api/auth/me` | 登录 | 当前用户资料 |
 | PUT | `/api/auth/profile` | 登录 | 修改当前用户显示名；修改密码时必须同时提供当前密码和新密码 |
+| GET | `/api/auth/2fa/status` | 登录 | 查看当前账号是否启用 TOTP |
+| POST | `/api/auth/2fa/setup` | 登录 | 使用当前密码生成一次性绑定密钥和 `otpauth://` URI；要求设置加密密钥 |
+| POST | `/api/auth/2fa/enable` | 登录 | 使用绑定阶段的 6 位验证码启用 TOTP |
+| POST | `/api/auth/2fa/disable` | 登录 | 使用当前密码和 6 位验证码停用 TOTP |
 | POST | `/api/auth/logout` | 登录 | 注销并清除会话 |
 
 登录请求：
@@ -36,6 +42,18 @@
   "returnTo": "/dashboard"
 }
 ```
+
+启用 TOTP 的登录响应示例：
+
+```json
+{
+  "user": null,
+  "returnTo": "/dashboard",
+  "requiresTwoFactor": true
+}
+```
+
+绑定流程先提交 `{"currentPassword":"通过安全输入提供"}` 到 `/api/auth/2fa/setup`，将返回的 `otpauthUri` 交给身份验证器 App 后，再把当前 6 位码提交到 `/api/auth/2fa/enable`。密钥只在 setup 响应中返回一次，数据库不会保存明文。
 
 ## 设备与指标
 

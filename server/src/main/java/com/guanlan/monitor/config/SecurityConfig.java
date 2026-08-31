@@ -47,7 +47,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/settings/public", "/api/settings/site-icon", "/api/public/overview", "/api/services/public", "/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/agent/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/agent/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/2fa/verify", "/api/agent/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/heartbeat/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/heartbeat/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

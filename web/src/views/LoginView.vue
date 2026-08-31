@@ -12,6 +12,8 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const form = reactive({ username: '', password: '' })
+const twoFactorCode = ref('')
+const twoFactorStep = ref(false)
 const loading = ref(false)
 const error = ref('')
 const revealPassword = ref(false)
@@ -31,20 +33,41 @@ function toggleTheme() {
 
 async function submit() {
   if (!serviceReady.value) return
-  if (!form.username.trim() || !form.password) {
+  if (twoFactorStep.value) {
+    if (!/^\d{6}$/.test(twoFactorCode.value)) {
+      error.value = '请输入 6 位验证码'
+      return
+    }
+  } else if (!form.username.trim() || !form.password) {
     error.value = '请输入用户名和密码'
     return
   }
   loading.value = true
   error.value = ''
   try {
-    const destination = await auth.login(form.username.trim(), form.password, returnTo.value)
-    await router.replace(safeLocalPath(destination))
+    if (twoFactorStep.value) {
+      const destination = await auth.verifyTwoFactor(twoFactorCode.value, returnTo.value)
+      await router.replace(safeLocalPath(destination))
+    } else {
+      const result = await auth.login(form.username.trim(), form.password, returnTo.value)
+      if (result.requiresTwoFactor) {
+        twoFactorStep.value = true
+        twoFactorCode.value = ''
+      } else {
+        await router.replace(safeLocalPath(result.returnTo))
+      }
+    }
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
     loading.value = false
   }
+}
+
+function returnToPasswordStep() {
+  twoFactorStep.value = false
+  twoFactorCode.value = ''
+  error.value = ''
 }
 
 async function checkServiceReadiness() {
@@ -107,30 +130,40 @@ onBeforeUnmount(() => {
       <form class="auth-card fade-in-up" novalidate @submit.prevent="submit">
         <div class="auth-card-head">
           <p class="eyebrow">运维控制台</p>
-          <h2>登录{{ siteName }}</h2>
-          <p>使用管理员分配的账号进入系统</p>
+          <h2>{{ twoFactorStep ? '输入验证码' : `登录${siteName}` }}</h2>
+          <p>{{ twoFactorStep ? '打开身份验证器，输入当前显示的 6 位验证码' : '使用管理员分配的账号进入系统' }}</p>
         </div>
 
-        <label class="field-label" for="username">用户名</label>
-        <div class="input-with-icon">
-          <UserRound :size="17" />
-          <input id="username" v-model="form.username" name="username" autocomplete="username" autofocus placeholder="请输入用户名" />
-        </div>
+        <template v-if="!twoFactorStep">
+          <label class="field-label" for="username">用户名</label>
+          <div class="input-with-icon">
+            <UserRound :size="17" />
+            <input id="username" v-model="form.username" name="username" autocomplete="username" autofocus placeholder="请输入用户名" />
+          </div>
 
-        <label class="field-label" for="password">密码</label>
-        <div class="input-with-icon">
-          <LockKeyhole :size="17" />
-          <input id="password" v-model="form.password" name="password" :type="revealPassword ? 'text' : 'password'" autocomplete="current-password" placeholder="请输入密码" />
-          <button type="button" :aria-label="revealPassword ? '隐藏密码' : '显示密码'" :title="revealPassword ? '隐藏密码' : '显示密码'" @click="revealPassword = !revealPassword">
-            <EyeOff v-if="revealPassword" :size="17" /><Eye v-else :size="17" />
-          </button>
-        </div>
+          <label class="field-label" for="password">密码</label>
+          <div class="input-with-icon">
+            <LockKeyhole :size="17" />
+            <input id="password" v-model="form.password" name="password" :type="revealPassword ? 'text' : 'password'" autocomplete="current-password" placeholder="请输入密码" />
+            <button type="button" :aria-label="revealPassword ? '隐藏密码' : '显示密码'" :title="revealPassword ? '隐藏密码' : '显示密码'" @click="revealPassword = !revealPassword">
+              <EyeOff v-if="revealPassword" :size="17" /><Eye v-else :size="17" />
+            </button>
+          </div>
+        </template>
+        <template v-else>
+          <label class="field-label" for="two-factor-code">身份验证器验证码</label>
+          <div class="input-with-icon">
+            <ShieldCheck :size="17" />
+            <input id="two-factor-code" v-model="twoFactorCode" name="one-time-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" autofocus placeholder="输入 6 位验证码" />
+          </div>
+          <button class="auth-back-link" type="button" @click="returnToPasswordStep">返回修改账号或密码</button>
+        </template>
 
         <p v-if="!serviceReady" :class="serviceFailed ? 'form-error' : 'auth-startup-status'" :role="serviceFailed ? 'alert' : 'status'"><span v-if="!serviceFailed" class="spinner" />{{ serviceMessage }}</p>
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         <button class="primary-command button-press" type="submit" :disabled="loading || !serviceReady">
           <span v-if="loading" class="spinner" />
-          <span>{{ loading ? '正在验证' : '登录' }}</span>
+          <span>{{ loading ? '正在验证' : (twoFactorStep ? '验证并登录' : '登录') }}</span>
         </button>
         <p class="auth-security"><LockKeyhole :size="13" /> 会话凭据仅保存在安全 Cookie 中</p>
         <RouterLink class="auth-public-link" to="/"><Activity :size="13" /> 查看公开状态页</RouterLink>

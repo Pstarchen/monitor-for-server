@@ -19,6 +19,7 @@ import com.guanlan.monitor.service.AlertService;
 import com.guanlan.monitor.service.ApiTokenService;
 import com.guanlan.monitor.service.DeviceService;
 import com.guanlan.monitor.service.MaintenanceJobs;
+import com.guanlan.monitor.service.TotpService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -58,6 +59,7 @@ class AuthAndAgentIntegrationTest {
     @Autowired SystemSettingRepository settings;
     @Autowired UserAccountRepository userAccounts;
     @Autowired PasswordEncoder passwordEncoder;
+    @Autowired TotpService totp;
 
     @Test
     void publicBrandUsesPersistedSiteNameWithoutAuthentication() throws Exception {
@@ -286,6 +288,71 @@ class AuthAndAgentIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.metric").value("TCP_CONNECTIONS"))
                 .andExpect(jsonPath("$.threshold").value(500));
+    }
+
+    @Test
+    void userCanEnrollTwoFactorAndMustCompleteChallengeOnLogin() throws Exception {
+        UserAccount account = new UserAccount();
+        account.setUsername("totp-test");
+        account.setDisplayName("TOTP 测试");
+        account.setPasswordHash(passwordEncoder.encode("Totp-password-123"));
+        account.setRole(UserAccount.Role.VIEWER);
+        account.setEnabled(true);
+        userAccounts.save(account);
+
+        var login = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/login")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"totp-test\",\"password\":\"Totp-password-123\"}"))
+                .andExpect(status().isOk()).andReturn();
+        MockHttpSession session = (MockHttpSession) login.getRequest().getSession(false);
+
+        var setup = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/2fa/setup")
+                        .session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Totp-password-123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.otpauthUri").value(org.hamcrest.Matchers.startsWith("otpauth://totp/")))
+                .andReturn();
+        String secret = mapper.readTree(setup.getResponse().getContentAsString()).get("secret").asText();
+        String setupCode = totp.currentCode(secret, Instant.now());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/2fa/enable")
+                        .session(session).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"" + setupCode + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true));
+
+        var challenge = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/login")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"totp-test\",\"password\":\"Totp-password-123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requiresTwoFactor").value(true))
+                .andExpect(jsonPath("$.user").doesNotExist())
+                .andReturn();
+        MockHttpSession challengeSession = (MockHttpSession) challenge.getRequest().getSession(false);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/2fa/verify")
+                        .session(challengeSession).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"000000\"}"))
+                .andExpect(status().isUnauthorized());
+
+        String loginCode = totp.currentCode(secret, Instant.now());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/2fa/verify")
+                        .session(challengeSession).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"" + loginCode + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.username").value("totp-test"))
+                .andExpect(jsonPath("$.requiresTwoFactor").value(false));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/2fa/disable")
+                        .session(challengeSession).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"wrong-password\",\"code\":\"" + loginCode + "\"}"))
+                .andExpect(status().isUnauthorized());
+        String disableCode = totp.currentCode(secret, Instant.now());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/auth/2fa/disable")
+                        .session(challengeSession).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Totp-password-123\",\"code\":\"" + disableCode + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false));
     }
 
     @Test

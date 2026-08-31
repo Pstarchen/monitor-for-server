@@ -31,5 +31,6 @@ public final class UserDtos {
             @Size(min = 12, max = 128) String newPassword
     ) {}
 
-    public record View(Long id, String username, String displayName, UserAccount.Role role, boolean enabled, Instant createdAt) {}
+    public record View(Long id, String username, String displayName, UserAccount.Role role, boolean enabled,
+                       boolean twoFactorEnabled, Instant createdAt) {}
 }

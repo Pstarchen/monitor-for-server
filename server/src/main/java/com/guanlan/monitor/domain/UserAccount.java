@@ -25,6 +25,12 @@ public class UserAccount {
     @Column(name = "password_hash", nullable = false, length = 100)
     private String passwordHash;
 
+    @Column(name = "totp_secret_ciphertext", columnDefinition = "TEXT")
+    private String totpSecretCiphertext;
+
+    @Column(name = "totp_enabled", nullable = false)
+    private boolean totpEnabled = false;
+
     @Column(name = "display_name", nullable = false, length = 80)
     private String displayName;
 

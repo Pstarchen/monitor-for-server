@@ -13,6 +13,7 @@ export interface User {
   displayName: string
   role: Role
   enabled: boolean
+  twoFactorEnabled: boolean
   createdAt: string
 }
 

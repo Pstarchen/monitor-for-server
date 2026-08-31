@@ -6,6 +6,7 @@ import {
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
+import QRCode from 'qrcode'
 import { api, errorMessage } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import { loadBranding, siteName } from '@/lib/branding'
@@ -20,6 +21,12 @@ const profileDialog = ref(false)
 const profileSaving = ref(false)
 const profileError = ref('')
 const profileForm = reactive({ displayName: '', currentPassword: '', newPassword: '' })
+const twoFactorSetupLoading = ref(false)
+const twoFactorActionLoading = ref(false)
+const twoFactorCode = ref('')
+const twoFactorSecret = ref('')
+const twoFactorUri = ref('')
+const twoFactorQr = ref('')
 const githubUrl = 'https://github.com/Pstarchen/monitor-for-server'
 const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
 const alertCenterOpen = ref(false)
@@ -114,12 +121,87 @@ async function logout() {
   await router.replace('/login')
 }
 
-function openProfile() {
+async function openProfile() {
   profileForm.displayName = auth.user?.displayName ?? ''
   profileForm.currentPassword = ''
   profileForm.newPassword = ''
+  twoFactorCode.value = ''
+  twoFactorSecret.value = ''
+  twoFactorUri.value = ''
+  twoFactorQr.value = ''
   profileError.value = ''
   profileDialog.value = true
+  try {
+    const status = await api.get<{ enabled: boolean }>('/auth/2fa/status')
+    if (auth.user) auth.user.twoFactorEnabled = status.data.enabled
+  } catch (cause) {
+    profileError.value = errorMessage(cause)
+  }
+}
+
+async function startTwoFactorSetup() {
+  if (!profileForm.currentPassword) {
+    profileError.value = '请输入当前密码后生成二维码'
+    return
+  }
+  twoFactorSetupLoading.value = true
+  profileError.value = ''
+  try {
+    const response = await api.post<{ secret: string; otpauthUri: string }>('/auth/2fa/setup', { currentPassword: profileForm.currentPassword })
+    twoFactorSecret.value = response.data.secret
+    twoFactorUri.value = response.data.otpauthUri
+    twoFactorQr.value = await QRCode.toDataURL(response.data.otpauthUri, { width: 184, margin: 1 })
+    twoFactorCode.value = ''
+  } catch (cause) {
+    profileError.value = errorMessage(cause)
+  } finally {
+    twoFactorSetupLoading.value = false
+  }
+}
+
+async function enableTwoFactor() {
+  if (!/^\d{6}$/.test(twoFactorCode.value)) {
+    profileError.value = '请输入身份验证器中的 6 位验证码'
+    return
+  }
+  twoFactorActionLoading.value = true
+  profileError.value = ''
+  try {
+    await api.post('/auth/2fa/enable', { code: twoFactorCode.value })
+    await auth.reload()
+    twoFactorSecret.value = ''
+    twoFactorUri.value = ''
+    twoFactorQr.value = ''
+    twoFactorCode.value = ''
+    ElMessage.success('双因素认证已启用')
+  } catch (cause) {
+    profileError.value = errorMessage(cause)
+  } finally {
+    twoFactorActionLoading.value = false
+  }
+}
+
+async function disableTwoFactor() {
+  if (!profileForm.currentPassword) {
+    profileError.value = '停用双因素认证前请输入当前密码'
+    return
+  }
+  if (!/^\d{6}$/.test(twoFactorCode.value)) {
+    profileError.value = '请输入身份验证器中的 6 位验证码'
+    return
+  }
+  twoFactorActionLoading.value = true
+  profileError.value = ''
+  try {
+    await api.post('/auth/2fa/disable', { currentPassword: profileForm.currentPassword, code: twoFactorCode.value })
+    await auth.reload()
+    twoFactorCode.value = ''
+    ElMessage.success('双因素认证已停用')
+  } catch (cause) {
+    profileError.value = errorMessage(cause)
+  } finally {
+    twoFactorActionLoading.value = false
+  }
 }
 
 async function saveProfile() {
@@ -284,8 +366,23 @@ onBeforeUnmount(() => {
     <el-dialog v-model="profileDialog" title="个人资料与密码" width="min(480px, calc(100vw - 28px))" destroy-on-close>
       <el-form label-position="top" @submit.prevent="saveProfile">
         <el-form-item label="显示名称" required><el-input v-model="profileForm.displayName" maxlength="80" autocomplete="name" /></el-form-item>
-        <el-form-item label="当前密码"><el-input v-model="profileForm.currentPassword" type="password" show-password autocomplete="current-password" placeholder="修改密码时填写" /></el-form-item>
+        <el-form-item label="当前密码"><el-input v-model="profileForm.currentPassword" type="password" show-password autocomplete="current-password" placeholder="修改密码或 2FA 安全操作时填写" /></el-form-item>
         <el-form-item label="新密码"><el-input v-model="profileForm.newPassword" type="password" show-password autocomplete="new-password" placeholder="留空表示不修改，至少 12 位" /></el-form-item>
+        <div class="two-factor-settings">
+          <div class="two-factor-settings-head"><div><strong>双因素认证</strong><small>{{ auth.user?.twoFactorEnabled ? '已启用，登录时需要验证码' : '未启用' }}</small></div><StatusBadge :status="auth.user?.twoFactorEnabled ? 'ONLINE' : 'OFFLINE'" /></div>
+          <template v-if="!auth.user?.twoFactorEnabled">
+            <p class="two-factor-help">使用身份验证器 App 扫描二维码，为账号增加一层登录保护。</p>
+            <el-button v-if="!twoFactorUri" type="primary" plain :loading="twoFactorSetupLoading" @click="startTwoFactorSetup"><ShieldCheck :size="15" />生成绑定二维码</el-button>
+            <div v-else class="two-factor-enroll">
+              <img :src="twoFactorQr" alt="双因素认证绑定二维码" class="two-factor-qr" />
+              <div class="two-factor-secret"><small>无法扫描时手动输入密钥</small><code>{{ twoFactorSecret }}</code><el-input v-model="twoFactorCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="输入 6 位验证码" /><el-button type="primary" :loading="twoFactorActionLoading" @click="enableTwoFactor">验证并启用</el-button></div>
+            </div>
+          </template>
+          <template v-else>
+            <p class="two-factor-help">停用前需要当前密码和身份验证器验证码。</p>
+            <div class="two-factor-disable"><el-input v-model="twoFactorCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="输入 6 位验证码" /><el-button type="danger" plain :loading="twoFactorActionLoading" @click="disableTwoFactor">停用 2FA</el-button></div>
+          </template>
+        </div>
         <p v-if="profileError" class="form-error" role="alert">{{ profileError }}</p>
       </el-form>
       <template #footer><el-button @click="profileDialog = false">取消</el-button><el-button type="primary" :loading="profileSaving" @click="saveProfile">保存</el-button></template>
