@@ -47,6 +47,7 @@ public class NetworkDiscoveryService {
     private final AuditService audit;
     private final ThreadPoolTaskExecutor executor;
     private final Map<Long, AtomicBoolean> cancellations = new ConcurrentHashMap<>();
+    private final Map<Long, ExecutorService> workers = new ConcurrentHashMap<>();
 
     public NetworkDiscoveryService(DiscoveryScanRepository scans, DiscoveryResultRepository results, ObjectMapper mapper,
                                    AuditService audit, @Qualifier("discoveryExecutor") ThreadPoolTaskExecutor executor) {
@@ -96,6 +97,8 @@ public class NetworkDiscoveryService {
         DiscoveryScan scan = require(id);
         if (scan.getStatus() == DiscoveryScan.Status.QUEUED || scan.getStatus() == DiscoveryScan.Status.RUNNING) {
             cancellations.computeIfAbsent(id, ignored -> new AtomicBoolean()).set(true);
+            ExecutorService worker = workers.get(id);
+            if (worker != null) worker.shutdownNow();
             scan.setStatus(DiscoveryScan.Status.CANCELED);
             scan.setFinishedAt(Instant.now());
             scan.setError("扫描已取消");
@@ -136,6 +139,7 @@ public class NetworkDiscoveryService {
         AtomicInteger scanned = new AtomicInteger(0);
         AtomicInteger discovered = new AtomicInteger(0);
         try (ExecutorService pool = Executors.newFixedThreadPool(normalized.concurrency())) {
+            workers.put(id, pool);
             List<Future<ProbeResult>> futures = new ArrayList<>();
             for (String address : normalized.addresses()) {
                 futures.add(pool.submit(() -> probe(address, normalized.ports(), normalized.timeoutMs())));
@@ -156,7 +160,9 @@ public class NetworkDiscoveryService {
                 }
             }
             futures.forEach(future -> { if (!future.isDone()) future.cancel(true); });
+            workers.remove(id, pool);
         } catch (Exception exception) {
+            workers.remove(id);
             finish(id, DiscoveryScan.Status.FAILED, "扫描执行失败，请稍后重试");
             return;
         }
