@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ClipboardList, Plus, RefreshCw, Terminal, XCircle } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
@@ -23,7 +23,6 @@ const selected = ref<AgentTask | null>(null)
 const deviceFilter = ref('')
 const statusFilter = ref<AgentTaskStatus | ''>('')
 const form = reactive({ deviceId: '', command: '', args: '', timeoutSeconds: 30, maxOutputBytes: 65536 })
-let refreshTimer = 0
 
 const operableDevices = computed(() => devices.value.filter((device) => auth.canRunTasks(device.id)))
 const canOperate = computed(() => (auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR') && operableDevices.value.length > 0)
@@ -82,11 +81,8 @@ async function cancelTask(task: AgentTask) {
 }
 
 function showTask(task: AgentTask) { selected.value = task }
-function scheduleRefresh() { window.clearTimeout(refreshTimer); refreshTimer = window.setTimeout(() => load(), 400) }
-
-onMounted(() => { load(); window.addEventListener('guanlan:realtime', scheduleRefresh) })
+onMounted(() => { load() })
 useVisibilityPolling(() => load())
-onBeforeUnmount(() => { window.clearTimeout(refreshTimer); window.removeEventListener('guanlan:realtime', scheduleRefresh) })
 </script>
 
 <template>

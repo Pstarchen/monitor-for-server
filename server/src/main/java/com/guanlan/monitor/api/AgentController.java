@@ -30,11 +30,11 @@ public class AgentController {
             jakarta.servlet.http.HttpServletRequest httpRequest,
             @Valid @RequestBody AgentReportRequest report
     ) {
-        MetricView view = metrics.ingest(deviceId, agentKey, report);
-        ddns.updateForDevice(devices.require(deviceId), clientIp(httpRequest));
+        MetricService.IngestResult result = metrics.ingest(deviceId, agentKey, report);
+        if (result.live()) ddns.updateForDevice(devices.require(deviceId), clientIp(httpRequest));
         return ResponseEntity.accepted()
                 .header("X-Agent-Interval-Seconds", Integer.toString(settings.agentCollectionSeconds()))
-                .body(view);
+                .body(result.metric());
     }
 
     private String clientIp(jakarta.servlet.http.HttpServletRequest request) {

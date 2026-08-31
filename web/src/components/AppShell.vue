@@ -13,6 +13,7 @@ import BrandMark from '@/components/BrandMark.vue'
 import { useAuthStore } from '@/stores/auth'
 import { loadBranding, siteName } from '@/lib/branding'
 import { dateTime, relativeTime } from '@/lib/format'
+import { matchesRealtimeEvent } from '@/lib/realtime'
 import type { AlertEvent, Role } from '@/types'
 
 const route = useRoute()
@@ -101,7 +102,8 @@ async function loadAlertPreview(silent = false) {
   }
 }
 
-function scheduleAlertRefresh() {
+function scheduleAlertRefresh(event: Event) {
+  if (!matchesRealtimeEvent(event, ['alert.opened', 'alert.updated', 'alert.resolved'])) return
   window.clearTimeout(alertRefreshTimer)
   alertRefreshTimer = window.setTimeout(() => loadAlertPreview(true), 350)
 }

@@ -107,7 +107,7 @@ func collectAndSend(ctx context.Context, logger *slog.Logger, metrics *collector
 	}
 	var updatedInterval time.Duration
 
-	paths, err := queue.List()
+	paths, err := queue.ListForDelivery()
 	if err != nil {
 		logger.Error("report buffer listing failed", "error", err)
 		return updatedInterval

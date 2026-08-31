@@ -13,6 +13,7 @@ import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { counterRate } from '@/lib/device-analytics'
 import { bytes, dateTime, percent, rate, rateScale, relativeTime } from '@/lib/format'
+import { matchesRealtimeEvent } from '@/lib/realtime'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
 import type { ContainerMetric, Device, DeviceCredential, DeviceNote, DeviceStatusEvent, Metric, ProcessMetric } from '@/types'
@@ -262,10 +263,10 @@ async function removeNote(note: DeviceNote) {
   }
 }
 
-async function load(background = false) {
-  if (background) refreshing.value = true
-  else loading.value = true
-  error.value = ''
+async function load(background = false, options: { silent?: boolean; metadata?: boolean } = {}) {
+  if (background && !options.silent) refreshing.value = true
+  else if (!background) loading.value = true
+  if (!options.silent) error.value = ''
   const to = new Date()
   const from = new Date(to.getTime() - rangeHours.value * 3600_000)
   try {
@@ -275,12 +276,14 @@ async function load(background = false) {
     ])
     device.value = deviceResponse.data
     history.value = historyResponse.data
-    await Promise.all([loadNotes(), loadStatusHistory()])
+    if (options.metadata !== false) await Promise.all([loadNotes(), loadStatusHistory()])
   } catch (cause) {
-    error.value = errorMessage(cause)
+    if (!options.silent) error.value = errorMessage(cause)
   } finally {
-    loading.value = false
-    refreshing.value = false
+    if (!options.silent) {
+      loading.value = false
+      refreshing.value = false
+    }
   }
 }
 
@@ -306,17 +309,16 @@ async function copyKey() {
 }
 
 function onRealtime(event: Event) {
-  const detail = (event as CustomEvent<{ payload?: { deviceId?: string } }>).detail
-  if (detail?.payload?.deviceId !== deviceId.value) return
+  if (!matchesRealtimeEvent(event, ['metric.updated', 'device.status'], deviceId.value)) return
   window.clearTimeout(refreshTimer)
-  refreshTimer = window.setTimeout(() => load(true), 350)
+  refreshTimer = window.setTimeout(() => load(true, { silent: true, metadata: false }), 350)
 }
 
 onMounted(() => {
   load()
   window.addEventListener('guanlan:realtime', onRealtime)
 })
-useVisibilityPolling(() => load(true))
+useVisibilityPolling(() => load(true, { silent: true }))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
   window.removeEventListener('guanlan:realtime', onRealtime)

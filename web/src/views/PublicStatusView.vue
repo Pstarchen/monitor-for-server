@@ -6,6 +6,7 @@ import BrandMark from '@/components/BrandMark.vue'
 import { api, errorMessage } from '@/lib/api'
 import { bytes, percent, rate, relativeTime, uptime } from '@/lib/format'
 import { loadBranding, siteName } from '@/lib/branding'
+import { matchesRealtimeEvent } from '@/lib/realtime'
 import type { PublicDevice, PublicOverview, PublicServiceCheck } from '@/types'
 
 type SortKey = 'default' | 'name' | 'os' | 'uptime' | 'cpu' | 'memory' | 'disk' | 'up' | 'down' | 'totalUp' | 'totalDown'
@@ -61,7 +62,8 @@ async function load() {
   }
 }
 
-function scheduleRefresh() {
+function scheduleRefresh(event: Event) {
+  if (!matchesRealtimeEvent(event, ['metric.updated', 'device.status'])) return
   window.clearTimeout(timer)
   timer = window.setTimeout(load, 500)
 }

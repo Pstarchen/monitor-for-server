@@ -67,6 +67,18 @@ func (q *Queue) List() ([]string, error) {
 	return q.listLocked()
 }
 
+// ListForDelivery puts the newest sample first so a reconnect immediately
+// restores current health before older buffered samples are replayed.
+func (q *Queue) ListForDelivery() ([]string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	paths, err := q.listLocked()
+	if err != nil || len(paths) < 2 {
+		return paths, err
+	}
+	return append([]string{paths[len(paths)-1]}, paths[:len(paths)-1]...), nil
+}
+
 func (q *Queue) Remove(path string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()

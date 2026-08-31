@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
@@ -34,20 +35,36 @@ public class MetricService {
     private final DeviceStatusHistoryService statusHistory;
 
     @Transactional
-    public MetricView ingest(String deviceId, String agentKey, AgentReportRequest report) {
-        if (report.collectedAt().isAfter(Instant.now().plus(Duration.ofMinutes(5)))) {
+    public IngestResult ingest(String deviceId, String agentKey, AgentReportRequest report) {
+        Instant receivedAt = Instant.now();
+        Instant collectedAt = report.collectedAt().truncatedTo(ChronoUnit.MICROS);
+        if (collectedAt.isAfter(receivedAt.plus(Duration.ofMinutes(5)))) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "采集时间不能晚于服务器时间 5 分钟以上");
         }
         Device device = devices.authenticateAgent(deviceId, agentKey);
         Device.Status previousStatus = device.getStatus();
-        device.setHostname(report.host().hostname());
-        device.setOs(join(report.host().platform(), report.host().platformVersion()));
-        device.setArchitecture(report.host().architecture());
-        device.setHardwareJson(json(Map.of("host", report.host(), "cpu", report.cpu(), "memory", report.memory())));
+        MetricSnapshot latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).orElse(null);
+        boolean advancesLatest = latest == null || collectedAt.isAfter(latest.getCollectedAt());
+        boolean live = advancesLatest && !collectedAt.isBefore(receivedAt.minusSeconds(Math.max(5, settings.offlineSeconds())));
+        if (live) {
+            device.setHostname(report.host().hostname());
+            device.setOs(join(report.host().platform(), report.host().platformVersion()));
+            device.setArchitecture(report.host().architecture());
+            device.setHardwareJson(json(Map.of("host", report.host(), "cpu", report.cpu(), "memory", report.memory())));
+        }
         device.setStatus(Device.Status.ONLINE);
-        device.setLastSeenAt(Instant.now());
+        device.setLastSeenAt(receivedAt);
         statusHistory.record(device, previousStatus, Device.Status.ONLINE, "Agent 上报，设备恢复在线");
-        alerts.evaluateOffline(device, 0);
+        presence.markSeen(deviceId, settings.offlineSeconds());
+        if (previousStatus != Device.Status.ONLINE) {
+            alerts.evaluateOffline(device, 0);
+            realtime.broadcast("device.status", deviceId);
+        }
+
+        MetricSnapshot duplicate = metrics.findByDeviceIdAndCollectedAt(deviceId, collectedAt).orElse(null);
+        if (duplicate != null) {
+            return new IngestResult(MetricView.from(duplicate, mapper), false);
+        }
 
         List<AgentReportRequest.DiskStats> disks = report.disks() == null ? List.of() : report.disks();
         List<AgentReportRequest.ContainerStats> containers = report.containers() == null ? List.of() : report.containers();
@@ -59,10 +76,10 @@ public class MetricService {
         List<AgentReportRequest.LogFile> systemLogs = report.systemLogs() == null ? List.of() : report.systemLogs();
         List<AgentReportRequest.IntegrityItem> integrity = report.integrity() == null ? List.of() : report.integrity();
         List<AgentReportRequest.CustomMetricResult> customMetrics = report.customMetrics() == null ? List.of() : report.customMetrics();
-        MetricSnapshot previous = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).orElse(null);
+        MetricSnapshot previous = metrics.findTopByDeviceIdAndCollectedAtLessThanOrderByCollectedAtDesc(device.getId(), collectedAt).orElse(null);
         MetricSnapshot metric = new MetricSnapshot();
         metric.setDevice(device);
-        metric.setCollectedAt(report.collectedAt());
+        metric.setCollectedAt(collectedAt);
         metric.setCpuUsage(clampPercent(report.cpu().usagePercent()));
         metric.setMemoryUsage(clampPercent(report.memory().usagePercent()));
         metric.setSwapUsage(clampPercent(report.memory().swapPercent()));
@@ -107,11 +124,15 @@ public class MetricService {
         metrics.save(metric);
 
         MetricView view = MetricView.from(metric, mapper);
-        alerts.evaluateMetric(device, metric);
-        presence.markOnline(deviceId, view, settings.offlineSeconds());
-        realtime.broadcast("metric.updated", deviceId);
-        return view;
+        if (live) {
+            alerts.evaluateMetric(device, metric);
+            presence.markLatest(deviceId, view);
+            realtime.broadcast("metric.updated", deviceId);
+        }
+        return new IngestResult(view, live);
     }
+
+    public record IngestResult(MetricView metric, boolean live) {}
 
     @Transactional(readOnly = true)
     public MetricView latest(String deviceId) {

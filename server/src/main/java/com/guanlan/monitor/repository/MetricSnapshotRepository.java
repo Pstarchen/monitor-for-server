@@ -9,7 +9,10 @@ import java.util.Optional;
 
 public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, Long> {
     Optional<MetricSnapshot> findTopByDeviceIdOrderByCollectedAtDesc(String deviceId);
+    Optional<MetricSnapshot> findByDeviceIdAndCollectedAt(String deviceId, Instant collectedAt);
+    Optional<MetricSnapshot> findTopByDeviceIdAndCollectedAtLessThanOrderByCollectedAtDesc(String deviceId, Instant collectedAt);
     List<MetricSnapshot> findByDeviceIdAndCollectedAtBetweenOrderByCollectedAtAsc(String deviceId, Instant from, Instant to);
+    long countByDeviceId(String deviceId);
     long deleteByCollectedAtBefore(Instant cutoff);
 }
 

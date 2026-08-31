@@ -12,6 +12,7 @@ import { buildAgentInstallCommand, type AgentInstallSource } from '@/lib/agent-i
 import { copyText } from '@/lib/clipboard'
 import { downloadCsv } from '@/lib/csv'
 import { percent, relativeTime } from '@/lib/format'
+import { matchesRealtimeEvent } from '@/lib/realtime'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
 import type { AgentBootstrap, Device, DeviceCredential, DeviceHealthState, DeviceStatus, DdnsConfig } from '@/types'
@@ -246,7 +247,8 @@ function agentServerHost(value: string) {
   }
 }
 
-function scheduleRefresh() {
+function scheduleRefresh(event: Event) {
+  if (!matchesRealtimeEvent(event, ['metric.updated', 'device.status'])) return
   window.clearTimeout(refreshTimer)
   refreshTimer = window.setTimeout(() => load(true), 400)
 }

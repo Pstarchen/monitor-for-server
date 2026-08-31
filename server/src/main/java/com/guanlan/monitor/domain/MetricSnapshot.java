@@ -11,7 +11,9 @@ import java.time.Instant;
 @Setter
 @NoArgsConstructor
 @Entity
-@Table(name = "metric_snapshots", indexes = {
+@Table(name = "metric_snapshots", uniqueConstraints = {
+        @UniqueConstraint(name = "uq_metrics_device_collected", columnNames = {"device_id", "collected_at"})
+}, indexes = {
         @Index(name = "idx_metrics_device_collected", columnList = "device_id,collected_at"),
         @Index(name = "idx_metrics_collected", columnList = "collected_at")
 })

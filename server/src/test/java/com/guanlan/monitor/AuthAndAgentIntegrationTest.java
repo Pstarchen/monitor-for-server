@@ -14,6 +14,7 @@ import com.guanlan.monitor.repository.AlertEventRepository;
 import com.guanlan.monitor.repository.AgentTaskRepository;
 import com.guanlan.monitor.repository.DeviceRepository;
 import com.guanlan.monitor.repository.DdnsConfigRepository;
+import com.guanlan.monitor.repository.MetricSnapshotRepository;
 import com.guanlan.monitor.repository.SystemSettingRepository;
 import com.guanlan.monitor.repository.UserAccountRepository;
 import com.guanlan.monitor.repository.UserDevicePermissionRepository;
@@ -33,6 +34,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
@@ -53,6 +55,7 @@ class AuthAndAgentIntegrationTest {
     @Autowired DeviceService devices;
     @Autowired DeviceRepository deviceRepository;
     @Autowired DdnsConfigRepository ddnsConfigs;
+    @Autowired MetricSnapshotRepository metricSnapshots;
     @Autowired AlertEventRepository alertEvents;
     @Autowired AlertService alertService;
     @Autowired ApiTokenService apiTokens;
@@ -382,7 +385,7 @@ class AuthAndAgentIntegrationTest {
                 && event.getStatus() == AlertEvent.Status.OPEN && event.getMessage().contains("风扇转速")
                 && event.getValue() == 3200);
 
-        String recovered = breached.replace("\"rpm\":1800},{\"name\":\"case_fan\",\"rpm\":3200", "\"rpm\":900},{\"name\":\"case_fan\",\"rpm\":1200");
+        String recovered = sampleReport().replace("\"temperatures\":[]", "\"temperatures\":[],\"fans\":[{\"name\":\"cpu_fan\",\"rpm\":900},{\"name\":\"case_fan\",\"rpm\":1200}]");
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
                         .header("X-Device-Id", credential.device().id()).header("X-Agent-Key", credential.agentKey())
                         .contentType(MediaType.APPLICATION_JSON).content(recovered))
@@ -719,6 +722,21 @@ class AuthAndAgentIntegrationTest {
         devicePermissions.save(permission);
     }
 
+    @Test
+    void bufferedMetricReplayKeepsTheCurrentSnapshotLatestAndIsIdempotent() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("replay-node", "lab", "tests", "127.0.0.33"));
+        Instant current = Instant.now().minusSeconds(1).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        Instant historical = current.minus(Duration.ofMinutes(10));
+
+        reportMetric(credential, sampleReportAt(current, "current-host"));
+        reportMetric(credential, sampleReportAt(historical, "historical-host"));
+        reportMetric(credential, sampleReportAt(current, "current-host"));
+
+        assertThat(metricSnapshots.countByDeviceId(credential.device().id())).isEqualTo(2);
+        assertThat(metricSnapshots.findTopByDeviceIdOrderByCollectedAtDesc(credential.device().id()).orElseThrow().getCollectedAt()).isEqualTo(current);
+        assertThat(deviceRepository.findById(credential.device().id()).orElseThrow().getHostname()).isEqualTo("current-host");
+    }
+
     private String sampleReport() throws Exception {
         return mapper.writeValueAsString(Map.of(
                 "collectedAt", Instant.now().toString(),
@@ -730,5 +748,21 @@ class AuthAndAgentIntegrationTest {
                 "processes", java.util.List.of(),
                 "services", java.util.List.of()
         ));
+    }
+
+    private String sampleReportAt(Instant collectedAt, String hostname) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode report = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(sampleReport());
+        report.put("collectedAt", collectedAt.toString());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) report.path("host")).put("hostname", hostname);
+        return mapper.writeValueAsString(report);
+    }
+
+    private void reportMetric(DeviceDtos.Credential credential, String report) throws Exception {
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(report))
+                .andExpect(status().isAccepted());
     }
 }

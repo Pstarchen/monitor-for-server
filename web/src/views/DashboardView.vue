@@ -15,6 +15,7 @@ import MetricChart from '@/components/MetricChart.vue'
 import { api, errorMessage } from '@/lib/api'
 import { trendWindow, type TrendRangeHours } from '@/lib/dashboard-trend'
 import { dateTime, percent, rate, rateScale, relativeTime, uptime } from '@/lib/format'
+import { matchesRealtimeEvent } from '@/lib/realtime'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import type { Dashboard, Device, DeviceNote, DeviceStatus, Metric, ServiceCheck } from '@/types'
 
@@ -144,10 +145,10 @@ async function loadTrend() {
   }
 }
 
-async function load(background = false) {
-  if (background) refreshing.value = true
-  else loading.value = true
-  error.value = ''
+async function load(background = false, silent = false) {
+  if (background && !silent) refreshing.value = true
+  else if (!background) loading.value = true
+  if (!silent) error.value = ''
   try {
     const [dashboardRequest, servicesRequest, notesRequest] = await Promise.allSettled([
       api.get<Dashboard>('/dashboard'),
@@ -171,10 +172,12 @@ async function load(background = false) {
     syncTrendDevice()
     if (background && trendDeviceIds.value.length) void loadTrend()
   } catch (cause) {
-    error.value = errorMessage(cause)
+    if (!silent) error.value = errorMessage(cause)
   } finally {
-    loading.value = false
-    refreshing.value = false
+    if (!silent) {
+      loading.value = false
+      refreshing.value = false
+    }
   }
 }
 
@@ -220,9 +223,10 @@ function uptimeSeconds(device: Device) {
   return typeof value === 'number' ? value : Number(value ?? 0)
 }
 
-function scheduleRefresh() {
+function scheduleRefresh(event: Event) {
+  if (!matchesRealtimeEvent(event, ['metric.updated', 'device.status'])) return
   window.clearTimeout(refreshTimer)
-  refreshTimer = window.setTimeout(() => load(true), 350)
+  refreshTimer = window.setTimeout(() => load(true, true), 350)
 }
 
 onMounted(() => {
@@ -230,7 +234,7 @@ onMounted(() => {
   window.addEventListener('guanlan:realtime', scheduleRefresh)
 })
 watch([trendDeviceIds, trendRangeHours], loadTrend)
-useVisibilityPolling(() => load(true))
+useVisibilityPolling(() => load(true, true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
   window.removeEventListener('guanlan:realtime', scheduleRefresh)
