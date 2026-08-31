@@ -16,7 +16,7 @@ if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
 if (-not $Check -and -not $Apply) { $Check = $true }
 # Registry downloads can legitimately take several minutes on a constrained link.
 # Keep the timeout finite, configurable, and aligned with the Linux updater.
-$pullTimeoutSeconds = if ($env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS } else { 600 }
+$pullTimeoutSeconds = if ($env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS } else { 180 }
 $composeTimeoutSeconds = if ($env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS } else { 900 }
 if ($pullTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
 $env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
@@ -76,7 +76,7 @@ try {
                 $mirrorLine = Select-String -LiteralPath $envFile -Pattern '^GUANLAN_CONTROLLER_IMAGE_MIRRORS=(.*)$' | Select-Object -First 1
                 if ($mirrorLine) { $mirrorValue = $mirrorLine.Matches[0].Groups[1].Value.Trim('"') }
             }
-            $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @('ghcr.nju.edu.cn', 'ghcr.1ms.run') }
+            $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @('ghcr.1ms.run', 'ghcr.nju.edu.cn') }
             foreach ($mirror in $mirrors) {
                 $candidate = $mirror.TrimEnd('/') + '/' + $suffix
                 Write-Host "尝试国内镜像源：$candidate"

@@ -3,11 +3,11 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 installer="${script_dir}/install-agent.sh"
-grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run' "${installer}" >/dev/null
+grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn' "${installer}" >/dev/null
 grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
 grep -F 'https://monitor.example.com/api/setup/agent-installer?platform=linux' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F 'cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.0/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F 'raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.0/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F 'cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.1/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F 'raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.1/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F -- 'curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F -- 'wget -4 -t 3 -T 10 -O "$installer_script" "$1"' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 temp_dir="$(mktemp -d)"

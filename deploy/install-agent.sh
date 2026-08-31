@@ -358,7 +358,7 @@ pull_agent_image() {
   local pull_timeout=120
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
-    IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run}"
+    IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}"
     for mirror_prefix in "${mirror_prefixes[@]}"; do
       mirror_prefix="${mirror_prefix%/}"
       [[ -z "${mirror_prefix}" ]] && continue
@@ -393,7 +393,7 @@ install_agent_updater() {
     printf 'container_name=%s\n' "$(shell_quote "${container_name}")"
     printf 'config_path=%s\n' "$(shell_quote "${agent_config_path}")"
     printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
-    printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run}")"
+    printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}")"
     printf 'docker_socket_source=%s\n' "$(shell_quote "${docker_socket}")"
     printf 'docker_socket_target=%s\n' "$(shell_quote "${docker_socket_target}")"
     printf '%s\n' \

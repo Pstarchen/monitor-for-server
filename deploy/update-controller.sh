@@ -34,7 +34,7 @@ cd "${project_root}"
 
 # Registry downloads can legitimately take several minutes on a constrained link.
 # Keep the timeout finite, configurable, and aligned with the Windows updater.
-pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-600}"
+pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-180}"
 compose_timeout_seconds="${GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-900}"
 if [[ ! "${pull_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${compose_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
   echo "更新超时必须是正整数秒数。" >&2
@@ -110,7 +110,7 @@ pull_one() {
     if [[ -z "${mirror_list}" && -f .env ]]; then
       mirror_list="$(read_env_value GUANLAN_CONTROLLER_IMAGE_MIRRORS)"
     fi
-    IFS=',' read -r -a prefixes <<< "${mirror_list:-ghcr.nju.edu.cn,ghcr.1ms.run}"
+    IFS=',' read -r -a prefixes <<< "${mirror_list:-ghcr.1ms.run,ghcr.nju.edu.cn}"
     for prefix in "${prefixes[@]}"; do
       prefix="${prefix%/}"
       [[ -z "${prefix}" ]] && continue

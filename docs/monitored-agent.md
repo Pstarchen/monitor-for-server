@@ -28,9 +28,9 @@ download_installer() {
 if ! download_installer \
   'https://monitor.example.com/api/setup/agent-installer?platform=linux'; then
   if ! download_installer \
-    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.0/deploy/install-agent.sh'; then
+    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.1/deploy/install-agent.sh'; then
     download_installer \
-      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.0/deploy/install-agent.sh' \
+      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.1/deploy/install-agent.sh' \
       || { echo '无法下载 Agent 安装器：总控、CDN 和 GitHub 均不可达，请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }
   fi
 fi
@@ -70,7 +70,7 @@ docker logs --tail 100 guanlan-agent
 
 内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定镜像。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；也可用 `--no-docker --binary /path/to/guanlan-agent` 强制本机模式。未提供二进制时会通过 `--source-url` 指定的仓库拉取源码构建。
 
-Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试可用的 `ghcr.nju.edu.cn` 和 `ghcr.1ms.run`，失败后回退到官方 GHCR；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
+Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试可用的 `ghcr.1ms.run` 和 `ghcr.nju.edu.cn`，失败后回退到官方 GHCR；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
 
 ```bash
 systemctl status guanlan-agent-update.timer
