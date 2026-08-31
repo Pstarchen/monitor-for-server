@@ -165,6 +165,16 @@ resolve_server_url() {
 
 resolve_server_url
 
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${seconds}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 script_source="${BASH_SOURCE[0]-}"
 script_dir=""
 project_root=""
@@ -176,7 +186,7 @@ temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 
 docker_available=false
-if [[ "${no_docker}" != true ]] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+if [[ "${no_docker}" != true ]] && command -v docker >/dev/null 2>&1 && run_with_timeout 10 docker info >/dev/null 2>&1; then
   docker_available=true
 fi
 
@@ -346,15 +356,6 @@ install_docker_agent() {
 pull_agent_image() {
   local candidate mirror_prefix image_suffix
   local pull_timeout=120
-  run_with_timeout() {
-    local seconds="$1"
-    shift
-    if command -v timeout >/dev/null 2>&1; then
-      timeout "${seconds}s" "$@"
-    else
-      "$@"
-    fi
-  }
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
     IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run}"

@@ -31,6 +31,7 @@ public class MetricService {
     private final PresenceService presence;
     private final SettingService settings;
     private final RealtimeWebSocketHandler realtime;
+    private final DeviceStatusHistoryService statusHistory;
 
     @Transactional
     public MetricView ingest(String deviceId, String agentKey, AgentReportRequest report) {
@@ -38,12 +39,14 @@ public class MetricService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "采集时间不能晚于服务器时间 5 分钟以上");
         }
         Device device = devices.authenticateAgent(deviceId, agentKey);
+        Device.Status previousStatus = device.getStatus();
         device.setHostname(report.host().hostname());
         device.setOs(join(report.host().platform(), report.host().platformVersion()));
         device.setArchitecture(report.host().architecture());
         device.setHardwareJson(json(Map.of("host", report.host(), "cpu", report.cpu(), "memory", report.memory())));
         device.setStatus(Device.Status.ONLINE);
         device.setLastSeenAt(Instant.now());
+        statusHistory.record(device, previousStatus, Device.Status.ONLINE, "Agent 上报，设备恢复在线");
         alerts.evaluateOffline(device, 0);
 
         List<AgentReportRequest.DiskStats> disks = report.disks() == null ? List.of() : report.disks();

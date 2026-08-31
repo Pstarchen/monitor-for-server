@@ -4,7 +4,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{
   labels: string[]
-  series: { name: string; data: number[]; color: string }[]
+  series: { name: string; data: Array<number | null>; color: string }[]
   unit?: string
   ariaLabel?: string
 }>()

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity, ArrowDown, ArrowUp, BellRing, CheckCircle2, Clock3, Cpu, HardDrive,
-  FileWarning, Gauge, MapPin, MemoryStick, RefreshCw, Search, Server, ShieldAlert, ShieldCheck, WifiOff,
+  FileWarning, Gauge, MapPin, MemoryStick, MessageSquare, RefreshCw, Search, Server, ShieldAlert, ShieldCheck, WifiOff,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
@@ -16,7 +16,7 @@ import { api, errorMessage } from '@/lib/api'
 import { trendWindow, type TrendRangeHours } from '@/lib/dashboard-trend'
 import { dateTime, percent, rate, rateScale, relativeTime, uptime } from '@/lib/format'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
-import type { Dashboard, Device, DeviceStatus, Metric, ServiceCheck } from '@/types'
+import type { Dashboard, Device, DeviceNote, DeviceStatus, Metric, ServiceCheck } from '@/types'
 
 type SortKey = 'attention' | 'cpu' | 'memory' | 'disk' | 'name'
 
@@ -28,14 +28,16 @@ const refreshing = ref(false)
 const error = ref('')
 const servicesError = ref('')
 const servicesRefreshing = ref(false)
+const recentNotes = ref<DeviceNote[]>([])
+const notesError = ref('')
 const search = ref('')
 const status = ref<DeviceStatus | ''>('')
 const group = ref('')
 const tag = ref('')
 const sort = ref<SortKey>('attention')
-const trendDeviceId = ref('')
+const trendDeviceIds = ref<string[]>([])
 const trendRangeHours = ref<TrendRangeHours>(6)
-const trendHistory = ref<Metric[]>([])
+const trendHistories = ref<Record<string, Metric[]>>({})
 const trendLoading = ref(false)
 const trendError = ref('')
 let refreshTimer = 0
@@ -68,32 +70,51 @@ const filteredDevices = computed(() => {
 
 const onlineServices = computed(() => serviceChecks.value.filter((service) => service.latest?.success).length)
 const trendDevices = computed(() => (dashboard.value?.devices ?? []).filter((device) => device.latest || device.status === 'ONLINE'))
-const trendDevice = computed(() => trendDevices.value.find((device) => device.id === trendDeviceId.value) ?? null)
+const selectedTrendDevices = computed(() => trendDevices.value.filter((device) => trendDeviceIds.value.includes(device.id)))
+const trendDevice = computed(() => selectedTrendDevices.value[0] ?? null)
+const trendDeviceId = computed(() => trendDeviceIds.value[0] ?? '')
+const trendHistory = computed(() => trendDeviceId.value ? trendHistories.value[trendDeviceId.value] ?? [] : [])
 const trendLatest = computed(() => trendHistory.value[trendHistory.value.length - 1] ?? trendDevice.value?.latest ?? null)
 const trendLabels = computed(() => trendHistory.value.map((item) => new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit', minute: '2-digit', second: trendRangeHours.value === 1 ? '2-digit' : undefined,
 }).format(new Date(item.collectedAt))))
-const trendResourceSeries = computed(() => [
-  { name: 'CPU', data: trendHistory.value.map((item) => item.cpuUsage), color: '#2867a6' },
-  { name: '内存', data: trendHistory.value.map((item) => item.memoryUsage), color: '#17834d' },
-  { name: '磁盘', data: trendHistory.value.map((item) => item.diskUsage), color: '#986400' },
-])
-const trendIoScale = computed(() => rateScale(trendHistory.value.reduce((max, item) => Math.max(max, item.networkRecvBps, item.networkSentBps), 0)))
-const trendIoSeries = computed(() => [
-  { name: '网络接收', data: trendHistory.value.map((item) => item.networkRecvBps / trendIoScale.value.divisor), color: '#2867a6' },
-  { name: '网络发送', data: trendHistory.value.map((item) => item.networkSentBps / trendIoScale.value.divisor), color: '#17834d' },
-])
+const trendIoScale = computed(() => rateScale(selectedTrendDevices.value.flatMap((device) => trendHistories.value[device.id] ?? []).reduce((max, item) => Math.max(max, item.networkRecvBps, item.networkSentBps), 0)))
+const trendPalette = ['#2867a6', '#17834d', '#986400', '#c73832']
+
+function alignedValues(deviceId: string, read: (metric: Metric) => number) {
+  const source = trendHistories.value[deviceId] ?? []
+  if (deviceId === trendDeviceId.value) return source.map(read)
+  return trendHistory.value.map((point) => {
+    let nearest: Metric | undefined
+    let distance = Number.POSITIVE_INFINITY
+    for (const item of source) {
+      const candidate = Math.abs(new Date(item.collectedAt).getTime() - new Date(point.collectedAt).getTime())
+      if (candidate < distance) { nearest = item; distance = candidate }
+    }
+    return nearest && distance <= 5 * 60_000 ? read(nearest) : null
+  })
+}
+
+const trendResourceSeries = computed(() => selectedTrendDevices.value.flatMap((device, index) => [
+  { name: `${device.name} · CPU`, data: alignedValues(device.id, (item) => item.cpuUsage), color: trendPalette[index % trendPalette.length] },
+  { name: `${device.name} · 内存`, data: alignedValues(device.id, (item) => item.memoryUsage), color: trendPalette[(index + 1) % trendPalette.length] },
+]))
+const trendIoSeries = computed(() => selectedTrendDevices.value.flatMap((device, index) => [
+  { name: `${device.name} · 接收`, data: alignedValues(device.id, (item) => item.networkRecvBps / trendIoScale.value.divisor), color: trendPalette[index % trendPalette.length] },
+  { name: `${device.name} · 发送`, data: alignedValues(device.id, (item) => item.networkSentBps / trendIoScale.value.divisor), color: trendPalette[(index + 1) % trendPalette.length] },
+]))
 const trendLoad = computed(() => trendLatest.value ? `${trendLatest.value.load1.toFixed(2)} / ${trendLatest.value.load5.toFixed(2)} / ${trendLatest.value.load15.toFixed(2)}` : '--')
 
 function syncTrendDevice() {
-  if (trendDevices.value.some((device) => device.id === trendDeviceId.value)) return
-  trendDeviceId.value = trendDevices.value[0]?.id ?? ''
+  const available = new Set(trendDevices.value.map((device) => device.id))
+  const current = trendDeviceIds.value.filter((id) => available.has(id)).slice(0, 4)
+  trendDeviceIds.value = current.length ? current : (trendDevices.value[0] ? [trendDevices.value[0].id] : [])
 }
 
 async function loadTrend() {
-  const id = trendDeviceId.value
-  if (!id) {
-    trendHistory.value = []
+  const ids = [...trendDeviceIds.value]
+  if (!ids.length) {
+    trendHistories.value = {}
     trendError.value = ''
     return
   }
@@ -102,8 +123,20 @@ async function loadTrend() {
   trendError.value = ''
   const { from, to } = trendWindow(trendRangeHours.value)
   try {
-    const response = await api.get<Metric[]>(`/devices/${id}/metrics/history`, { params: { from: from.toISOString(), to: to.toISOString() } })
-    if (requestId === trendRequestId) trendHistory.value = response.data
+    const responses = await Promise.allSettled(ids.map((id) => api.get<Metric[]>(`/devices/${id}/metrics/history`, { params: { from: from.toISOString(), to: to.toISOString() } })))
+    if (requestId !== trendRequestId) return
+    const next: Record<string, Metric[]> = {}
+    let failures = 0
+    responses.forEach((response, index) => {
+      if (response.status === 'fulfilled') next[ids[index]] = response.value.data
+      else failures += 1
+    })
+    if (failures === ids.length) {
+      const failed = responses.find((response): response is PromiseRejectedResult => response.status === 'rejected')
+      throw failed?.reason ?? new Error('趋势数据加载失败')
+    }
+    trendHistories.value = next
+    if (failures) trendError.value = `${failures} 台设备趋势暂时不可用`
   } catch (cause) {
     if (requestId === trendRequestId) trendError.value = errorMessage(cause)
   } finally {
@@ -116,9 +149,10 @@ async function load(background = false) {
   else loading.value = true
   error.value = ''
   try {
-    const [dashboardRequest, servicesRequest] = await Promise.allSettled([
+    const [dashboardRequest, servicesRequest, notesRequest] = await Promise.allSettled([
       api.get<Dashboard>('/dashboard'),
       api.get<ServiceCheck[]>('/services'),
+      api.get<DeviceNote[]>('/device-notes/recent', { params: { limit: 8 } }),
     ])
     if (dashboardRequest.status === 'rejected') throw dashboardRequest.reason
     dashboard.value = dashboardRequest.value.data
@@ -128,8 +162,14 @@ async function load(background = false) {
     } else {
       servicesError.value = errorMessage(servicesRequest.reason)
     }
+    if (notesRequest.status === 'fulfilled') {
+      recentNotes.value = notesRequest.value.data
+      notesError.value = ''
+    } else {
+      notesError.value = errorMessage(notesRequest.reason)
+    }
     syncTrendDevice()
-    if (background && trendDeviceId.value) void loadTrend()
+    if (background && trendDeviceIds.value.length) void loadTrend()
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
@@ -189,7 +229,7 @@ onMounted(() => {
   load()
   window.addEventListener('guanlan:realtime', scheduleRefresh)
 })
-watch([trendDeviceId, trendRangeHours], loadTrend)
+watch([trendDeviceIds, trendRangeHours], loadTrend)
 useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
@@ -233,7 +273,7 @@ onBeforeUnmount(() => {
         </div>
         <article class="panel trend-panel">
           <div class="trend-panel-toolbar">
-            <label class="trend-device-picker">监控节点<el-select v-model="trendDeviceId" placeholder="选择节点" :disabled="!trendDevices.length" aria-label="选择趋势监控节点"><el-option v-for="device in trendDevices" :key="device.id" :label="device.name" :value="device.id"><span class="trend-device-option"><strong>{{ device.name }}</strong><small>{{ device.groupName || '未分组' }} · {{ device.status === 'ONLINE' ? '在线' : '最近有数据' }}</small></span></el-option></el-select></label>
+            <label class="trend-device-picker">监控节点（可多选）<el-select v-model="trendDeviceIds" multiple collapse-tags collapse-tags-tooltip :multiple-limit="4" placeholder="选择节点" :disabled="!trendDevices.length" aria-label="选择趋势监控节点"><el-option v-for="device in trendDevices" :key="device.id" :label="device.name" :value="device.id"><span class="trend-device-option"><strong>{{ device.name }}</strong><small>{{ device.groupName || '未分组' }} · {{ device.status === 'ONLINE' ? '在线' : '最近有数据' }}</small></span></el-option></el-select></label>
             <div class="trend-range-control"><span>时间范围</span><el-segmented v-model="trendRangeHours" :options="[{ label: '1 小时', value: 1 }, { label: '6 小时', value: 6 }, { label: '24 小时', value: 24 }]" :disabled="!trendDeviceId" aria-label="趋势时间范围" /></div>
           </div>
           <div v-if="trendError" class="trend-state trend-state-error" role="alert"><span>{{ trendError }}</span><el-button text @click="loadTrend">重试</el-button></div>
@@ -246,7 +286,7 @@ onBeforeUnmount(() => {
               <div><span>当前内存</span><strong>{{ percent(trendLatest?.memoryUsage) }}</strong></div>
               <div><span>当前磁盘</span><strong>{{ percent(trendLatest?.diskUsage) }}</strong></div>
               <div><span>负载 1 / 5 / 15 分钟</span><strong>{{ trendLoad }}</strong></div>
-              <div><span>采集点</span><strong>{{ trendHistory.length }}</strong></div>
+              <div><span>对比节点</span><strong>{{ selectedTrendDevices.length }}</strong></div>
             </div>
             <div class="chart-grid trend-chart-grid">
               <article><div class="panel-head"><div><h3>资源使用率</h3><p>CPU、内存与最高磁盘占用</p></div><Cpu :size="16" /></div><MetricChart :labels="trendLabels" :series="trendResourceSeries" unit="%" :aria-label="`${trendDevice?.name ?? '节点'}资源使用率趋势`" /></article>
@@ -254,6 +294,24 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="trendLoading" class="trend-refreshing" role="status"><RefreshCw :size="13" class="spinning" />正在更新趋势数据</div>
           </template>
+        </article>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          <div><h2>值班记录</h2><p>最近的设备变更、巡检与交接信息</p></div>
+          <span class="filter-count"><MessageSquare :size="14" />{{ recentNotes.length }} 条记录</span>
+        </div>
+        <article class="panel dashboard-notes-panel">
+          <div v-if="notesError" class="inline-error" role="alert"><span>{{ notesError }}</span><el-button text @click="load(true)">重试</el-button></div>
+          <div v-else-if="recentNotes.length" class="dashboard-note-list">
+            <button v-for="note in recentNotes" :key="note.id" type="button" @click="router.push(`/devices/${note.deviceId}`)">
+              <span class="dashboard-note-icon"><MessageSquare :size="15" /></span>
+              <span class="dashboard-note-main"><strong>{{ note.deviceName }}</strong><span>{{ note.content }}</span></span>
+              <span class="dashboard-note-meta"><b>{{ note.author }}</b><time :datetime="note.createdAt">{{ dateTime(note.createdAt) }}</time></span>
+            </button>
+          </div>
+          <EmptyState v-else title="暂无值班记录" description="在设备详情的“资产与记录”中添加交接或变更信息，首页会自动汇总。" />
         </article>
       </section>
 

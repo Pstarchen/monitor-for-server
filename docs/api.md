@@ -45,11 +45,16 @@
 | GET | `/api/devices/{id}` | 登录 | 单台设备详情 |
 | GET | `/api/devices/{id}/health` | 登录 | Agent 接入健康诊断：连接状态、最近上报年龄、失联阈值、指标年龄和检查结果 |
 | POST | `/api/devices` | ADMIN / OPERATOR | 创建设备并一次性返回 Agent 密钥 |
-| PUT | `/api/devices/{id}` | ADMIN / OPERATOR | 更新名称、位置、分组和主 IP |
+| PUT | `/api/devices/{id}` | ADMIN / OPERATOR | 更新名称、位置、分组、主 IP、资产信息和公开设置 |
 | POST | `/api/devices/{id}/rotate-key` | ADMIN | 轮换并一次性返回新密钥 |
 | DELETE | `/api/devices/{id}` | ADMIN | 删除设备及关联数据 |
 | GET | `/api/devices/{id}/metrics/latest` | 登录 | 最新指标 |
 | GET | `/api/devices/{id}/metrics/history` | 登录 | `from` 到 `to` 的历史指标，最大 31 天；每个快照包含当时的容器与进程列表，控制台可据此绘制单容器/单进程历史趋势 |
+| GET | `/api/devices/{id}/notes?limit=50` | 登录 | 设备工作记录，最多 200 条 |
+| POST | `/api/devices/{id}/notes` | ADMIN / OPERATOR | 新增交接、变更或巡检记录，正文最多 2000 字符 |
+| DELETE | `/api/devices/{id}/notes/{noteId}` | ADMIN / OPERATOR | 删除设备工作记录 |
+| GET | `/api/device-notes/recent?limit=8` | 登录 | 首页值班记录汇总 |
+| GET | `/api/devices/{id}/status-history` | 登录 | 设备状态转换时间线，默认最近 31 天，最多查询 366 天 |
 
 创建设备请求：
 
@@ -58,9 +63,20 @@
   "name": "生产 API-01",
   "location": "上海机房 A3",
   "groupName": "生产环境",
-  "primaryIp": "10.20.1.15"
+  "primaryIp": "10.20.1.15",
+  "assetTag": "SRV-2025-001",
+  "ownerName": "运维一组",
+  "vendor": "Dell",
+  "model": "PowerEdge R760",
+  "serialNumber": "SN-001",
+  "environment": "production",
+  "purchaseDate": "2025-01-02",
+  "warrantyExpiresAt": "2028-01-02",
+  "description": "生产 API 主节点"
 }
 ```
+
+设备资产字段均为可选；`environment` 可使用 `production`、`staging`、`testing`、`development` 或 `disaster-recovery`，日期使用 `YYYY-MM-DD`。设备状态从待接入变为在线、从在线变为离线或恢复在线时，系统会自动生成状态历史事件。
 
 创建和轮换密钥的响应包含 `{ "device": { ... }, "agentKey": "..." }`。`agentKey` 不会再次返回。
 

@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Getter
@@ -43,6 +44,33 @@ public class Device {
 
     @Column(name = "group_name", length = 80)
     private String groupName;
+
+    @Column(name = "asset_tag", length = 80)
+    private String assetTag;
+
+    @Column(name = "owner_name", length = 100)
+    private String ownerName;
+
+    @Column(length = 100)
+    private String vendor;
+
+    @Column(length = 120)
+    private String model;
+
+    @Column(name = "serial_number", length = 120)
+    private String serialNumber;
+
+    @Column(length = 40)
+    private String environment;
+
+    @Column(name = "purchase_date")
+    private LocalDate purchaseDate;
+
+    @Column(name = "warranty_expires_at")
+    private LocalDate warrantyExpiresAt;
+
+    @Column(length = 500)
+    private String description;
 
     @Column(name = "tags_json", columnDefinition = "TEXT")
     private String tagsJson;

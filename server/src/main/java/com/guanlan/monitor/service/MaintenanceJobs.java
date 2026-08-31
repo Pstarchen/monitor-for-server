@@ -24,6 +24,7 @@ public class MaintenanceJobs {
     private final ServiceCheckResultRepository serviceResults;
     private final AgentTaskRepository agentTasks;
     private final AuditService audit;
+    private final DeviceStatusHistoryService statusHistory;
 
     @Scheduled(fixedDelay = 10_000, initialDelay = 10_000)
     @Transactional
@@ -33,7 +34,9 @@ public class MaintenanceJobs {
         Instant now = Instant.now();
         for (Device device : devices.findAll()) {
             if (device.getLastSeenAt() == null || device.getLastSeenAt().isAfter(cutoff)) continue;
+            Device.Status previousStatus = device.getStatus();
             device.setStatus(Device.Status.OFFLINE);
+            statusHistory.record(device, previousStatus, Device.Status.OFFLINE, "超过失联阈值，未收到 Agent 上报");
             double elapsed = Duration.between(device.getLastSeenAt(), now).toSeconds();
             alerts.evaluateOffline(device, elapsed);
         }
@@ -44,6 +47,7 @@ public class MaintenanceJobs {
     public void removeExpiredMetrics() {
         metrics.deleteByCollectedAtBefore(Instant.now().minus(Duration.ofDays(settings.retentionDays())));
         serviceResults.deleteByCheckedAtBefore(Instant.now().minus(Duration.ofDays(settings.retentionDays())));
+        statusHistory.removeBefore(Instant.now().minus(Duration.ofDays(settings.retentionDays())));
     }
 
     @Scheduled(fixedDelay = 10_000, initialDelay = 15_000)

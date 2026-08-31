@@ -22,6 +22,7 @@ public class ControllerAgentProvisioner implements ApplicationRunner {
     private final AppProperties properties;
     private final DeviceRepository devices;
     private final PasswordEncoder passwordEncoder;
+    private final DeviceStatusHistoryService statusHistory;
 
     @Override
     @Transactional
@@ -58,6 +59,7 @@ public class ControllerAgentProvisioner implements ApplicationRunner {
         device.setAgentKeyPrefix(key.substring(0, 8));
         device.setControllerManaged(true);
         devices.save(device);
+        statusHistory.record(device, null, Device.Status.PENDING, "总控 Agent 已登记，等待首次上报");
         log.info("Controller host device provisioned.");
     }
 

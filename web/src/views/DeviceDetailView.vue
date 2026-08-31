@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, CheckCircle2, CircleAlert, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, Network, RefreshCw, ServerCog, ShieldAlert, ShieldCheck, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, CheckCircle2, CircleAlert, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, MessageSquare, Network, RefreshCw, Send, ServerCog, ShieldAlert, ShieldCheck, Trash2, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -15,7 +15,7 @@ import { counterRate } from '@/lib/device-analytics'
 import { bytes, dateTime, percent, rate, rateScale, relativeTime } from '@/lib/format'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
-import type { ContainerMetric, Device, DeviceCredential, Metric, ProcessMetric } from '@/types'
+import type { ContainerMetric, Device, DeviceCredential, DeviceNote, DeviceStatusEvent, Metric, ProcessMetric } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +28,14 @@ const error = ref('')
 const rangeHours = ref(1)
 const activeTab = ref('overview')
 const credential = ref<DeviceCredential | null>(null)
+const notes = ref<DeviceNote[]>([])
+const statusEvents = ref<DeviceStatusEvent[]>([])
+const noteContent = ref('')
+const notesLoading = ref(false)
+const notesSaving = ref(false)
+const notesError = ref('')
+const statusHistoryLoading = ref(false)
+const statusHistoryError = ref('')
 const containerSelectionId = ref('')
 const processSelectionKey = ref('')
 let refreshTimer = 0
@@ -196,6 +204,64 @@ function healthAge(health: Device['health']) {
   return health.lastSeenAgeSeconds == null ? '尚未收到上报' : relativeTime(health.lastSeenAt)
 }
 
+function statusLabel(status: Device['status'] | null) {
+  return status === 'ONLINE' ? '在线' : status === 'OFFLINE' ? '离线' : status === 'PENDING' ? '待接入' : '--'
+}
+
+async function loadNotes() {
+  notesLoading.value = true
+  notesError.value = ''
+  try {
+    notes.value = (await api.get<DeviceNote[]>(`/devices/${deviceId.value}/notes`, { params: { limit: 80 } })).data
+  } catch (cause) {
+    notesError.value = errorMessage(cause)
+  } finally {
+    notesLoading.value = false
+  }
+}
+
+async function loadStatusHistory() {
+  statusHistoryLoading.value = true
+  statusHistoryError.value = ''
+  try {
+    statusEvents.value = (await api.get<DeviceStatusEvent[]>(`/devices/${deviceId.value}/status-history`, { params: { limit: 120 } })).data
+  } catch (cause) {
+    statusHistoryError.value = errorMessage(cause)
+  } finally {
+    statusHistoryLoading.value = false
+  }
+}
+
+async function addNote() {
+  const content = noteContent.value.trim()
+  if (!content) {
+    ElMessage.warning('请输入工作记录')
+    return
+  }
+  notesSaving.value = true
+  try {
+    const created = (await api.post<DeviceNote>(`/devices/${deviceId.value}/notes`, { content })).data
+    notes.value = [created, ...notes.value]
+    noteContent.value = ''
+    ElMessage.success('工作记录已保存')
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    notesSaving.value = false
+  }
+}
+
+async function removeNote(note: DeviceNote) {
+  try {
+    await ElMessageBox.confirm('删除后无法恢复这条工作记录。', '删除工作记录', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
+    await api.delete(`/devices/${deviceId.value}/notes/${note.id}`)
+    notes.value = notes.value.filter((item) => item.id !== note.id)
+    ElMessage.success('工作记录已删除')
+  } catch (cause) {
+    if (cause !== 'cancel' && cause !== 'close') ElMessage.error(errorMessage(cause))
+  }
+}
+
 async function load(background = false) {
   if (background) refreshing.value = true
   else loading.value = true
@@ -209,6 +275,7 @@ async function load(background = false) {
     ])
     device.value = deviceResponse.data
     history.value = historyResponse.data
+    await Promise.all([loadNotes(), loadStatusHistory()])
   } catch (cause) {
     error.value = errorMessage(cause)
   } finally {
@@ -341,6 +408,53 @@ onBeforeUnmount(() => {
               </dl>
             </article>
           </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="资产与记录" name="operations">
+          <div class="section two-column device-operations-grid">
+            <article class="panel detail-list">
+              <div class="panel-head"><div><h2>资产信息</h2><p>责任、归属与生命周期信息</p></div><ServerCog :size="17" /></div>
+              <dl>
+                <div><dt>资产编号</dt><dd>{{ device.assetTag || '--' }}</dd></div>
+                <div><dt>责任人</dt><dd>{{ device.ownerName || '--' }}</dd></div>
+                <div><dt>供应商 / 型号</dt><dd>{{ [device.vendor, device.model].filter(Boolean).join(' · ') || '--' }}</dd></div>
+                <div><dt>序列号</dt><dd class="mono-value">{{ device.serialNumber || '--' }}</dd></div>
+                <div><dt>环境</dt><dd>{{ device.environment || '--' }}</dd></div>
+                <div><dt>采购日期</dt><dd>{{ device.purchaseDate || '--' }}</dd></div>
+                <div><dt>保修到期</dt><dd>{{ device.warrantyExpiresAt || '--' }}</dd></div>
+              </dl>
+              <p v-if="device.description" class="asset-description">{{ device.description }}</p>
+              <el-button v-if="canOperate" class="operations-edit-button" @click="router.push({ path: '/devices', query: { edit: device.id } })">前往设备管理编辑</el-button>
+            </article>
+
+            <article class="panel device-notes-panel">
+              <div class="panel-head"><div><h2>工作记录</h2><p>交接、变更和现场处理摘要</p></div><MessageSquare :size="17" /></div>
+              <div v-if="canOperate" class="device-note-composer"><el-input v-model="noteContent" type="textarea" :rows="3" maxlength="2000" show-word-limit placeholder="记录一次变更、巡检或交接事项" /><el-button type="primary" :loading="notesSaving" @click="addNote"><Send :size="15" />添加记录</el-button></div>
+              <div v-if="notesError" class="inline-error" role="alert"><span>{{ notesError }}</span><el-button text :loading="notesLoading" @click="loadNotes">重试</el-button></div>
+              <LoadingState v-else-if="notesLoading && !notes.length" />
+              <div v-else-if="notes.length" class="device-note-list">
+                <div v-for="note in notes" :key="note.id" class="device-note-item">
+                  <div class="device-note-head"><strong>{{ note.author }}</strong><time :datetime="note.createdAt">{{ dateTime(note.createdAt) }}</time><button v-if="canOperate" class="table-icon-button danger-command" type="button" title="删除工作记录" aria-label="删除工作记录" @click="removeNote(note)"><Trash2 :size="14" /></button></div>
+                  <p>{{ note.content }}</p>
+                </div>
+              </div>
+              <EmptyState v-else title="暂无工作记录" description="添加第一条交接或变更记录，方便团队追溯设备操作。" />
+            </article>
+          </div>
+
+          <article class="panel status-history-panel">
+            <div class="panel-head"><div><h2>状态时间线</h2><p>记录 Agent 接入、恢复和失联转换</p></div><Waypoints :size="17" /></div>
+            <div v-if="statusHistoryError" class="inline-error" role="alert"><span>{{ statusHistoryError }}</span><el-button text :loading="statusHistoryLoading" @click="loadStatusHistory">重试</el-button></div>
+            <LoadingState v-else-if="statusHistoryLoading && !statusEvents.length" />
+            <div v-else-if="statusEvents.length" class="status-timeline">
+              <div v-for="event in statusEvents" :key="event.id" class="status-timeline-item" :data-status="event.status">
+                <span class="status-timeline-dot" aria-hidden="true" />
+                <div><strong>{{ statusLabel(event.previousStatus) }} → {{ statusLabel(event.status) }}</strong><p>{{ event.reason }}</p></div>
+                <time :datetime="event.changedAt">{{ dateTime(event.changedAt) }}</time>
+              </div>
+            </div>
+            <EmptyState v-else title="暂无状态变更" description="设备状态发生转换后，时间线会在这里保留记录。" />
+          </article>
         </el-tab-pane>
 
         <el-tab-pane :label="`磁盘 (${latest?.disks.length ?? 0})`" name="disks">

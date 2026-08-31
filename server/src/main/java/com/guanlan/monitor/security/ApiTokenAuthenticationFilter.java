@@ -80,10 +80,12 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/admin/")) return "nezha:admin:*";
         if (path.equals("/api/dashboard")) return "nezha:inventory:read";
         if (path.equals("/api/topology")) return "nezha:inventory:read";
+        if (path.equals("/api/device-notes/recent")) return "nezha:inventory:read";
         if (path.equals("/api/devices")) return method.equals("GET") ? "nezha:inventory:read" : method.equals("POST") ? "nezha:server:write" : null;
         if (path.startsWith("/api/devices/")) {
             if (path.endsWith("/rotate-key")) return "nezha:server:write";
             if (path.contains("/metrics/")) return "nezha:server:read";
+            if (path.contains("/notes")) return method.equals("GET") ? "nezha:server:read" : method.equals("POST") ? "nezha:server:write" : method.equals("DELETE") ? "nezha:inventory:delete" : null;
             return switch (method) {
                 case "GET" -> "nezha:server:read";
                 case "PUT" -> "nezha:server:write";

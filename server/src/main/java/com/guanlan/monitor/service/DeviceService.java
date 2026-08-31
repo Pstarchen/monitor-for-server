@@ -20,6 +20,7 @@ import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDate;
 
 @Service
 @RequiredArgsConstructor
@@ -31,6 +32,7 @@ public class DeviceService {
     private final AuditService audit;
     private final DdnsConfigRepository ddnsConfigs;
     private final DeviceHealthService health;
+    private final DeviceStatusHistoryService statusHistory;
     private final SecureRandom random = new SecureRandom();
 
     @Transactional(readOnly = true)
@@ -57,6 +59,7 @@ public class DeviceService {
         device.setLocation(request.location());
         device.setGroupName(request.groupName());
         device.setPrimaryIp(request.primaryIp());
+        applyAssetFields(device, request.assetTag(), request.ownerName(), request.vendor(), request.model(), request.serialNumber(), request.environment(), request.purchaseDate(), request.warrantyExpiresAt(), request.description());
         device.setTagsJson(json(normalizeTags(request.tags())));
         device.setDdnsEnabled(request.ddnsEnabled());
         device.setDdnsConfigId(validDdnsConfig(request.ddnsEnabled(), request.ddnsConfigId()));
@@ -64,6 +67,7 @@ public class DeviceService {
         device.setAgentKeyPrefix(rawKey.substring(0, 8));
         device.setAgentKeyHash(passwordEncoder.encode(rawKey));
         devices.save(device);
+        statusHistory.record(device, null, Device.Status.PENDING, "设备登记，等待 Agent 首次上报");
         audit.record("DEVICE_CREATE", "device:" + device.getId(), "创建设备 " + device.getName());
         return new DeviceDtos.Credential(view(device), rawKey);
     }
@@ -75,6 +79,7 @@ public class DeviceService {
         device.setLocation(request.location());
         device.setGroupName(request.groupName());
         device.setPrimaryIp(request.primaryIp());
+        applyAssetFields(device, request.assetTag(), request.ownerName(), request.vendor(), request.model(), request.serialNumber(), request.environment(), request.purchaseDate(), request.warrantyExpiresAt(), request.description());
         device.setTagsJson(json(normalizeTags(request.tags())));
         device.setDdnsEnabled(request.ddnsEnabled());
         device.setDdnsConfigId(validDdnsConfig(request.ddnsEnabled(), request.ddnsConfigId()));
@@ -122,9 +127,33 @@ public class DeviceService {
     public DeviceDtos.View view(Device device) {
         MetricView latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).map(metric -> MetricView.from(metric, mapper)).orElse(null);
         return new DeviceDtos.View(device.getId(), device.getName(), device.getHostname(), device.getOs(), device.getArchitecture(),
-                device.getPrimaryIp(), device.getLocation(), device.getGroupName(), readTags(device.getTagsJson()), device.isDdnsEnabled(), device.getDdnsConfigId(), device.isPublicVisible(), device.getStatus(), device.getLastSeenAt(),
+                device.getPrimaryIp(), device.getLocation(), device.getGroupName(), readTags(device.getTagsJson()),
+                device.getAssetTag(), device.getOwnerName(), device.getVendor(), device.getModel(), device.getSerialNumber(), device.getEnvironment(),
+                device.getPurchaseDate(), device.getWarrantyExpiresAt(), device.getDescription(),
+                device.isDdnsEnabled(), device.getDdnsConfigId(), device.isPublicVisible(), device.getStatus(), device.getLastSeenAt(),
                 device.getAgentKeyPrefix(), device.isControllerManaged(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest,
                 health.describe(device, latest));
+    }
+
+    private void applyAssetFields(Device device, String assetTag, String ownerName, String vendor, String model,
+                                  String serialNumber, String environment, LocalDate purchaseDate,
+                                  LocalDate warrantyExpiresAt, String description) {
+        if (purchaseDate != null && warrantyExpiresAt != null && warrantyExpiresAt.isBefore(purchaseDate)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "保修到期日不能早于采购日期");
+        }
+        device.setAssetTag(clean(assetTag));
+        device.setOwnerName(clean(ownerName));
+        device.setVendor(clean(vendor));
+        device.setModel(clean(model));
+        device.setSerialNumber(clean(serialNumber));
+        device.setEnvironment(clean(environment));
+        device.setPurchaseDate(purchaseDate);
+        device.setWarrantyExpiresAt(warrantyExpiresAt);
+        device.setDescription(clean(description));
+    }
+
+    private String clean(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private Long validDdnsConfig(boolean enabled, Long id) {

@@ -115,6 +115,50 @@ class AuthAndAgentIntegrationTest {
 
     @Test
     @WithMockUser(username = "operator", roles = "OPERATOR")
+    void deviceAssetsAndNotesArePersistedAndScopedToDevice() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("asset-node", "lab", "tests", "127.0.0.31"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/devices/" + credential.device().id())
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"asset-node","location":"机房 A3","groupName":"生产","primaryIp":"10.0.0.31","tags":["核心"],"assetTag":"SRV-001","ownerName":"运维一组","vendor":"Dell","model":"R760","serialNumber":"SN-001","environment":"production","purchaseDate":"2025-01-02","warrantyExpiresAt":"2028-01-02","description":"API 主节点","ddnsEnabled":false,"publicVisible":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetTag").value("SRV-001"))
+                .andExpect(jsonPath("$.ownerName").value("运维一组"))
+                .andExpect(jsonPath("$.warrantyExpiresAt").value("2028-01-02"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/devices/" + credential.device().id() + "/notes")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"已完成系统补丁和服务重启\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.deviceId").value(credential.device().id()))
+                .andExpect(jsonPath("$.content").value("已完成系统补丁和服务重启"));
+
+        mvc.perform(get("/api/devices/" + credential.device().id() + "/notes"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].author").value("operator"));
+    }
+
+    @Test
+    @WithMockUser(roles = "VIEWER")
+    void agentStatusTransitionsAreRecorded() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("history-node", "lab", "tests", "127.0.0.32"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON).content(sampleReport()))
+                .andExpect(status().isAccepted());
+
+        mvc.perform(get("/api/devices/" + credential.device().id() + "/status-history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].previousStatus").value("PENDING"))
+                .andExpect(jsonPath("$[0].status").value("ONLINE"))
+                .andExpect(jsonPath("$[0].reason").value("Agent 上报，设备恢复在线"));
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
     void serviceMonitorRejectsMalformedHttpTarget() throws Exception {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/services")
                         .with(csrf()).contentType(MediaType.APPLICATION_JSON)

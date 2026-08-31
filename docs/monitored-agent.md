@@ -11,16 +11,27 @@ export GUANLAN_AGENT_KEY='<一次性密钥>'
 installer_script="$(mktemp)"
 trap 'rm -f "$installer_script"' EXIT
 download_installer() {
-  curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
-    || curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script"
+  if command -v curl >/dev/null 2>&1; then
+    curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
+      && return 0
+    curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
+      && return 0
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -4 -t 3 -T 10 -O "$installer_script" "$1" \
+      && return 0
+    wget -t 3 -T 10 -O "$installer_script" "$1" \
+      && return 0
+  fi
+  return 1
 }
 if ! download_installer \
   'https://monitor.example.com/api/setup/agent-installer?platform=linux'; then
   if ! download_installer \
-    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.10.0/deploy/install-agent.sh'; then
+    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.0/deploy/install-agent.sh'; then
     download_installer \
-      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.10.0/deploy/install-agent.sh' \
-      || { echo '无法下载 Agent 安装器，请检查总控地址、服务器网络。' >&2; exit 1; }
+      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.0/deploy/install-agent.sh' \
+      || { echo '无法下载 Agent 安装器：总控、CDN 和 GitHub 均不可达，请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }
   fi
 fi
 sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \

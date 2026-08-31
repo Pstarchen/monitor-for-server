@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Copy, KeyRound, Pencil, Plus, RefreshCw, Search, Server, Terminal, Trash2 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
@@ -15,6 +15,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { AgentBootstrap, Device, DeviceCredential, DeviceStatus, DdnsConfig } from '@/types'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const devices = ref<Device[]>([])
 const ddnsConfigs = ref<DdnsConfig[]>([])
@@ -34,11 +35,11 @@ const lightweight = ref(false)
 const collectAllProcesses = ref(false)
 const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
-const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
+const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], assetTag: '', ownerName: '', vendor: '', model: '', serialNumber: '', environment: '', purchaseDate: '', warrantyExpiresAt: '', description: '', ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
 const agentInstallerControllerPath = '/api/setup/agent-installer'
-const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.10.0/deploy/install-agent'
-const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.10.0/deploy/install-agent'
-const agentInstallerCacheKey = 'v8'
+const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.0/deploy/install-agent'
+const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.0/deploy/install-agent'
+const agentInstallerCacheKey = 'v9'
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
@@ -49,7 +50,7 @@ const filtered = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return devices.value.filter((device) => (!status.value || device.status === status.value)
     && (!tag.value || (device.tags ?? []).includes(tag.value))
-    && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName, ...(device.tags ?? [])].some((value) => value?.toLowerCase().includes(needle))))
+    && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName, device.assetTag, device.ownerName, device.vendor, device.model, device.serialNumber, device.environment, ...(device.tags ?? [])].some((value) => value?.toLowerCase().includes(needle))))
 })
 const installCommand = computed(() => {
   if (!credential.value) return ''
@@ -67,7 +68,7 @@ const installCommand = computed(() => {
   const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
   const processArgs = !lightweight.value && collectAllProcesses.value ? ` --all-processes --process-limit ${processCollectionLimit.value}` : ''
   return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
-    `installer_script="$(mktemp)"; trap 'rm -f "$installer_script"' EXIT; download_installer() { curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" || curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script"; }; if ! download_installer '${controllerInstallerUrl}?platform=linux&${agentInstallerCacheKey}'; then if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载 Agent 安装器，请检查总控地址、服务器网络或使用 IPv4 出口。' >&2; exit 1; }; fi; fi; sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
+    `installer_script="$(mktemp)"; trap 'rm -f "$installer_script"' EXIT; download_installer() { if command -v curl >/dev/null 2>&1; then curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" && return 0; curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" && return 0; fi; if command -v wget >/dev/null 2>&1; then wget -4 -t 3 -T 10 -O "$installer_script" "$1" && return 0; wget -t 3 -T 10 -O "$installer_script" "$1" && return 0; fi; return 1; }; if ! download_installer '${controllerInstallerUrl}?platform=linux&${agentInstallerCacheKey}'; then if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载 Agent 安装器：总控、CDN 和 GitHub 均不可达，请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }; fi; fi; sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
 })
 
 async function load(background = false) {
@@ -105,13 +106,13 @@ function showCredential(value: DeviceCredential) {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { name: '', location: '', groupName: '', primaryIp: '', tags: [], ddnsEnabled: false, ddnsConfigId: null, publicVisible: true })
+  Object.assign(form, { name: '', location: '', groupName: '', primaryIp: '', tags: [], assetTag: '', ownerName: '', vendor: '', model: '', serialNumber: '', environment: '', purchaseDate: '', warrantyExpiresAt: '', description: '', ddnsEnabled: false, ddnsConfigId: null, publicVisible: true })
   dialog.value = true
 }
 
 function openEdit(device: Device) {
   editingId.value = device.id
-  Object.assign(form, { name: device.name, location: device.location ?? '', groupName: device.groupName ?? '', primaryIp: device.primaryIp ?? '', tags: [...(device.tags ?? [])], ddnsEnabled: device.ddnsEnabled, ddnsConfigId: device.ddnsConfigId, publicVisible: device.publicVisible })
+  Object.assign(form, { name: device.name, location: device.location ?? '', groupName: device.groupName ?? '', primaryIp: device.primaryIp ?? '', tags: [...(device.tags ?? [])], assetTag: device.assetTag ?? '', ownerName: device.ownerName ?? '', vendor: device.vendor ?? '', model: device.model ?? '', serialNumber: device.serialNumber ?? '', environment: device.environment ?? '', purchaseDate: device.purchaseDate ?? '', warrantyExpiresAt: device.warrantyExpiresAt ?? '', description: device.description ?? '', ddnsEnabled: device.ddnsEnabled, ddnsConfigId: device.ddnsConfigId, publicVisible: device.publicVisible })
   dialog.value = true
 }
 
@@ -122,7 +123,7 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = { name: form.name.trim(), location: form.location.trim() || null, groupName: form.groupName.trim() || null, primaryIp: form.primaryIp.trim() || null, tags: form.tags.map((tag) => tag.trim()).filter(Boolean), ddnsEnabled: form.ddnsEnabled, ddnsConfigId: form.ddnsEnabled ? form.ddnsConfigId : null, publicVisible: form.publicVisible }
+    const payload = { name: form.name.trim(), location: form.location.trim() || null, groupName: form.groupName.trim() || null, primaryIp: form.primaryIp.trim() || null, tags: form.tags.map((tag) => tag.trim()).filter(Boolean), assetTag: form.assetTag.trim() || null, ownerName: form.ownerName.trim() || null, vendor: form.vendor.trim() || null, model: form.model.trim() || null, serialNumber: form.serialNumber.trim() || null, environment: form.environment || null, purchaseDate: form.purchaseDate || null, warrantyExpiresAt: form.warrantyExpiresAt || null, description: form.description.trim() || null, ddnsEnabled: form.ddnsEnabled, ddnsConfigId: form.ddnsEnabled ? form.ddnsConfigId : null, publicVisible: form.publicVisible }
     if (editingId.value) {
       await api.put(`/devices/${editingId.value}`, payload)
       ElMessage.success('设备信息已更新')
@@ -215,9 +216,17 @@ function scheduleRefresh() {
 }
 
 onMounted(() => {
-  load()
+  load().then(() => {
+    const requestedId = typeof route.query.edit === 'string' ? route.query.edit : ''
+    const requested = devices.value.find((device) => device.id === requestedId)
+    if (requested) openEdit(requested)
+  })
   loadAgentBootstrap()
   window.addEventListener('guanlan:realtime', scheduleRefresh)
+})
+watch(() => route.query.edit, (value) => {
+  const requested = devices.value.find((device) => device.id === value)
+  if (requested) openEdit(requested)
 })
 useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
@@ -254,7 +263,7 @@ onBeforeUnmount(() => {
           <thead><tr><th>设备</th><th>状态</th><th>分组 / 位置</th><th>CPU</th><th>内存</th><th>最近上报</th><th class="actions-column">操作</th></tr></thead>
           <tbody>
             <tr v-for="device in filtered" :key="device.id">
-              <td><button class="device-link" type="button" @click="router.push(`/devices/${device.id}`)"><span><Server :size="17" /></span><span><strong>{{ device.name }}</strong><small>{{ device.primaryIp || device.hostname || '等待 Agent 上报地址' }}</small></span></button></td>
+              <td><button class="device-link" type="button" @click="router.push(`/devices/${device.id}`)"><span><Server :size="17" /></span><span><strong>{{ device.name }}</strong><small>{{ device.primaryIp || device.hostname || '等待 Agent 上报地址' }}</small><small v-if="device.assetTag || device.ownerName">{{ device.assetTag || '未编资产号' }} · {{ device.ownerName || '未指定责任人' }}</small></span></button></td>
               <td class="device-health-cell"><StatusBadge :status="device.status" /><small class="device-health-detail" :data-state="device.health.state">{{ device.health.reason }}</small></td>
               <td><strong class="plain-cell">{{ device.groupName || '未分组' }}</strong><small class="cell-subtext">{{ device.location || '未设置位置' }}</small><span v-if="device.tags?.length" class="tag-list"><em v-for="tag in device.tags" :key="tag">{{ tag }}</em></span></td>
               <td>{{ device.latest ? percent(device.latest.cpuUsage) : '--' }}</td>
@@ -274,7 +283,7 @@ onBeforeUnmount(() => {
       </EmptyState>
     </article>
 
-    <el-dialog v-model="dialog" :title="editingId ? '编辑设备' : '添加设备'" width="min(520px, calc(100vw - 28px))" destroy-on-close>
+    <el-dialog v-model="dialog" :title="editingId ? '编辑设备' : '添加设备'" width="min(720px, calc(100vw - 28px))" destroy-on-close>
       <el-form label-position="top" @submit.prevent="save">
         <div class="form-grid two-fields">
           <el-form-item label="设备名称" required><el-input v-model="form.name" maxlength="100" placeholder="例如：生产环境 API-01" /></el-form-item>
@@ -282,6 +291,15 @@ onBeforeUnmount(() => {
           <el-form-item label="设备分组"><el-input v-model="form.groupName" maxlength="80" placeholder="例如：生产环境" /></el-form-item>
           <el-form-item label="物理位置"><el-input v-model="form.location" maxlength="120" placeholder="例如：上海机房 A3" /></el-form-item>
           <el-form-item label="设备标签"><el-select v-model="form.tags" multiple filterable allow-create default-first-option collapse-tags collapse-tags-tooltip placeholder="例如：生产、核心、华东"><el-option v-for="tag in knownTags" :key="tag" :label="tag" :value="tag" /></el-select><p class="field-help">可添加最多 20 个标签，用于搜索与总览筛选。</p></el-form-item>
+          <el-form-item label="资产编号"><el-input v-model="form.assetTag" maxlength="80" placeholder="例如：SRV-2025-001" /></el-form-item>
+          <el-form-item label="责任人"><el-input v-model="form.ownerName" maxlength="100" placeholder="例如：运维一组 / 张三" /></el-form-item>
+          <el-form-item label="供应商"><el-input v-model="form.vendor" maxlength="100" placeholder="例如：Dell、华为云" /></el-form-item>
+          <el-form-item label="型号"><el-input v-model="form.model" maxlength="120" placeholder="例如：PowerEdge R760" /></el-form-item>
+          <el-form-item label="序列号"><el-input v-model="form.serialNumber" maxlength="120" /></el-form-item>
+          <el-form-item label="环境"><el-select v-model="form.environment" clearable placeholder="选择环境"><el-option label="生产" value="production" /><el-option label="预发布" value="staging" /><el-option label="测试" value="testing" /><el-option label="开发" value="development" /><el-option label="灾备" value="disaster-recovery" /></el-select></el-form-item>
+          <el-form-item label="采购日期"><el-date-picker v-model="form.purchaseDate" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" /></el-form-item>
+          <el-form-item label="保修到期"><el-date-picker v-model="form.warrantyExpiresAt" type="date" value-format="YYYY-MM-DD" placeholder="选择日期" /></el-form-item>
+          <el-form-item class="form-span-two" label="资产说明"><el-input v-model="form.description" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="记录用途、机柜位置或交接信息" /></el-form-item>
           <el-form-item label="DDNS 配置"><el-checkbox v-model="form.ddnsEnabled">启用动态域名解析</el-checkbox><el-select v-if="form.ddnsEnabled" v-model="form.ddnsConfigId" clearable placeholder="选择 DDNS 配置"><el-option v-for="config in ddnsConfigs" :key="config.id" :label="config.name" :value="config.id" /></el-select></el-form-item>
           <el-form-item label="公开状态页"><el-checkbox v-model="form.publicVisible">在公开状态页展示此设备</el-checkbox></el-form-item>
         </div>

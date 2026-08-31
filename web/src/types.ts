@@ -145,6 +145,15 @@ export interface Device {
   location: string | null
   groupName: string | null
   tags: string[]
+  assetTag: string | null
+  ownerName: string | null
+  vendor: string | null
+  model: string | null
+  serialNumber: string | null
+  environment: string | null
+  purchaseDate: string | null
+  warrantyExpiresAt: string | null
+  description: string | null
   ddnsEnabled: boolean
   ddnsConfigId: number | null
   publicVisible: boolean
@@ -156,6 +165,23 @@ export interface Device {
   hardware: Record<string, unknown>
   latest: Metric | null
   health: DeviceHealth
+}
+
+export interface DeviceNote {
+  id: number
+  deviceId: string
+  deviceName: string
+  author: string
+  content: string
+  createdAt: string
+}
+
+export interface DeviceStatusEvent {
+  id: number
+  previousStatus: DeviceStatus | null
+  status: DeviceStatus
+  reason: string
+  changedAt: string
 }
 
 export interface DeviceHealthCheck {
