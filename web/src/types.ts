@@ -210,6 +210,8 @@ export interface AlertEvent {
   notifiedAt: string | null
 }
 
+export interface AlertAcknowledgeRequest { ids: number[] }
+
 export type MaintenanceRecurrence = 'NONE' | 'DAILY' | 'WEEKLY'
 
 export interface MaintenanceWindow {

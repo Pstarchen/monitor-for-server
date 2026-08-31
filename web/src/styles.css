@@ -141,6 +141,21 @@ p, h1, h2, h3 { margin: 0; }
 .route-leave-to { opacity: 0; transform: translateY(-4px); }
 .button-press:active { transform: scale(.97); }
 .filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.device-filter-select { width: 190px; }
+.alert-summary-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 14px; border: 1px solid var(--border); background: var(--surface-raised); }
+.alert-summary-strip > div { display: grid; grid-template-columns: 30px auto; grid-template-rows: auto auto; align-items: center; gap: 0 9px; min-height: 62px; padding: 10px 14px; }
+.alert-summary-strip > div + div { border-left: 1px solid var(--border); }
+.alert-summary-icon { grid-row: 1 / -1; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; color: var(--info); background: var(--info-bg); }
+.alert-summary-danger { color: var(--danger); background: var(--danger-bg); }
+.alert-summary-warning { color: var(--warning); background: var(--warning-bg); }
+.alert-summary-strip strong { font-size: 19px; line-height: 1; }
+.alert-summary-strip small { color: var(--muted); font-size: 11px; }
+.bulk-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; margin: -4px 0 12px; padding: 7px 12px; border: 1px solid var(--info-border, var(--border)); background: var(--info-bg); color: var(--foreground); }
+.bulk-action-bar > span { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+.select-column { width: 42px; text-align: center; }
+.table-select-all { width: 32px; height: 32px; display: inline-grid; place-items: center; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.table-select-all:hover, .table-select-all:focus-visible { color: var(--foreground); }
+.select-column input { width: 16px; height: 16px; accent-color: var(--primary); }
 .two-column { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, .8fr); gap: 14px; }
 .mobile-drawer .el-drawer__body { padding: 0; background: var(--surface); }
 .drawer-head { height: 64px; display: flex; align-items: center; justify-content: space-between; padding-right: 12px; border-bottom: 1px solid var(--border); }

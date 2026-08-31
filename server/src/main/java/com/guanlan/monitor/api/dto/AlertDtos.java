@@ -4,10 +4,12 @@ import com.guanlan.monitor.domain.AlertEvent;
 import com.guanlan.monitor.domain.AlertRule;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 
 public final class AlertDtos {
     private AlertDtos() {}
@@ -33,6 +35,10 @@ public final class AlertDtos {
             AlertRule.Severity severity, AlertEvent.Status status, double value,
             String message, Instant startedAt, Instant acknowledgedAt,
             String acknowledgedBy, Instant resolvedAt, boolean notificationSuppressed, Instant notifiedAt
+    ) {}
+
+    public record AcknowledgeRequest(
+            @NotEmpty @Size(max = 100) List<Long> ids
     ) {}
 }
 

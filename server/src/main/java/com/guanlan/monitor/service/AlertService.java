@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -49,6 +50,15 @@ public class AlertService {
     @Transactional(readOnly = true)
     public List<AlertDtos.EventView> listEvents(int limit) {
         return events.findAllByOrderByStartedAtDesc(PageRequest.of(0, Math.min(Math.max(limit, 1), 500))).stream().map(this::eventView).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<AlertDtos.EventView> listEvents(int limit, AlertEvent.Status status,
+                                                AlertRule.Severity severity, String deviceId) {
+        String normalizedDeviceId = deviceId == null || deviceId.isBlank() ? null : deviceId.trim();
+        return events.search(status, severity, normalizedDeviceId,
+                        PageRequest.of(0, Math.min(Math.max(limit, 1), 500)))
+                .stream().map(this::eventView).toList();
     }
 
     @Transactional(readOnly = true)
@@ -102,6 +112,14 @@ public class AlertService {
             audit.record("ALERT_ACK", "alert:" + id, "确认告警 " + event.getRule().getName());
         }
         return eventView(event);
+    }
+
+    @Transactional
+    public List<AlertDtos.EventView> acknowledge(Collection<Long> ids, String actor) {
+        if (ids == null || ids.isEmpty() || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id < 1)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "一次最多确认 100 条有效告警");
+        }
+        return ids.stream().distinct().map(id -> acknowledge(id, actor)).toList();
     }
 
     @Transactional(readOnly = true)

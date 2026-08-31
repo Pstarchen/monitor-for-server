@@ -35,8 +35,9 @@ const collectAllProcesses = ref(false)
 const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
-const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.8.0/deploy/install-agent'
-const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.8.0/deploy/install-agent'
+const agentInstallerControllerPath = '/api/setup/agent-installer'
+const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.9.0/deploy/install-agent'
+const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.9.0/deploy/install-agent'
 const agentInstallerCacheKey = 'v8'
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
@@ -53,19 +54,20 @@ const filtered = computed(() => {
 const installCommand = computed(() => {
   if (!credential.value) return ''
   const url = agentServerHost(agentServerUrl.value)
+  const controllerInstallerUrl = `${url}${agentInstallerControllerPath}`
   const disks = diskMountpoints.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean)
   if (credentialPlatform.value === 'windows') {
     const diskArgs = disks.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
     const lightArgs = lightweight.value ? ' -SkipProcesses -SkipConnections' : ''
     const processArgs = !lightweight.value && collectAllProcesses.value ? ` -CollectAllProcesses -ProcessCollectionLimit ${processCollectionLimit.value}` : ''
     return `$env:GUANLAN_AGENT_KEY = '${powerShellQuote(credential.value.agentKey)}'\n` +
-      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerCdnUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer } catch { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerRawUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer }; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}; Remove-Item $installer -Force`
+      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${controllerInstallerUrl}?platform=windows&${agentInstallerCacheKey}' -OutFile $installer } catch { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerCdnUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer } catch { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerRawUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer } }; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}; Remove-Item $installer -Force`
   }
   const diskArgs = disks.map((value) => ` --disk '${shellQuote(value)}'`).join('')
   const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
   const processArgs = !lightweight.value && collectAllProcesses.value ? ` --all-processes --process-limit ${processCollectionLimit.value}` : ''
   return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
-    `installer_script="$(mktemp)"; trap 'rm -f "$installer_script"' EXIT; download_installer() { curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" || curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script"; }; if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载 Agent 安装器，请检查服务器网络或使用 IPv4 出口。' >&2; exit 1; }; fi; sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
+    `installer_script="$(mktemp)"; trap 'rm -f "$installer_script"' EXIT; download_installer() { curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" || curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script"; }; if ! download_installer '${controllerInstallerUrl}?platform=linux&${agentInstallerCacheKey}'; then if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载 Agent 安装器，请检查总控地址、服务器网络或使用 IPv4 出口。' >&2; exit 1; }; fi; fi; sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
 })
 
 async function load(background = false) {

@@ -15,10 +15,13 @@ download_installer() {
     || curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script"
 }
 if ! download_installer \
-  'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.8.0/deploy/install-agent.sh'; then
-  download_installer \
-    'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.8.0/deploy/install-agent.sh' \
-    || { echo '无法下载 Agent 安装器，请检查服务器网络。' >&2; exit 1; }
+  'https://monitor.example.com/api/setup/agent-installer?platform=linux'; then
+  if ! download_installer \
+    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.9.0/deploy/install-agent.sh'; then
+    download_installer \
+      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.9.0/deploy/install-agent.sh' \
+      || { echo '无法下载 Agent 安装器，请检查总控地址、服务器网络。' >&2; exit 1; }
+  fi
 fi
 sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
   --server-url monitor.example.com \

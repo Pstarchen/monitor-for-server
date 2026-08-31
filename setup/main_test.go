@@ -37,6 +37,36 @@ func TestValidateSetupRequest(t *testing.T) {
 	}
 }
 
+func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
+	originalWorkspace := workspace
+	workspace = t.TempDir()
+	t.Cleanup(func() { workspace = originalWorkspace })
+	if err := os.MkdirAll(filepath.Join(workspace, "deploy"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.sh"), []byte("#!/usr/bin/env bash\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := &setupService{}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=linux", nil)
+	response := httptest.NewRecorder()
+	service.agentInstaller(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "#!/usr/bin/env bash") {
+		t.Fatalf("linux installer response = %d %q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("installer response must not be cached")
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=../../.env", nil)
+	response = httptest.NewRecorder()
+	service.agentInstaller(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid platform returned %d, want 400", response.Code)
+	}
+}
+
 func TestValidateAllowedOriginsRequiresPublicOrigin(t *testing.T) {
 	publicURL, err := url.Parse("https://monitor.example.com")
 	if err != nil {

@@ -79,6 +79,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/setup/status", service.status)
 	mux.HandleFunc("/api/setup/complete", service.complete)
+	mux.HandleFunc("/api/setup/agent-installer", service.agentInstaller)
 	updater.register(mux)
 	go updater.runScheduler()
 
@@ -94,6 +95,36 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+// agentInstaller serves the installer from the mounted controller workspace so
+// monitored hosts do not need direct access to GitHub or another CDN.
+func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	platform := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("platform")))
+	filename := map[string]string{"linux": "install-agent.sh", "windows": "install-agent.ps1"}[platform]
+	if filename == "" {
+		writeError(w, http.StatusBadRequest, "安装器平台必须是 linux 或 windows")
+		return
+	}
+	path := filepath.Join(workspace, "deploy", filename)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "当前总控版本未提供该平台的 Agent 安装器")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Agent 安装器读取失败")
+		}
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
 }
 
 func (s *setupService) status(w http.ResponseWriter, _ *http.Request) {
