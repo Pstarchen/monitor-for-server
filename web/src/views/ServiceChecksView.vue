@@ -30,9 +30,30 @@ const historyCheck = ref<ServiceCheck | null>(null)
 const history = ref<ServiceCheckResult[]>([])
 const heartbeatDialog = ref(false)
 const heartbeatCredential = ref<ServiceCheck | null>(null)
+const statusFilter = ref<'ALL' | 'HEALTHY' | 'FAILING' | 'PAUSED'>('ALL')
+const typeFilter = ref<ServiceCheckType | ''>('')
 const form = reactive({ name: '', target: '', type: 'HTTP_GET' as ServiceCheckType, intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null as number | null, bodyContains: '' })
 const labels: Record<ServiceCheckType, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', REDIS_PING: 'Redis PING', POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', HEARTBEAT: '外部心跳' }
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
+const filteredChecks = computed(() => checks.value.filter((check) => {
+  const stateMatches = statusFilter.value === 'ALL'
+    || (statusFilter.value === 'PAUSED' && !check.enabled)
+    || (statusFilter.value === 'FAILING' && check.enabled && Boolean(check.latest) && !check.latest?.success)
+    || (statusFilter.value === 'HEALTHY' && check.enabled && Boolean(check.latest?.success))
+  return stateMatches && (!typeFilter.value || check.type === typeFilter.value)
+}))
+const serviceSummary = computed(() => {
+  const availabilityChecks = checks.value.filter((check) => check.availabilityPercent != null)
+  return {
+    total: checks.value.length,
+    healthy: checks.value.filter((check) => check.enabled && check.latest?.success).length,
+    failing: checks.value.filter((check) => check.enabled && check.latest && !check.latest.success).length,
+    paused: checks.value.filter((check) => !check.enabled).length,
+    availability: availabilityChecks.length
+      ? availabilityChecks.reduce((sum, check) => sum + Number(check.availabilityPercent ?? 0), 0) / availabilityChecks.length
+      : null,
+  }
+})
 const historyLabels = computed(() => history.value.map((item) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(item.checkedAt))))
 const historyLatencySeries = computed(() => [{ name: '响应延迟', data: history.value.map((item) => Math.max(0, Number(item.latencyMs) || 0)), color: '#2867a6' }])
 
@@ -165,8 +186,21 @@ useVisibilityPolling(() => load(true))
 
     <LoadingState v-if="loading" />
     <div v-else-if="error" class="panel state-panel"><EmptyState title="服务监控加载失败" :description="error"><el-button @click="load">重新加载</el-button></EmptyState></div>
-    <div v-else-if="checks.length" class="service-availability-grid">
-      <ServiceAvailabilityCard v-for="check in checks" :key="check.id" :name="check.name" :type-label="labels[check.type]" :subtitle="check.type === 'HEARTBEAT' ? `外部任务 · 令牌 ${check.heartbeatTokenPrefix ?? '已配置'}...` : check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs" :refresh-interval-seconds="check.intervalSeconds">
+    <template v-else>
+      <div class="service-summary-grid" aria-label="服务监控摘要">
+        <div><span>监控总数</span><strong>{{ serviceSummary.total }}</strong><small>已登记目标</small></div>
+        <div data-tone="success"><span>当前正常</span><strong>{{ serviceSummary.healthy }}</strong><small>最近探测成功</small></div>
+        <div data-tone="danger"><span>需要关注</span><strong>{{ serviceSummary.failing }}</strong><small>最近一次探测失败</small></div>
+        <div data-tone="warning"><span>已暂停</span><strong>{{ serviceSummary.paused }}</strong><small>不会自动探测</small></div>
+        <div><span>平均可用率</span><strong>{{ serviceSummary.availability ? `${serviceSummary.availability.toFixed(2)}%` : '--' }}</strong><small>最近 7 天</small></div>
+      </div>
+      <div v-if="checks.length" class="filter-bar service-filter-bar">
+        <el-segmented v-model="statusFilter" :options="[{ label: '全部', value: 'ALL' }, { label: '正常', value: 'HEALTHY' }, { label: '异常', value: 'FAILING' }, { label: '已暂停', value: 'PAUSED' }]" aria-label="服务状态筛选" />
+        <el-select v-model="typeFilter" clearable placeholder="全部类型" class="compact-select" aria-label="服务类型筛选"><el-option v-for="(label, value) in labels" :key="value" :label="label" :value="value" /></el-select>
+        <span class="filter-count">{{ filteredChecks.length }} / {{ checks.length }} 项监控</span>
+      </div>
+      <div v-if="filteredChecks.length" class="service-availability-grid">
+      <ServiceAvailabilityCard v-for="check in filteredChecks" :key="check.id" :name="check.name" :type-label="labels[check.type]" :subtitle="check.type === 'HEARTBEAT' ? `外部任务 · 令牌 ${check.heartbeatTokenPrefix ?? '已配置'}...` : check.target" :latest="check.latest" :history="check.history" :availability-percent="check.availabilityPercent" :latency-threshold-ms="check.latencyThresholdMs" :refresh-interval-seconds="check.intervalSeconds">
         <template #actions>
           <span class="availability-actions">
             <button class="table-icon-button" type="button" title="查看历史" aria-label="查看历史" @click="openHistory(check)"><Clock3 :size="15" /></button>
@@ -186,8 +220,9 @@ useVisibilityPolling(() => load(true))
           <span v-if="check.type === 'HEARTBEAT'" class="availability-detail">超时判定为 {{ Math.max(30, check.intervalSeconds * 2) }} 秒</span>
         </template>
       </ServiceAvailabilityCard>
-    </div>
-    <article v-else class="panel"><EmptyState title="暂无服务监控" description="添加一个 HTTP、Ping 或 TCP 目标，开始记录可用性和延迟。"><el-button v-if="canEdit" type="primary" @click="openCreate"><Plus :size="16" />新建监控</el-button></EmptyState></article>
+      </div>
+      <article v-else class="panel"><EmptyState :title="checks.length ? '没有匹配的服务监控' : '暂无服务监控'" :description="checks.length ? '调整状态或类型筛选后重试。' : '添加一个 HTTP、Ping 或 TCP 目标，开始记录可用性和延迟。'"><el-button v-if="canEdit && !checks.length" type="primary" @click="openCreate"><Plus :size="16" />新建监控</el-button></EmptyState></article>
+    </template>
 
     <el-dialog v-model="dialog" :title="editingId ? '编辑服务监控' : '新建服务监控'" width="min(560px, calc(100vw - 28px))" destroy-on-close>
       <el-form label-position="top">

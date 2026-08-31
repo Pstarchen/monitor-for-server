@@ -120,43 +120,57 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 安装器默认检测 Docker 守护进程，成功时直接拉取 GHCR 预构建镜像并启动容器，不要求 Go。密钥通过环境变量提供，避免进入命令历史：
 
+请只复制代码块中的纯文本 URL，不要把 Markdown 链接写成 `[链接](链接)`；总控同域入口是首选，目标服务器无需直接访问 GitHub。
+
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
 installer_script="$(mktemp)"
 trap 'rm -f "$installer_script"' EXIT
 download_installer() {
+  local url="$1" downloaded=false
   if command -v curl >/dev/null 2>&1; then
-    curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
-      && return 0
-    curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
-      && return 0
+    curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true
+    if [ "$downloaded" != true ]; then curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true; fi
   fi
-  if command -v wget >/dev/null 2>&1; then
-    wget -4 -t 3 -T 10 -O "$installer_script" "$1" \
-      && return 0
-    wget -t 3 -T 10 -O "$installer_script" "$1" \
-      && return 0
+  if [ "$downloaded" != true ] && command -v wget >/dev/null 2>&1; then
+    wget -4 -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true
+    if [ "$downloaded" != true ]; then wget -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true; fi
   fi
+  if [ "$downloaded" = true ] && head -n 1 "$installer_script" | grep -q '^#!/usr/bin/env bash'; then return 0; fi
+  rm -f "$installer_script"
   return 1
 }
 if ! download_installer \
   'https://monitor.example.com/api/setup/agent-installer?platform=linux'; then
   if ! download_installer \
-    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.1/deploy/install-agent.sh'; then
+    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.12.0/deploy/install-agent.sh'; then
     download_installer \
-      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.1/deploy/install-agent.sh' \
-      || { echo '无法下载 Agent 安装器：总控、CDN 和 GitHub 均不可达，请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }
+      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.12.0/deploy/install-agent.sh' \
+      || { echo '无法下载有效的 Agent 安装器：总控、CDN 和 GitHub 均不可达，或返回内容不是 Bash 脚本。请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }
   fi
 fi
-sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
-  --server-url monitor.example.com \
-  --device-id '<设备ID>' \
-  --interval 3s \
-  --disk / \
-  --disk /data \
-  --service nginx \
-  --service sshd \
-  --process java
+if [ "$(id -u)" -eq 0 ]; then
+  bash "$installer_script" \
+    --server-url monitor.example.com \
+    --device-id '<设备ID>' \
+    --interval 3s \
+    --disk / \
+    --disk /data \
+    --service nginx \
+    --service sshd \
+    --process java
+else
+  command -v sudo >/dev/null 2>&1 || { echo '请以 root 身份运行，或安装 sudo 后重试。' >&2; exit 1; }
+  sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
+    --server-url monitor.example.com \
+    --device-id '<设备ID>' \
+    --interval 3s \
+    --disk / \
+    --disk /data \
+    --service nginx \
+    --service sshd \
+    --process java
+fi
 ```
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。使用 `--process java`（可重复指定，最多 32 个）可额外保留关键进程，即使其不在 CPU 排名前 12；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。Windows 安装器对应使用 `-MonitoredProcess java`、`-CollectAllProcesses`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。

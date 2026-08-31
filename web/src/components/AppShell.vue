@@ -2,13 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity, BarChart3, BellRing, CalendarClock, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut,
+  Activity, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut,
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
-import { errorMessage } from '@/lib/api'
+import { api, errorMessage } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import { loadBranding, siteName } from '@/lib/branding'
+import { dateTime, relativeTime } from '@/lib/format'
+import type { AlertEvent } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -20,8 +22,16 @@ const profileError = ref('')
 const profileForm = reactive({ displayName: '', currentPassword: '', newPassword: '' })
 const githubUrl = 'https://github.com/Pstarchen/monitor-for-server'
 const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
+const alertCenterOpen = ref(false)
+const alertPreview = ref<AlertEvent[]>([])
+const alertPreviewLoading = ref(false)
+const alertPreviewError = ref('')
+const alertPreviewLoadedAt = ref('')
+const activeAlertCount = computed(() => alertPreview.value.length)
 let socket: WebSocket | null = null
 let reconnectTimer = 0
+let alertRefreshTimer = 0
+let alertPollTimer = 0
 let active = true
 
 const navigation = [
@@ -61,6 +71,41 @@ function applyTheme() {
 function toggleTheme() {
   dark.value = !dark.value
   applyTheme()
+}
+
+async function loadAlertPreview(silent = false) {
+  if (!auth.user) return
+  if (!silent) alertPreviewLoading.value = true
+  try {
+    // Fetch the bounded API maximum so the badge reflects the total active set;
+    // the popover still renders only the first eight rows for a compact layout.
+    alertPreview.value = (await api.get<AlertEvent[]>('/alerts', { params: { limit: 500, status: 'OPEN' } })).data
+    alertPreviewLoadedAt.value = new Date().toISOString()
+    alertPreviewError.value = ''
+  } catch (cause) {
+    alertPreviewError.value = errorMessage(cause)
+  } finally {
+    alertPreviewLoading.value = false
+  }
+}
+
+function scheduleAlertRefresh() {
+  window.clearTimeout(alertRefreshTimer)
+  alertRefreshTimer = window.setTimeout(() => loadAlertPreview(true), 350)
+}
+
+function openAlerts() {
+  alertCenterOpen.value = true
+  if (!alertPreviewLoadedAt.value && !alertPreviewLoading.value) void loadAlertPreview()
+}
+
+function goToAlerts() {
+  alertCenterOpen.value = false
+  void router.push('/alerts')
+}
+
+function alertSeverityLabel(severity: AlertEvent['severity']) {
+  return severity === 'CRITICAL' ? '严重' : severity === 'WARNING' ? '警告' : '提示'
 }
 
 async function logout() {
@@ -118,11 +163,17 @@ onMounted(() => {
   loadBranding()
   applyTheme()
   connectRealtime()
+  void loadAlertPreview()
+  alertPollTimer = window.setInterval(() => loadAlertPreview(true), 60_000)
+  window.addEventListener('guanlan:realtime', scheduleAlertRefresh)
 })
 
 onBeforeUnmount(() => {
   active = false
   window.clearTimeout(reconnectTimer)
+  window.clearTimeout(alertRefreshTimer)
+  window.clearInterval(alertPollTimer)
+  window.removeEventListener('guanlan:realtime', scheduleAlertRefresh)
   socket?.close()
 })
 </script>
@@ -183,6 +234,27 @@ onBeforeUnmount(() => {
           <a class="icon-button" :href="githubUrl" target="_blank" rel="noopener noreferrer" aria-label="访问 GitHub 仓库" title="访问 GitHub 仓库">
             <Github :size="18" />
           </a>
+          <el-popover v-model:visible="alertCenterOpen" placement="bottom-end" :width="360" trigger="click" popper-class="alert-center-popover" @show="openAlerts">
+            <template #reference>
+              <button id="alert-center-trigger" class="icon-button topbar-alert-button" type="button" aria-label="打开告警中心" title="告警中心" :aria-expanded="alertCenterOpen" aria-controls="alert-center-panel">
+                <BellRing :size="18" />
+                <span v-if="activeAlertCount" class="topbar-alert-count" aria-live="polite">{{ activeAlertCount > 99 ? '99+' : activeAlertCount }}</span>
+              </button>
+            </template>
+            <div id="alert-center-panel" class="alert-center" aria-label="告警中心">
+              <header class="alert-center-head"><div><strong>告警中心</strong><small>未处理事件</small></div><span v-if="activeAlertCount" class="alert-center-count">{{ activeAlertCount }} 条</span></header>
+              <div v-if="alertPreviewLoading" class="alert-center-state"><span class="spinner" />正在读取告警</div>
+              <div v-else-if="alertPreviewError" class="alert-center-state alert-center-error" role="alert"><span>{{ alertPreviewError }}</span><button type="button" @click="loadAlertPreview()">重新加载</button></div>
+              <div v-else-if="alertPreview.length" class="alert-center-list">
+                <button v-for="alert in alertPreview.slice(0, 8)" :key="alert.id" class="alert-center-item" type="button" @click="goToAlerts">
+                  <span class="alert-center-severity" :data-severity="alert.severity"><i />{{ alertSeverityLabel(alert.severity) }}</span>
+                  <span class="alert-center-copy"><strong>{{ alert.ruleName }}</strong><small>{{ alert.deviceName }} · {{ alert.message }}</small><time :datetime="alert.startedAt">{{ relativeTime(alert.startedAt) }} · {{ dateTime(alert.startedAt) }}</time></span>
+                </button>
+              </div>
+              <div v-else class="alert-center-empty"><CheckCircle2 :size="18" /><strong>目前没有未处理告警</strong><span>设备和服务都在配置阈值内。</span></div>
+              <button class="alert-center-footer" type="button" @click="goToAlerts">查看全部告警 <ChevronDown :size="14" class="rotate-270" /></button>
+            </div>
+          </el-popover>
           <button class="icon-button" type="button" :aria-label="dark ? '切换浅色模式' : '切换深色模式'" :title="dark ? '浅色模式' : '深色模式'" @click="toggleTheme">
             <Sun v-if="dark" :size="18" /><Moon v-else :size="18" />
           </button>

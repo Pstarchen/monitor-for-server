@@ -6,42 +6,55 @@
 
 在线安装器默认优先使用 Docker：Docker 命令和守护进程可用时，直接拉取公开的 `ghcr.io/pstarchen/monitor-for-server-agent:latest` 镜像并启动容器，不需要 Go 或 git。只有 Docker 不可用时，安装器才使用 `--binary` 指定的本机程序，或拉取源码并用 Go 1.24+ 构建。
 
+请只复制下面代码块中的纯文本 URL，不要把 Markdown 链接写成 `[链接](链接)`；总控同域入口是首选，目标服务器无需访问 GitHub 即可获取安装器。
+
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
 installer_script="$(mktemp)"
 trap 'rm -f "$installer_script"' EXIT
 download_installer() {
+  local url="$1" downloaded=false
   if command -v curl >/dev/null 2>&1; then
-    curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
-      && return 0
-    curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" \
-      && return 0
+    curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true
+    if [ "$downloaded" != true ]; then curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true; fi
   fi
-  if command -v wget >/dev/null 2>&1; then
-    wget -4 -t 3 -T 10 -O "$installer_script" "$1" \
-      && return 0
-    wget -t 3 -T 10 -O "$installer_script" "$1" \
-      && return 0
+  if [ "$downloaded" != true ] && command -v wget >/dev/null 2>&1; then
+    wget -4 -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true
+    if [ "$downloaded" != true ]; then wget -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true; fi
   fi
+  if [ "$downloaded" = true ] && head -n 1 "$installer_script" | grep -q '^#!/usr/bin/env bash'; then return 0; fi
+  rm -f "$installer_script"
   return 1
 }
 if ! download_installer \
   'https://monitor.example.com/api/setup/agent-installer?platform=linux'; then
   if ! download_installer \
-    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.1/deploy/install-agent.sh'; then
+    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.12.0/deploy/install-agent.sh'; then
     download_installer \
-      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.1/deploy/install-agent.sh' \
-      || { echo '无法下载 Agent 安装器：总控、CDN 和 GitHub 均不可达，请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }
+      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.12.0/deploy/install-agent.sh' \
+      || { echo '无法下载有效的 Agent 安装器：总控、CDN 和 GitHub 均不可达，或返回内容不是 Bash 脚本。请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }
   fi
 fi
-sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
-  --server-url monitor.example.com \
-  --device-id '<设备ID>' \
-  --interval 3s \
-  --disk / \
-  --log-path /var/log/nginx/error.log \
-  --integrity-path /etc/nginx \
-  --service nginx
+if [ "$(id -u)" -eq 0 ]; then
+  bash "$installer_script" \
+    --server-url monitor.example.com \
+    --device-id '<设备ID>' \
+    --interval 3s \
+    --disk / \
+    --log-path /var/log/nginx/error.log \
+    --integrity-path /etc/nginx \
+    --service nginx
+else
+  command -v sudo >/dev/null 2>&1 || { echo '请以 root 身份运行，或安装 sudo 后重试。' >&2; exit 1; }
+  sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
+    --server-url monitor.example.com \
+    --device-id '<设备ID>' \
+    --interval 3s \
+    --disk / \
+    --log-path /var/log/nginx/error.log \
+    --integrity-path /etc/nginx \
+    --service nginx
+fi
 ```
 
 `--server-url` 只填写域名或 `域名:端口` 即可。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 HTTP 并在配置中启用明文连接。也支持直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS；HTTP 仅适合没有证书的临时或内网部署。安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：

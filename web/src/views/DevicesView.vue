@@ -2,17 +2,18 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Copy, KeyRound, Pencil, Plus, RefreshCw, Search, Server, Terminal, Trash2 } from 'lucide-vue-next'
+import { Copy, Download, KeyRound, Pencil, Plus, RefreshCw, Search, Server, Terminal, Trash2 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
+import { downloadCsv } from '@/lib/csv'
 import { percent, relativeTime } from '@/lib/format'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
-import type { AgentBootstrap, Device, DeviceCredential, DeviceStatus, DdnsConfig } from '@/types'
+import type { AgentBootstrap, Device, DeviceCredential, DeviceHealthState, DeviceStatus, DdnsConfig } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -24,6 +25,9 @@ const error = ref('')
 const search = ref('')
 const status = ref<DeviceStatus | ''>('')
 const tag = ref('')
+const group = ref('')
+const environment = ref('')
+const healthState = ref<DeviceHealthState | ''>('')
 const dialog = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
@@ -37,21 +41,58 @@ const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], assetTag: '', ownerName: '', vendor: '', model: '', serialNumber: '', environment: '', purchaseDate: '', warrantyExpiresAt: '', description: '', ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
 const agentInstallerControllerPath = '/api/setup/agent-installer'
-const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.11.1/deploy/install-agent'
-const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.11.1/deploy/install-agent'
-const agentInstallerCacheKey = 'v10'
+const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.12.0/deploy/install-agent'
+const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.12.0/deploy/install-agent'
+const agentInstallerCacheKey = 'v12'
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
 
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
 const knownTags = computed(() => Array.from(new Set(devices.value.flatMap((device) => device.tags ?? []))).sort((left, right) => left.localeCompare(right, 'zh-CN')))
+const knownGroups = computed(() => Array.from(new Set(devices.value.map((device) => device.groupName).filter((value): value is string => Boolean(value)))).sort((left, right) => left.localeCompare(right, 'zh-CN')))
+const knownEnvironments = computed(() => Array.from(new Set(devices.value.map((device) => device.environment).filter((value): value is string => Boolean(value)))).sort((left, right) => left.localeCompare(right, 'zh-CN')))
+const environmentLabels: Record<string, string> = { production: '生产', staging: '预发布', testing: '测试', development: '开发', 'disaster-recovery': '灾备' }
+const healthLabels: Record<DeviceHealthState, string> = { HEALTHY: '健康', DEGRADED: '数据延迟', OFFLINE: 'Agent 离线', PENDING: '待接入' }
 const filtered = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return devices.value.filter((device) => (!status.value || device.status === status.value)
     && (!tag.value || (device.tags ?? []).includes(tag.value))
+    && (!group.value || device.groupName === group.value)
+    && (!environment.value || device.environment === environment.value)
+    && (!healthState.value || device.health?.state === healthState.value)
     && (!needle || [device.name, device.hostname, device.primaryIp, device.location, device.groupName, device.assetTag, device.ownerName, device.vendor, device.model, device.serialNumber, device.environment, ...(device.tags ?? [])].some((value) => value?.toLowerCase().includes(needle))))
 })
+
+function exportInventory() {
+  if (!filtered.value.length) {
+    ElMessage.info('当前筛选没有可导出的设备')
+    return
+  }
+  const headers = ['设备名称', '状态', '健康', '分组', '环境', '主机名', '主 IP', '操作系统', '架构', 'CPU 使用率', '内存使用率', '磁盘使用率', '最近上报', '资产编号', '责任人', '供应商', '型号', '序列号']
+  const rows = filtered.value.map((device) => [
+    device.name,
+    device.status === 'ONLINE' ? '在线' : device.status === 'OFFLINE' ? '离线' : '待接入',
+    healthLabels[device.health?.state ?? 'PENDING'],
+    device.groupName ?? '',
+    device.environment ? (environmentLabels[device.environment] ?? device.environment) : '',
+    device.hostname ?? '',
+    device.primaryIp ?? '',
+    device.os ?? '',
+    device.architecture ?? '',
+    device.latest ? `${device.latest.cpuUsage.toFixed(2)}%` : '',
+    device.latest ? `${device.latest.memoryUsage.toFixed(2)}%` : '',
+    device.latest ? `${device.latest.diskUsage.toFixed(2)}%` : '',
+    device.lastSeenAt ?? '',
+    device.assetTag ?? '',
+    device.ownerName ?? '',
+    device.vendor ?? '',
+    device.model ?? '',
+    device.serialNumber ?? '',
+  ])
+  downloadCsv(`guanlan-devices-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
+  ElMessage.success(`已导出 ${rows.length} 台设备`)
+}
 const installCommand = computed(() => {
   if (!credential.value) return ''
   const url = agentServerHost(agentServerUrl.value)
@@ -64,11 +105,36 @@ const installCommand = computed(() => {
     return `$env:GUANLAN_AGENT_KEY = '${powerShellQuote(credential.value.agentKey)}'\n` +
       `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${controllerInstallerUrl}?platform=windows&${agentInstallerCacheKey}' -OutFile $installer } catch { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerCdnUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer } catch { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerRawUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer } }; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}; Remove-Item $installer -Force`
   }
-  const diskArgs = disks.map((value) => ` --disk '${shellQuote(value)}'`).join('')
+  const diskArgs = disks.map((value) => ` --disk ${shellQuote(value)}`).join('')
   const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
   const processArgs = !lightweight.value && collectAllProcesses.value ? ` --all-processes --process-limit ${processCollectionLimit.value}` : ''
-  return `export GUANLAN_AGENT_KEY='${shellQuote(credential.value.agentKey)}'\n` +
-    `installer_script="$(mktemp)"; trap 'rm -f "$installer_script"' EXIT; download_installer() { if command -v curl >/dev/null 2>&1; then curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" && return 0; curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$1" -o "$installer_script" && return 0; fi; if command -v wget >/dev/null 2>&1; then wget -4 -t 3 -T 10 -O "$installer_script" "$1" && return 0; wget -t 3 -T 10 -O "$installer_script" "$1" && return 0; fi; return 1; }; if ! download_installer '${controllerInstallerUrl}?platform=linux&${agentInstallerCacheKey}'; then if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载 Agent 安装器：总控、CDN 和 GitHub 均不可达，请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }; fi; fi; sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" --server-url '${shellQuote(url)}' --device-id '${shellQuote(credential.value.device.id)}' --interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}`
+  const installArgs = `--server-url ${shellQuote(url)} --device-id ${shellQuote(credential.value.device.id)} --interval ${collectionSeconds.value}s${diskArgs}${lightArgs}${processArgs}`
+  const command = [
+    `export GUANLAN_AGENT_KEY=${shellQuote(credential.value.agentKey)}`,
+    'installer_script="$(mktemp)"',
+    `trap 'rm -f "$installer_script"' EXIT`,
+    'download_installer() {',
+    '  local url="$1" downloaded=false',
+    '  if command -v curl >/dev/null 2>&1; then',
+    '    curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true',
+    '    if [ "$downloaded" != true ]; then curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true; fi',
+    '  fi',
+    '  if [ "$downloaded" != true ] && command -v wget >/dev/null 2>&1; then',
+    '    wget -4 -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true',
+    '    if [ "$downloaded" != true ]; then wget -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true; fi',
+    '  fi',
+    '  if [ "$downloaded" = true ] && head -n 1 "$installer_script" | grep -q "^#!/usr/bin/env bash"; then return 0; fi',
+    '  rm -f "$installer_script"',
+    '  return 1',
+    '}',
+    `if ! download_installer '${controllerInstallerUrl}?platform=linux&${agentInstallerCacheKey}'; then`,
+    `  if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then`,
+    `    download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载有效的 Agent 安装器：总控、CDN 和 GitHub 均不可达，或返回内容不是 Bash 脚本。请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }`,
+    '  fi',
+    'fi',
+    `if [ "$(id -u)" -eq 0 ]; then bash "$installer_script" ${installArgs}; elif command -v sudo >/dev/null 2>&1; then sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" ${installArgs}; else echo '请以 root 身份运行，或安装 sudo 后重试。' >&2; exit 1; fi`,
+  ].join('\n')
+  return command
 })
 
 async function load(background = false) {
@@ -192,7 +258,7 @@ function selectText(element: HTMLElement | null) {
 }
 
 function shellQuote(value: string) {
-  return value.split("'").join("'\"'\"'")
+  return `'${value.split("'").join("'\"'\"'")}'`
 }
 
 function powerShellQuote(value: string) {
@@ -240,6 +306,7 @@ onBeforeUnmount(() => {
     <PageHeader eyebrow="INFRASTRUCTURE" title="设备管理" description="登记监控节点、配置归属信息并管理 Agent 接入凭据。">
       <template #actions>
         <el-button @click="load(true)"><RefreshCw :size="16" />刷新</el-button>
+        <el-button :disabled="!filtered.length" title="导出当前筛选结果" @click="exportInventory"><Download :size="16" />导出清单</el-button>
         <el-button v-if="canEdit" class="button-press" type="primary" @click="openCreate"><Plus :size="16" />添加设备</el-button>
       </template>
     </PageHeader>
@@ -251,6 +318,15 @@ onBeforeUnmount(() => {
       </el-select>
       <el-select v-model="tag" clearable placeholder="全部标签" class="compact-select">
         <el-option v-for="item in knownTags" :key="item" :label="item" :value="item" />
+      </el-select>
+      <el-select v-model="group" clearable placeholder="全部分组" class="compact-select">
+        <el-option v-for="item in knownGroups" :key="item" :label="item" :value="item" />
+      </el-select>
+      <el-select v-model="environment" clearable placeholder="全部环境" class="compact-select">
+        <el-option v-for="item in knownEnvironments" :key="item" :label="environmentLabels[item] ?? item" :value="item" />
+      </el-select>
+      <el-select v-model="healthState" clearable placeholder="全部健康状态" class="compact-select">
+        <el-option v-for="(label, value) in healthLabels" :key="value" :label="label" :value="value" />
       </el-select>
       <span class="filter-count">{{ filtered.length }} / {{ devices.length }} 台设备</span>
     </div>
