@@ -339,6 +339,16 @@ install_docker_agent() {
 
 pull_agent_image() {
   local candidate mirror_prefix image_suffix
+  local pull_timeout=120
+  run_with_timeout() {
+    local seconds="$1"
+    shift
+    if command -v timeout >/dev/null 2>&1; then
+      timeout "${seconds}s" "$@"
+    else
+      "$@"
+    fi
+  }
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
     IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run}"
@@ -347,13 +357,13 @@ pull_agent_image() {
       [[ -z "${mirror_prefix}" ]] && continue
       candidate="${mirror_prefix}/${image_suffix}"
       echo "正在尝试 Agent 镜像源 ${candidate}..."
-      if docker pull "${candidate}" >/dev/null && docker tag "${candidate}" "${agent_image}"; then
+      if run_with_timeout "${pull_timeout}" docker pull "${candidate}" >/dev/null && docker tag "${candidate}" "${agent_image}"; then
         return 0
       fi
     done
   fi
   echo "正在尝试 Agent 官方镜像源 ${agent_image}..."
-  docker pull "${agent_image}"
+  run_with_timeout "${pull_timeout}" docker pull "${agent_image}"
 }
 
 shell_quote() {

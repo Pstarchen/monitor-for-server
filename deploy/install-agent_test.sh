@@ -4,6 +4,9 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 installer="${script_dir}/install-agent.sh"
 grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.nju.edu.cn,ghcr.1ms.run' "${installer}" >/dev/null
+grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
+grep -F 'cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@main/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F -- '--retry-all-errors --connect-timeout 10 --max-time 30' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 fake_bin="${temp_dir}/bin"

@@ -8,8 +8,16 @@
 
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
-curl -fsSL https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh | \
-sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
+installer_script="$(mktemp)"
+trap 'rm -f "$installer_script"' EXIT
+if ! curl -fL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 \
+  'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@main/deploy/install-agent.sh' \
+  -o "$installer_script"; then
+  curl -fL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 \
+    'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh' \
+    -o "$installer_script" || { echo '无法下载 Agent 安装器，请检查服务器网络。' >&2; exit 1; }
+fi
+sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
   --server-url monitor.example.com \
   --device-id '<设备ID>' \
   --interval 3s \
@@ -20,6 +28,17 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
 ```
 
 `--server-url` 只填写域名或 `域名:端口` 即可。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 HTTP 并在配置中启用明文连接。也支持直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS；HTTP 仅适合没有证书的临时或内网部署。安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
+
+需要个性化指标时，可在 `custom_metrics` 中配置最多 32 个程序。程序通过参数数组直接执行，不经过 Shell；`kind` 支持 `number`、`text`、`exit_code`，每项最多运行 3 秒并截断 4096 字符输出。例如：
+
+```json
+"custom_metrics": [
+  {"name": "queue_depth", "command": "/usr/local/bin/queue-depth", "args": [], "kind": "number"},
+  {"name": "release", "command": "/usr/local/bin/release-name", "args": [], "kind": "text"}
+]
+```
+
+告警规则选择“自定义监控项”并填写相同名称后，可对数值结果设置阈值；文本结果仅展示，不参与数值告警。
 
 如果主机存在 `/var/run/docker.sock` 或 Docker 兼容的 Podman socket，Agent 会额外读取容器状态、CPU、内存和累计网络流量；受管 Docker Agent 也会尝试 `/host` 对应路径。没有 socket 或权限不足时自动跳过，不影响其他主机指标。运行时 socket 具备高权限，只应在受信任主机上挂载。
 
