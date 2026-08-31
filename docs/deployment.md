@@ -122,8 +122,16 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 ```bash
 export GUANLAN_AGENT_KEY='<一次性密钥>'
-curl -fsSL https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh | \
-sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
+installer_script="$(mktemp)"
+trap 'rm -f "$installer_script"' EXIT
+if ! curl -fL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 \
+  'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.7.1/deploy/install-agent.sh' \
+  -o "$installer_script"; then
+  curl -fL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 30 \
+    'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.7.1/deploy/install-agent.sh' \
+    -o "$installer_script" || { echo '无法下载 Agent 安装器，请检查服务器网络。' >&2; exit 1; }
+fi
+sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" \
   --server-url monitor.example.com \
   --device-id '<设备ID>' \
   --interval 3s \
@@ -135,6 +143,8 @@ sudo --preserve-env=GUANLAN_AGENT_KEY bash -s -- \
 ```
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。使用 `--process java`（可重复指定，最多 32 个）可额外保留关键进程，即使其不在 CPU 排名前 12；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。Windows 安装器对应使用 `-MonitoredProcess java`、`-CollectAllProcesses`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
+
+需要个性化指标时，在 Agent 配置的 `custom_metrics` 数组中添加最多 32 个参数化程序。程序不经过 Shell，每项最多运行 3 秒，`kind` 支持 `number`、`text`、`exit_code`；服务端设备详情会展示结果，告警规则可对数值项设置阈值。详见 `docs/monitored-agent.md` 中的 JSON 示例。
 
 `--server-url` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。也可以直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS，HTTP 仅适合没有证书的临时或内网部署。默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。可用 `--image` 或 `GUANLAN_AGENT_IMAGE` 指向固定版本/内部仓库，`--container` 可覆盖容器名。Docker 模式会以只读方式映射 `/dev` 供可选 SMART 检测使用；虚拟磁盘或未授予设备访问权限时，SMART 会显示为未采集，不影响其他指标。Docker 模式安装结果：
 
