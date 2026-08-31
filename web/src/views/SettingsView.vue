@@ -4,7 +4,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Activity, CheckCircle2, ChevronRight, Copy, Database, Globe2, KeyRound, LockKeyhole,
-  Clock3, Download, GitCommit, Mail, MessageSquareText, RefreshCw, RotateCcw,
+  Clock3, Download, GitCommit, ImageOff, Mail, MessageSquareText, RefreshCw, RotateCcw,
   Plus, Save, Send, ServerCog, Settings2, ShieldCheck, Trash2, Upload,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
@@ -15,7 +15,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { dateTime } from '@/lib/format'
-import { loadBranding } from '@/lib/branding'
+import { brandAssetUrl, loadBranding } from '@/lib/branding'
 import { apiTokenScopeLabel, visibleApiTokenScopeGroups } from '@/lib/api-token-scopes'
 import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
 import { createMobileBindingQrCode, resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
@@ -77,6 +77,8 @@ const loading = ref(true)
 const saving = ref(false)
 const uploadingIcon = ref(false)
 const iconUploadProgress = ref(0)
+const iconPreviewRevision = ref(0)
+const iconPreviewFailed = ref(false)
 const siteIconInput = ref<HTMLInputElement | null>(null)
 const error = ref('')
 const testing = reactive<Record<ChannelKey, boolean>>({ email: false, dingtalk: false, wecom: false, generic: false })
@@ -104,6 +106,7 @@ const tokenScopeGroups = computed(() => visibleApiTokenScopeGroups(canAdmin.valu
 const tokenSelectedScopeCount = computed(() => tokenForm.scopes.length)
 let updatePollTimer: ReturnType<typeof setTimeout> | undefined
 const hasChanges = computed(() => baseline.value !== '' && baseline.value !== snapshot())
+const siteIconPreviewUrl = computed(() => brandAssetUrl(form.siteIconUrl, iconPreviewRevision.value))
 
 function snapshot() {
   return JSON.stringify(form)
@@ -266,8 +269,10 @@ async function uploadSiteIcon(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  if (!file.type.startsWith('image/')) {
-    ElMessage.error('请选择图片文件')
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const supportedExtension = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'ico', 'svg'].includes(extension)
+  if (!file.type.startsWith('image/') && !supportedExtension) {
+    ElMessage.error('请选择 PNG、JPG、WebP、GIF、ICO 或 SVG 图片')
     return
   }
   if (file.size > 50 * 1024 * 1024) {
@@ -280,12 +285,16 @@ async function uploadSiteIcon(event: Event) {
     const body = new FormData()
     body.append('file', file, file.name)
     const response = await api.post<Settings>('/settings/site-icon', body, {
+      timeout: 120_000,
       onUploadProgress: (progress) => {
-        if (progress.total) iconUploadProgress.value = Math.round(progress.loaded * 100 / progress.total)
+        if (progress.total) iconUploadProgress.value = Math.min(99, Math.round(progress.loaded * 100 / progress.total))
       },
     })
     settings.value = response.data
     apply(response.data)
+    iconUploadProgress.value = 100
+    iconPreviewRevision.value = Date.now()
+    iconPreviewFailed.value = false
     await loadBranding(true)
     ElMessage.success('网站图标上传成功')
   } catch (cause) {
@@ -297,6 +306,8 @@ async function uploadSiteIcon(event: Event) {
 
 function restoreDefaultSiteIcon() {
   form.siteIconUrl = '/brand-icon.png'
+  iconPreviewRevision.value = 0
+  iconPreviewFailed.value = false
 }
 
 async function testChannel(channel: ChannelKey) {
@@ -544,14 +555,14 @@ onBeforeUnmount(() => {
                 <div class="setting-row">
                   <div class="setting-copy"><label for="site-icon-url">网站图标</label><p>浏览器标签页使用的图标。可填写站内路径或 HTTPS 图片地址，留空恢复默认图标。</p></div>
                   <div class="setting-control site-icon-control">
-                    <div class="site-icon-preview"><img :src="form.siteIconUrl || '/brand-icon.png'" alt="" /></div>
+                    <div class="site-icon-preview"><img v-if="!iconPreviewFailed" :src="siteIconPreviewUrl" alt="当前网站图标预览" @error="iconPreviewFailed = true" /><ImageOff v-else :size="19" aria-label="图标预览加载失败" /></div>
                     <div class="site-icon-fields">
-                      <el-input id="site-icon-url" v-model="form.siteIconUrl" placeholder="/brand-icon.png 或 https://example.com/icon.png" />
+                      <el-input id="site-icon-url" v-model="form.siteIconUrl" placeholder="/brand-icon.png 或 https://example.com/icon.png" @input="iconPreviewFailed = false" />
                       <div class="site-icon-actions">
-                        <input ref="siteIconInput" class="site-icon-file-input" type="file" accept="image/*" @change="uploadSiteIcon" />
+                        <input ref="siteIconInput" class="site-icon-file-input" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.ico,.svg,image/*" @change="uploadSiteIcon" />
                         <el-button :loading="uploadingIcon" :disabled="uploadingIcon" @click="chooseSiteIcon"><Upload :size="15" />上传图标</el-button>
                         <el-button v-if="form.siteIconUrl !== '/brand-icon.png'" :disabled="uploadingIcon" @click="restoreDefaultSiteIcon"><RotateCcw :size="15" />恢复默认</el-button>
-                        <span class="site-icon-hint">图片文件，最大 50MB</span>
+                        <span class="site-icon-hint">PNG、JPG、WebP、GIF、ICO 或 SVG，最大 50MB</span>
                       </div>
                       <el-progress v-if="uploadingIcon" :percentage="iconUploadProgress" :show-text="false" :stroke-width="4" />
                     </div>

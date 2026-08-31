@@ -5,6 +5,18 @@ import type { PublicBrand } from '@/types'
 export const siteName = ref('星辰监控')
 export const siteIconUrl = ref('/brand-icon.png')
 let pending: Promise<void> | undefined
+let assetRevision = 0
+
+function nextAssetRevision(): number {
+  assetRevision = Math.max(Date.now(), assetRevision + 1)
+  return assetRevision
+}
+
+export function brandAssetUrl(value: string | null | undefined, revision = 0): string {
+  const url = value?.trim() || '/brand-icon.png'
+  const [path] = url.split(/[?#]/, 1)
+  return path === '/api/settings/site-icon' && revision > 0 ? `${path}?v=${revision}` : url
+}
 
 function syncDocumentBranding(): void {
   if (typeof document !== 'undefined') {
@@ -33,7 +45,7 @@ export function loadBranding(force = false): Promise<void> {
       if (value) {
         siteName.value = value
       }
-      siteIconUrl.value = data.siteIconUrl?.trim() || '/brand-icon.png'
+      siteIconUrl.value = brandAssetUrl(data.siteIconUrl, force ? nextAssetRevision() : 0)
       syncDocumentBranding()
     } catch {
       // Keep the last known brand when the public endpoint is temporarily unavailable.

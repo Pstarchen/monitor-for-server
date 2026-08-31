@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut, Radar,
+  Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, CircleHelp, ClipboardList, GitBranch, Globe2, Github, LogOut, Radar,
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
@@ -69,6 +69,7 @@ const visibleNavigation = computed(() => navigation.filter((item) => !item.roles
 
 const pageTitle = computed(() => {
   if (route.path.startsWith('/devices/')) return '设备详情'
+  if (route.path === '/guide') return '使用指南'
   return [...navigation, ...administration].find((item) => route.path.startsWith(item.path))?.label ?? siteName.value
 })
 
@@ -320,7 +321,10 @@ onBeforeUnmount(() => {
           <div><p>运维控制台</p><strong>{{ pageTitle }}</strong></div>
         </div>
         <div class="topbar-actions">
-          <a class="icon-button" :href="githubUrl" target="_blank" rel="noopener noreferrer" aria-label="访问 GitHub 仓库" title="访问 GitHub 仓库">
+          <RouterLink class="icon-button topbar-guide-link" to="/guide" aria-label="打开功能使用指南" title="功能使用指南">
+            <CircleHelp :size="19" />
+          </RouterLink>
+          <a class="icon-button topbar-github-link" :href="githubUrl" target="_blank" rel="noopener noreferrer" aria-label="访问 GitHub 仓库" title="访问 GitHub 仓库">
             <Github :size="18" />
           </a>
           <el-popover v-model:visible="alertCenterOpen" placement="bottom-end" :width="360" trigger="click" popper-class="alert-center-popover" @show="openAlerts">

@@ -29,6 +29,7 @@ const router = createRouter({
         { path: 'ddns', name: 'ddns', component: () => import('@/views/DdnsView.vue') },
         { path: 'tasks', name: 'tasks', component: () => import('@/views/AgentTasksView.vue') },
         { path: 'tokens', name: 'tokens', component: () => import('@/views/ApiTokensView.vue') },
+        { path: 'guide', name: 'guide', component: () => import('@/views/GuideView.vue') },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { role: 'ADMIN' } },
         { path: 'users', name: 'users', component: () => import('@/views/UsersView.vue'), meta: { role: 'ADMIN' } },
         { path: 'audit', name: 'audit', component: () => import('@/views/AuditView.vue'), meta: { role: 'ADMIN' } },

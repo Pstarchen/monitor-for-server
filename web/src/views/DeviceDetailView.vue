@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, CheckCircle2, CircleAlert, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, MessageSquare, Network, RefreshCw, Send, ServerCog, ShieldAlert, ShieldCheck, Trash2, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, CheckCircle2, CircleAlert, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, MessageSquare, Network, PencilLine, RefreshCw, Send, ServerCog, ShieldAlert, ShieldCheck, Trash2, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -135,6 +135,20 @@ const processSeries = computed(() => [
   { name: 'CPU', data: processTrendPoints.value.map((item) => item.process.cpuPercent), color: '#986400' },
   { name: '内存', data: processTrendPoints.value.map((item) => item.process.memoryPercent), color: '#c73832' },
 ])
+const processCpuLeader = computed(() => (latest.value?.processes ?? []).reduce<ProcessMetric | null>(
+  (leader, process) => !leader || process.cpuPercent > leader.cpuPercent ? process : leader,
+  null,
+))
+const processMemoryLeader = computed(() => (latest.value?.processes ?? []).reduce<ProcessMetric | null>(
+  (leader, process) => !leader || process.memoryPercent > leader.memoryPercent ? process : leader,
+  null,
+))
+const runningContainerCount = computed(() => containers.value.filter((item) => item.state.toLowerCase() === 'running').length)
+const containerRestartTotal = computed(() => containers.value.reduce((total, item) => total + item.restartCount, 0))
+const containerCpuLeader = computed(() => containers.value.reduce<ContainerMetric | null>(
+  (leader, container) => !leader || container.cpuPercent > leader.cpuPercent ? container : leader,
+  null,
+))
 const fans = computed(() => latest.value?.fans ?? [])
 const batteries = computed(() => latest.value?.batteries ?? [])
 const gpus = computed(() => latest.value?.gpus ?? [])
@@ -413,9 +427,19 @@ onBeforeUnmount(() => {
         </el-tab-pane>
 
         <el-tab-pane label="资产与记录" name="operations">
+          <div class="resource-summary-strip asset-summary-strip" aria-label="资产概况">
+            <div><span><ServerCog :size="15" />资产编号</span><strong class="mono-value">{{ device.assetTag || '未录入' }}</strong><small>{{ [device.vendor, device.model].filter(Boolean).join(' · ') || '未录入厂商与型号' }}</small></div>
+            <div><span><MessageSquare :size="15" />责任与归属</span><strong>{{ device.ownerName || '未分配' }}</strong><small>{{ device.groupName || '未设置设备组' }}</small></div>
+            <div><span><Gauge :size="15" />运行环境</span><strong>{{ device.environment || '未标注' }}</strong><small>{{ device.location || '未设置机房位置' }}</small></div>
+            <div><span><ShieldCheck :size="15" />保修到期</span><strong>{{ device.warrantyExpiresAt || '未设置' }}</strong><small>{{ device.purchaseDate ? `采购于 ${device.purchaseDate}` : '未记录采购日期' }}</small></div>
+          </div>
+
           <div class="section two-column device-operations-grid">
             <article class="panel detail-list">
-              <div class="panel-head"><div><h2>资产信息</h2><p>责任、归属与生命周期信息</p></div><ServerCog :size="17" /></div>
+              <div class="panel-head asset-panel-head">
+                <div><h2>资产信息</h2><p>责任、归属与生命周期信息</p></div>
+                <el-button v-if="canOperate" class="asset-panel-action" @click="router.push({ path: '/devices', query: { edit: device.id } })"><PencilLine :size="15" />编辑资产</el-button>
+              </div>
               <dl>
                 <div><dt>资产编号</dt><dd>{{ device.assetTag || '--' }}</dd></div>
                 <div><dt>责任人</dt><dd>{{ device.ownerName || '--' }}</dd></div>
@@ -426,36 +450,39 @@ onBeforeUnmount(() => {
                 <div><dt>保修到期</dt><dd>{{ device.warrantyExpiresAt || '--' }}</dd></div>
               </dl>
               <p v-if="device.description" class="asset-description">{{ device.description }}</p>
-              <el-button v-if="canOperate" class="operations-edit-button" @click="router.push({ path: '/devices', query: { edit: device.id } })">前往设备管理编辑</el-button>
             </article>
 
             <article class="panel device-notes-panel">
               <div class="panel-head"><div><h2>工作记录</h2><p>交接、变更和现场处理摘要</p></div><MessageSquare :size="17" /></div>
-              <div v-if="canOperate" class="device-note-composer"><el-input v-model="noteContent" type="textarea" :rows="3" maxlength="2000" show-word-limit placeholder="记录一次变更、巡检或交接事项" /><el-button type="primary" :loading="notesSaving" @click="addNote"><Send :size="15" />添加记录</el-button></div>
-              <div v-if="notesError" class="inline-error" role="alert"><span>{{ notesError }}</span><el-button text :loading="notesLoading" @click="loadNotes">重试</el-button></div>
-              <LoadingState v-else-if="notesLoading && !notes.length" />
-              <div v-else-if="notes.length" class="device-note-list">
-                <div v-for="note in notes" :key="note.id" class="device-note-item">
-                  <div class="device-note-head"><strong>{{ note.author }}</strong><time :datetime="note.createdAt">{{ dateTime(note.createdAt) }}</time><button v-if="canOperate" class="table-icon-button danger-command" type="button" title="删除工作记录" aria-label="删除工作记录" @click="removeNote(note)"><Trash2 :size="14" /></button></div>
-                  <p>{{ note.content }}</p>
+              <div class="device-notes-body">
+                <div v-if="canOperate" class="device-note-composer"><el-input v-model="noteContent" type="textarea" :rows="3" maxlength="2000" show-word-limit placeholder="记录一次变更、巡检或交接事项" /><el-button type="primary" :loading="notesSaving" @click="addNote"><Send :size="15" />添加记录</el-button></div>
+                <div v-if="notesError" class="inline-error" role="alert"><span>{{ notesError }}</span><el-button text :loading="notesLoading" @click="loadNotes">重试</el-button></div>
+                <LoadingState v-else-if="notesLoading && !notes.length" />
+                <div v-else-if="notes.length" class="device-note-list">
+                  <div v-for="note in notes" :key="note.id" class="device-note-item">
+                    <div class="device-note-head"><span class="record-avatar" aria-hidden="true">{{ note.author.slice(0, 1) }}</span><strong>{{ note.author }}</strong><time :datetime="note.createdAt">{{ dateTime(note.createdAt) }}</time><button v-if="canOperate" class="table-icon-button danger-command" type="button" title="删除工作记录" aria-label="删除工作记录" @click="removeNote(note)"><Trash2 :size="14" /></button></div>
+                    <p>{{ note.content }}</p>
+                  </div>
                 </div>
+                <EmptyState v-else title="暂无工作记录" description="添加第一条交接或变更记录，方便团队追溯设备操作。" />
               </div>
-              <EmptyState v-else title="暂无工作记录" description="添加第一条交接或变更记录，方便团队追溯设备操作。" />
             </article>
           </div>
 
           <article class="panel status-history-panel">
             <div class="panel-head"><div><h2>状态时间线</h2><p>记录 Agent 接入、恢复和失联转换</p></div><Waypoints :size="17" /></div>
-            <div v-if="statusHistoryError" class="inline-error" role="alert"><span>{{ statusHistoryError }}</span><el-button text :loading="statusHistoryLoading" @click="loadStatusHistory">重试</el-button></div>
-            <LoadingState v-else-if="statusHistoryLoading && !statusEvents.length" />
-            <div v-else-if="statusEvents.length" class="status-timeline">
-              <div v-for="event in statusEvents" :key="event.id" class="status-timeline-item" :data-status="event.status">
-                <span class="status-timeline-dot" aria-hidden="true" />
-                <div><strong>{{ statusLabel(event.previousStatus) }} → {{ statusLabel(event.status) }}</strong><p>{{ event.reason }}</p></div>
-                <time :datetime="event.changedAt">{{ dateTime(event.changedAt) }}</time>
+            <div class="status-history-body">
+              <div v-if="statusHistoryError" class="inline-error" role="alert"><span>{{ statusHistoryError }}</span><el-button text :loading="statusHistoryLoading" @click="loadStatusHistory">重试</el-button></div>
+              <LoadingState v-else-if="statusHistoryLoading && !statusEvents.length" />
+              <div v-else-if="statusEvents.length" class="status-timeline">
+                <div v-for="event in statusEvents" :key="event.id" class="status-timeline-item" :data-status="event.status">
+                  <span class="status-timeline-dot" aria-hidden="true" />
+                  <div><strong>{{ statusLabel(event.previousStatus) }} → {{ statusLabel(event.status) }}</strong><p>{{ event.reason }}</p></div>
+                  <time :datetime="event.changedAt">{{ dateTime(event.changedAt) }}</time>
+                </div>
               </div>
+              <EmptyState v-else title="暂无状态变更" description="设备状态发生转换后，时间线会在这里保留记录。" />
             </div>
-            <EmptyState v-else title="暂无状态变更" description="设备状态发生转换后，时间线会在这里保留记录。" />
           </article>
         </el-tab-pane>
 
@@ -464,15 +491,27 @@ onBeforeUnmount(() => {
         </el-tab-pane>
 
         <el-tab-pane :label="`进程 (${latest?.processes.length ?? 0})`" name="processes">
+          <div class="resource-summary-strip" aria-label="进程资源概况">
+            <div><span><ListChecks :size="15" />已采集进程</span><strong>{{ latest?.processes.length ?? 0 }}</strong><small>当前快照中的进程数</small></div>
+            <div><span><Cpu :size="15" />CPU 占用最高</span><strong>{{ processCpuLeader ? percent(processCpuLeader.cpuPercent) : '--' }}</strong><small>{{ processCpuLeader?.name || '暂无进程数据' }}</small></div>
+            <div><span><MemoryStick :size="15" />内存占用最高</span><strong>{{ processMemoryLeader ? percent(processMemoryLeader.memoryPercent) : '--' }}</strong><small>{{ processMemoryLeader?.name || '暂无进程数据' }}</small></div>
+          </div>
           <div v-if="processOptions.length" class="analytics-toolbar">
             <label><span>历史进程</span><el-select v-model="selectedProcessKey" filterable aria-label="选择历史进程"><el-option v-for="process in processOptions" :key="processKey(process)" :label="`${process.name || '未命名'} · PID ${process.pid}`" :value="processKey(process)"><span class="analytics-option"><strong>{{ process.name || '未命名进程' }}</strong><small>PID {{ process.pid }}{{ process.username ? ` · ${process.username}` : '' }}</small></span></el-option></el-select></label>
             <span v-if="selectedProcess" class="analytics-selection">最近 CPU {{ percent(selectedProcess.cpuPercent) }} · 内存 {{ percent(selectedProcess.memoryPercent) }}</span>
           </div>
-          <div v-if="processTrendPoints.length > 1" class="chart-grid analytics-chart-grid">
+          <div v-if="processTrendPoints.length > 1" class="chart-grid analytics-chart-grid single-chart-grid">
             <article class="panel"><div class="panel-head"><div><h2>进程资源趋势</h2><p>{{ selectedProcess?.name || '所选进程' }} · PID {{ selectedProcess?.pid ?? '--' }}</p></div><Cpu :size="17" /></div><MetricChart :labels="processTrendLabels" :series="processSeries" unit="%" :aria-label="`${selectedProcess?.name || '进程'}资源趋势`" /></article>
           </div>
           <div v-else-if="processOptions.length" class="panel analytics-empty"><EmptyState title="暂无进程历史数据" description="该进程在当前时间范围内只有一个采集点，继续采集后会显示趋势。" /></div>
-          <article class="panel"><div v-if="latest?.processes.length" class="table-wrap"><table class="data-table"><thead><tr><th>PID</th><th>进程</th><th>命令行</th><th>用户</th><th>CPU</th><th>内存</th><th>状态</th></tr></thead><tbody><tr v-for="process in latest.processes" :key="process.pid"><td class="mono-value">{{ process.pid }}</td><td><strong>{{ process.name }}</strong></td><td class="mono-value process-command" :title="process.commandLine || undefined">{{ process.commandLine || '--' }}</td><td>{{ process.username || '--' }}</td><td>{{ percent(process.cpuPercent) }}</td><td>{{ percent(process.memoryPercent) }}</td><td>{{ process.status }}</td></tr></tbody></table></div><EmptyState v-else title="暂无进程数据" description="默认保留 CPU 排名前 12 的进程；需要完整清单时，在 Agent 配置启用 collect_all_processes。" /></article>
+          <article class="panel resource-inventory-panel">
+            <div class="panel-head"><div><h2>进程快照</h2><p>按 Agent 采集顺序展示当前资源占用</p></div><ListChecks :size="17" /></div>
+            <template v-if="latest?.processes.length">
+              <div class="table-wrap desktop-data-view"><table class="data-table"><thead><tr><th>PID</th><th>进程</th><th>命令行</th><th>用户</th><th>CPU</th><th>内存</th><th>状态</th></tr></thead><tbody><tr v-for="process in latest.processes" :key="process.pid"><td class="mono-value">{{ process.pid }}</td><td><strong>{{ process.name }}</strong></td><td class="mono-value process-command" :title="process.commandLine || undefined">{{ process.commandLine || '--' }}</td><td>{{ process.username || '--' }}</td><td>{{ percent(process.cpuPercent) }}</td><td>{{ percent(process.memoryPercent) }}</td><td><span class="record-state">{{ process.status || '未知' }}</span></td></tr></tbody></table></div>
+              <div class="mobile-data-view resource-record-list"><article v-for="process in latest.processes" :key="process.pid" class="resource-record"><header><div><strong>{{ process.name || '未命名进程' }}</strong><span class="mono-value">PID {{ process.pid }} · {{ process.username || '未知用户' }}</span></div><span class="record-state">{{ process.status || '未知' }}</span></header><dl><div><dt>CPU</dt><dd>{{ percent(process.cpuPercent) }}</dd></div><div><dt>内存</dt><dd>{{ percent(process.memoryPercent) }}</dd></div></dl><p class="mono-value">{{ process.commandLine || '未采集命令行' }}</p></article></div>
+            </template>
+            <EmptyState v-else title="暂无进程数据" description="默认保留 CPU 排名前 12 的进程；需要完整清单时，在 Agent 配置启用 collect_all_processes。" />
+          </article>
         </el-tab-pane>
 
         <el-tab-pane :label="`服务 (${latest?.services.length ?? 0})`" name="services">
@@ -484,6 +523,12 @@ onBeforeUnmount(() => {
         </el-tab-pane>
 
         <el-tab-pane :label="`容器 (${containers.length})`" name="containers">
+          <div class="resource-summary-strip" aria-label="容器运行概况">
+            <div><span><Box :size="15" />容器总数</span><strong>{{ containers.length }}</strong><small>当前快照中的 Docker 容器</small></div>
+            <div><span><CheckCircle2 :size="15" />正在运行</span><strong>{{ runningContainerCount }}</strong><small>{{ containers.length - runningContainerCount }} 个未运行</small></div>
+            <div><span><Cpu :size="15" />CPU 占用最高</span><strong>{{ containerCpuLeader ? percent(containerCpuLeader.cpuPercent) : '--' }}</strong><small>{{ containerCpuLeader?.name || '暂无容器数据' }}</small></div>
+            <div><span><RefreshCw :size="15" />累计重启</span><strong>{{ containerRestartTotal }}</strong><small>当前容器重启计数合计</small></div>
+          </div>
           <div v-if="containerOptions.length" class="analytics-toolbar">
             <label><span>历史容器</span><el-select v-model="selectedContainerId" filterable aria-label="选择历史容器"><el-option v-for="container in containerOptions" :key="container.id" :label="container.name || container.id.slice(0, 12)" :value="container.id"><span class="analytics-option"><strong>{{ container.name || '未命名容器' }}</strong><small>{{ container.image || container.id.slice(0, 12) }}</small></span></el-option></el-select></label>
             <span v-if="selectedContainer" class="analytics-selection">当前 CPU {{ percent(selectedContainer.cpuPercent) }} · 内存 {{ percent(selectedContainer.memoryPercent) }}</span>
@@ -493,7 +538,14 @@ onBeforeUnmount(() => {
             <article class="panel"><div class="panel-head"><div><h2>容器网络吞吐</h2><p>按相邻采集点计算，计数器重置会自动归零 · {{ containerNetworkScale.unit }}</p></div><Network :size="17" /></div><MetricChart :labels="containerTrendLabels" :series="containerNetworkSeries" :unit="containerNetworkScale.unit" :aria-label="`${selectedContainer?.name || '容器'}网络吞吐趋势`" /></article>
           </div>
           <div v-else-if="containerOptions.length" class="panel analytics-empty"><EmptyState title="暂无容器历史数据" description="该容器在当前时间范围内只有一个采集点，继续采集后会显示趋势。" /></div>
-          <article class="panel"><div class="panel-head"><div><h2>Docker 容器</h2><p>运行状态、资源占用与累计网络流量</p></div><Box :size="17" /></div><div v-if="containers.length" class="table-wrap"><table class="data-table"><thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th><th>网络</th><th>重启</th></tr></thead><tbody><tr v-for="container in containers" :key="container.id"><td><strong>{{ container.name }}</strong><small class="mono-value">{{ container.id.slice(0, 12) }}</small></td><td class="mono-value container-image">{{ container.image || '--' }}</td><td><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /><small>{{ container.status || '--' }}</small></td><td>{{ percent(container.cpuPercent) }}</td><td>{{ percent(container.memoryPercent) }}<small>{{ bytes(container.memoryUsageBytes) }} / {{ bytes(container.memoryLimitBytes) }}</small></td><td><span class="container-network"><ArrowUp :size="12" />{{ bytes(container.networkTxBytes) }}</span><span class="container-network"><ArrowDown :size="12" />{{ bytes(container.networkRxBytes) }}</span></td><td>{{ container.restartCount }}</td></tr></tbody></table></div><EmptyState v-else title="暂无 Docker 容器" description="Agent 未检测到可访问的 Docker socket；主机监控、服务检查与其他指标不受影响。" /></article>
+          <article class="panel resource-inventory-panel">
+            <div class="panel-head"><div><h2>Docker 容器</h2><p>运行状态、资源占用与累计网络流量</p></div><Box :size="17" /></div>
+            <template v-if="containers.length">
+              <div class="table-wrap desktop-data-view"><table class="data-table"><thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th><th>网络</th><th>重启</th></tr></thead><tbody><tr v-for="container in containers" :key="container.id"><td><strong>{{ container.name }}</strong><small class="mono-value">{{ container.id.slice(0, 12) }}</small></td><td class="mono-value container-image">{{ container.image || '--' }}</td><td><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /><small>{{ container.status || '--' }}</small></td><td>{{ percent(container.cpuPercent) }}</td><td>{{ percent(container.memoryPercent) }}<small>{{ bytes(container.memoryUsageBytes) }} / {{ bytes(container.memoryLimitBytes) }}</small></td><td><span class="container-network"><ArrowUp :size="12" />{{ bytes(container.networkTxBytes) }}</span><span class="container-network"><ArrowDown :size="12" />{{ bytes(container.networkRxBytes) }}</span></td><td>{{ container.restartCount }}</td></tr></tbody></table></div>
+              <div class="mobile-data-view resource-record-list"><article v-for="container in containers" :key="container.id" class="resource-record"><header><div><strong>{{ container.name || '未命名容器' }}</strong><span class="mono-value">{{ container.image || container.id.slice(0, 12) }}</span></div><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /></header><dl><div><dt>CPU</dt><dd>{{ percent(container.cpuPercent) }}</dd></div><div><dt>内存</dt><dd>{{ percent(container.memoryPercent) }}</dd></div><div><dt>发送 / 接收</dt><dd>{{ bytes(container.networkTxBytes) }} / {{ bytes(container.networkRxBytes) }}</dd></div><div><dt>重启</dt><dd>{{ container.restartCount }}</dd></div></dl><p>{{ container.status || '未提供运行状态详情' }}</p></article></div>
+            </template>
+            <EmptyState v-else title="暂无 Docker 容器" description="Agent 未检测到可访问的 Docker socket；主机监控、服务检查与其他指标不受影响。" />
+          </article>
         </el-tab-pane>
 
         <el-tab-pane :label="`网卡 (${networkInterfaces.length})`" name="network">
