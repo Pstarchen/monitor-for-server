@@ -366,7 +366,7 @@ curl -fsS -X POST -H 'X-Heartbeat-Token: hb_...' 'https://monitor.example.com/ap
   "metricRetentionDays": 30,
   "deviceOfflineAfterSeconds": 30,
   "defaultCollectionSeconds": 3,
-  "siteName": "观澜监控",
+  "siteName": "星辰监控",
   "publicBaseUrl": "https://monitor.example.com",
   "timezone": "Asia/Shanghai",
   "email": {

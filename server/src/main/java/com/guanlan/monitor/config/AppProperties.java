@@ -13,7 +13,7 @@ public class AppProperties {
     private String timezone = "Asia/Shanghai";
     private String bootstrapAdminUsername;
     private String bootstrapAdminPassword;
-    private String siteName = "星辰云巡";
+    private String siteName = "星辰监控";
     private String siteIconStoragePath = "/var/lib/guanlan-monitor/site-icon";
     private String publicBaseUrl = "";
     private boolean allowInsecureHttp;
@@ -26,6 +26,11 @@ public class AppProperties {
     private Notification notification = new Notification();
     private ControllerAgent controllerAgent = new ControllerAgent();
     private ControllerUpdate controllerUpdate = new ControllerUpdate();
+
+    public String getSiteName() {
+        if ("星辰云巡".equals(siteName) || "观澜监控".equals(siteName)) return "星辰监控";
+        return siteName;
+    }
 
     @Getter
     @Setter

@@ -296,7 +296,7 @@ public class NotificationService {
 
     private String brandName() {
         String value = settings.publicBrand().siteName();
-        return value == null || value.isBlank() ? "星辰云巡" : value.trim();
+        return value == null || value.isBlank() ? "星辰监控" : value.trim();
     }
 
     private boolean blank(String value) { return value == null || value.isBlank(); }

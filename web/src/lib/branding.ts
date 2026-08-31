@@ -2,15 +2,15 @@ import { ref } from 'vue'
 import { api } from './api'
 import type { PublicBrand } from '@/types'
 
-export const siteName = ref('星辰云巡')
-export const siteIconUrl = ref('/favicon.svg')
+export const siteName = ref('星辰监控')
+export const siteIconUrl = ref('/brand-icon.png')
 let pending: Promise<void> | undefined
 
 function syncDocumentBranding(): void {
   if (typeof document !== 'undefined') {
     document.title = siteName.value
     const icon = document.querySelector<HTMLLinkElement>('link[data-guanlan-site-icon]') ?? document.createElement('link')
-    const href = siteIconUrl.value || '/favicon.svg'
+    const href = siteIconUrl.value || '/brand-icon.png'
     icon.rel = 'icon'
     if (href.split(/[?#]/, 1)[0].toLowerCase().endsWith('.svg')) icon.type = 'image/svg+xml'
     else icon.removeAttribute('type')
@@ -33,7 +33,7 @@ export function loadBranding(force = false): Promise<void> {
       if (value) {
         siteName.value = value
       }
-      siteIconUrl.value = data.siteIconUrl?.trim() || '/favicon.svg'
+      siteIconUrl.value = data.siteIconUrl?.trim() || '/brand-icon.png'
       syncDocumentBranding()
     } catch {
       // Keep the last known brand when the public endpoint is temporarily unavailable.

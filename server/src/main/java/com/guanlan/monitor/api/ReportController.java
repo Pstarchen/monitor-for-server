@@ -36,7 +36,7 @@ public class ReportController {
                                @RequestParam(required = false) Instant to,
                                Authentication authentication) {
         ReportService.Summary summary = reports.summary(from, to, access.visibleDeviceIds(authentication));
-        StringBuilder csv = new StringBuilder("# 观澜监控运行报告\n");
+        StringBuilder csv = new StringBuilder("# 星辰监控运行报告\n");
         csv.append("时间范围,开始,结束\n");
         csv.append("报告," ).append(summary.from()).append(',').append(summary.to()).append("\n\n");
         csv.append("设备,状态,采集点,平均 CPU %,平均内存 %,平均磁盘 %,峰值压力 %\n");

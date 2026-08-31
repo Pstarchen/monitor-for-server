@@ -63,8 +63,9 @@ p, h1, h2, h3 { margin: 0; }
 .app-shell { min-height: 100vh; }
 .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 20; width: var(--sidebar-width); display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--surface); }
 .brand { height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--border); }
-.brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; color: #fff; background: #171717; }
-.dark .brand-mark { color: #171717; background: #f2f2f2; }
+.brand-mark { width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center; overflow: hidden; border: 1px solid color-mix(in srgb, #62dcff 36%, var(--border)); border-radius: 7px; color: #fff; background: #07102c; box-shadow: 0 0 0 1px color-mix(in srgb, #209cff 12%, transparent); }
+.brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.dark .brand-mark { color: #fff; background: #07102c; }
 .brand > span:last-child { display: flex; flex-direction: column; min-width: 0; }
 .brand strong { font-size: 15px; font-weight: 700; }
 .brand small { margin-top: 2px; font-size: 9px; color: var(--muted); }
@@ -1109,8 +1110,7 @@ p, h1, h2, h3 { margin: 0; }
 .public-status-brand { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
 .public-status-brand > span:last-child { display: grid; gap: 2px; }
 .public-status-brand strong { font-size: 14px; letter-spacing: .01em; }
-.public-status-brand .brand-mark { color: var(--surface); background: var(--accent); }
-.dark .public-status-brand .brand-mark { color: #10201e; background: var(--accent); }
+.public-status-brand .brand-mark, .dark .public-status-brand .brand-mark { color: #fff; background: #07102c; }
 .public-status-brand small { color: var(--muted); font-size: 9px; letter-spacing: .14em; }
 .public-status-actions { display: flex; align-items: center; gap: 10px; }
 .public-status-login { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 11px; text-decoration: none; }

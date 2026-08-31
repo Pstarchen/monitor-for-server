@@ -2,13 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity, Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut, Radar,
+  Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut, Radar,
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
 import { api, errorMessage } from '@/lib/api'
 import StatusBadge from '@/components/StatusBadge.vue'
+import BrandMark from '@/components/BrandMark.vue'
 import { useAuthStore } from '@/stores/auth'
 import { loadBranding, siteName } from '@/lib/branding'
 import { dateTime, relativeTime } from '@/lib/format'
@@ -268,7 +269,7 @@ onBeforeUnmount(() => {
   <div class="app-shell">
     <aside class="sidebar desktop-sidebar">
       <RouterLink class="brand" to="/" aria-label="返回公开监控大屏">
-        <span class="brand-mark"><Activity :size="19" /></span>
+        <BrandMark />
         <span><strong>{{ siteName }}</strong><small>PRIVATE OPS</small></span>
       </RouterLink>
       <nav class="side-navigation" aria-label="主导航">
@@ -292,7 +293,7 @@ onBeforeUnmount(() => {
     <el-drawer v-model="drawer" direction="ltr" size="272px" :with-header="false" class="mobile-drawer">
       <div class="drawer-head">
         <RouterLink class="brand" to="/" aria-label="返回公开监控大屏" @click="drawer = false">
-          <span class="brand-mark"><Activity :size="19" /></span><strong>{{ siteName }}</strong>
+          <BrandMark /><strong>{{ siteName }}</strong>
         </RouterLink>
         <button class="icon-button" type="button" aria-label="关闭导航" title="关闭导航" @click="drawer = false"><X :size="19" /></button>
       </div>

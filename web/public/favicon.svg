@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title>星辰云巡</title>
+  <title>星辰监控</title>
   <rect width="64" height="64" rx="14" fill="#202426"/>
   <path d="M10 33h10l5-14 10 27 7-20 4 7h8" fill="none" stroke="#f5f7f8" stroke-linecap="round" stroke-linejoin="round" stroke-width="5"/>
 </svg>

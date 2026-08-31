@@ -60,8 +60,8 @@ const form = reactive({
   metricRetentionDays: 30,
   deviceOfflineAfterSeconds: 30,
   defaultCollectionSeconds: 3,
-  siteName: '星辰云巡',
-  siteIconUrl: '/favicon.svg',
+  siteName: '星辰监控',
+  siteIconUrl: '/brand-icon.png',
   publicBaseUrl: '',
   timezone: 'Asia/Shanghai',
   enableMcp: false,
@@ -296,7 +296,7 @@ async function uploadSiteIcon(event: Event) {
 }
 
 function restoreDefaultSiteIcon() {
-  form.siteIconUrl = '/favicon.svg'
+  form.siteIconUrl = '/brand-icon.png'
 }
 
 async function testChannel(channel: ChannelKey) {
@@ -544,13 +544,13 @@ onBeforeUnmount(() => {
                 <div class="setting-row">
                   <div class="setting-copy"><label for="site-icon-url">网站图标</label><p>浏览器标签页使用的图标。可填写站内路径或 HTTPS 图片地址，留空恢复默认图标。</p></div>
                   <div class="setting-control site-icon-control">
-                    <div class="site-icon-preview"><img :src="form.siteIconUrl || '/favicon.svg'" alt="" /></div>
+                    <div class="site-icon-preview"><img :src="form.siteIconUrl || '/brand-icon.png'" alt="" /></div>
                     <div class="site-icon-fields">
-                      <el-input id="site-icon-url" v-model="form.siteIconUrl" placeholder="/favicon.svg 或 https://example.com/icon.svg" />
+                      <el-input id="site-icon-url" v-model="form.siteIconUrl" placeholder="/brand-icon.png 或 https://example.com/icon.png" />
                       <div class="site-icon-actions">
                         <input ref="siteIconInput" class="site-icon-file-input" type="file" accept="image/*" @change="uploadSiteIcon" />
                         <el-button :loading="uploadingIcon" :disabled="uploadingIcon" @click="chooseSiteIcon"><Upload :size="15" />上传图标</el-button>
-                        <el-button v-if="form.siteIconUrl !== '/favicon.svg'" :disabled="uploadingIcon" @click="restoreDefaultSiteIcon"><RotateCcw :size="15" />恢复默认</el-button>
+                        <el-button v-if="form.siteIconUrl !== '/brand-icon.png'" :disabled="uploadingIcon" @click="restoreDefaultSiteIcon"><RotateCcw :size="15" />恢复默认</el-button>
                         <span class="site-icon-hint">图片文件，最大 50MB</span>
                       </div>
                       <el-progress v-if="uploadingIcon" :percentage="iconUploadProgress" :show-text="false" :stroke-width="4" />

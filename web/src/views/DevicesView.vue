@@ -8,6 +8,7 @@ import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
+import { buildAgentInstallCommand, type AgentInstallSource } from '@/lib/agent-install'
 import { copyText } from '@/lib/clipboard'
 import { downloadCsv } from '@/lib/csv'
 import { percent, relativeTime } from '@/lib/format'
@@ -33,6 +34,7 @@ const saving = ref(false)
 const editingId = ref<string | null>(null)
 const credential = ref<DeviceCredential | null>(null)
 const credentialPlatform = ref<'linux' | 'windows'>('linux')
+const agentInstallSource = ref<AgentInstallSource>('controller')
 const agentServerUrl = ref(window.location.origin)
 const collectionSeconds = ref(3)
 const lightweight = ref(false)
@@ -40,10 +42,10 @@ const collectAllProcesses = ref(false)
 const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], assetTag: '', ownerName: '', vendor: '', model: '', serialNumber: '', environment: '', purchaseDate: '', warrantyExpiresAt: '', description: '', ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
-const agentInstallerControllerPath = '/api/setup/agent-installer'
-const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.12.0/deploy/install-agent'
-const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.12.0/deploy/install-agent'
-const agentInstallerCacheKey = 'v12'
+const agentInstallSourceOptions: Array<{ label: string; value: AgentInstallSource }> = [
+  { label: '总控直连', value: 'controller' },
+  { label: 'Gitee 镜像', value: 'gitee' },
+]
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
@@ -96,45 +98,19 @@ function exportInventory() {
 const installCommand = computed(() => {
   if (!credential.value) return ''
   const url = agentServerHost(agentServerUrl.value)
-  const controllerInstallerUrl = `${url}${agentInstallerControllerPath}`
   const disks = diskMountpoints.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean)
-  if (credentialPlatform.value === 'windows') {
-    const diskArgs = disks.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
-    const lightArgs = lightweight.value ? ' -SkipProcesses -SkipConnections' : ''
-    const processArgs = !lightweight.value && collectAllProcesses.value ? ` -CollectAllProcesses -ProcessCollectionLimit ${processCollectionLimit.value}` : ''
-    return `$env:GUANLAN_AGENT_KEY = '${powerShellQuote(credential.value.agentKey)}'\n` +
-      `$installer = Join-Path $env:TEMP 'guanlan-install-agent.ps1'; try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${controllerInstallerUrl}?platform=windows&${agentInstallerCacheKey}' -OutFile $installer } catch { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerCdnUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer } catch { Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 '${agentInstallerRawUrl}.ps1?${agentInstallerCacheKey}' -OutFile $installer } }; & powershell -ExecutionPolicy Bypass -File $installer -ServerUrl '${powerShellQuote(url)}' -DeviceId '${powerShellQuote(credential.value.device.id)}' -Interval '${collectionSeconds.value}s'${diskArgs}${lightArgs}${processArgs}; Remove-Item $installer -Force`
-  }
-  const diskArgs = disks.map((value) => ` --disk ${shellQuote(value)}`).join('')
-  const lightArgs = lightweight.value ? ' --skip-processes --skip-connections' : ''
-  const processArgs = !lightweight.value && collectAllProcesses.value ? ` --all-processes --process-limit ${processCollectionLimit.value}` : ''
-  const installArgs = `--server-url ${shellQuote(url)} --device-id ${shellQuote(credential.value.device.id)} --interval ${collectionSeconds.value}s${diskArgs}${lightArgs}${processArgs}`
-  const command = [
-    `export GUANLAN_AGENT_KEY=${shellQuote(credential.value.agentKey)}`,
-    'installer_script="$(mktemp)"',
-    `trap 'rm -f "$installer_script"' EXIT`,
-    'download_installer() {',
-    '  local url="$1" downloaded=false',
-    '  if command -v curl >/dev/null 2>&1; then',
-    '    curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true',
-    '    if [ "$downloaded" != true ]; then curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 "$url" -o "$installer_script" && downloaded=true; fi',
-    '  fi',
-    '  if [ "$downloaded" != true ] && command -v wget >/dev/null 2>&1; then',
-    '    wget -4 -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true',
-    '    if [ "$downloaded" != true ]; then wget -t 3 -T 10 -O "$installer_script" "$url" && downloaded=true; fi',
-    '  fi',
-    '  if [ "$downloaded" = true ] && head -n 1 "$installer_script" | grep -q "^#!/usr/bin/env bash"; then return 0; fi',
-    '  rm -f "$installer_script"',
-    '  return 1',
-    '}',
-    `if ! download_installer '${controllerInstallerUrl}?platform=linux&${agentInstallerCacheKey}'; then`,
-    `  if ! download_installer '${agentInstallerCdnUrl}.sh?${agentInstallerCacheKey}'; then`,
-    `    download_installer '${agentInstallerRawUrl}.sh?${agentInstallerCacheKey}' || { echo '无法下载有效的 Agent 安装器：总控、CDN 和 GitHub 均不可达，或返回内容不是 Bash 脚本。请检查服务器出口、防火墙或 DNS。' >&2; exit 1; }`,
-    '  fi',
-    'fi',
-    `if [ "$(id -u)" -eq 0 ]; then bash "$installer_script" ${installArgs}; elif command -v sudo >/dev/null 2>&1; then sudo --preserve-env=GUANLAN_AGENT_KEY bash "$installer_script" ${installArgs}; else echo '请以 root 身份运行，或安装 sudo 后重试。' >&2; exit 1; fi`,
-  ].join('\n')
-  return command
+  return buildAgentInstallCommand({
+    platform: credentialPlatform.value,
+    source: agentInstallSource.value,
+    serverUrl: url,
+    deviceId: credential.value.device.id,
+    agentKey: credential.value.agentKey,
+    collectionSeconds: collectionSeconds.value,
+    diskMountpoints: disks,
+    lightweight: lightweight.value,
+    collectAllProcesses: collectAllProcesses.value,
+    processCollectionLimit: processCollectionLimit.value,
+  })
 })
 
 async function load(background = false) {
@@ -164,6 +140,7 @@ async function loadAgentBootstrap() {
 function showCredential(value: DeviceCredential) {
   credential.value = value
   credentialPlatform.value = 'linux'
+  agentInstallSource.value = 'controller'
   lightweight.value = false
   collectAllProcesses.value = false
   processCollectionLimit.value = 64
@@ -256,14 +233,6 @@ function selectText(element: HTMLElement | null) {
   range.selectNodeContents(element)
   selection.removeAllRanges()
   selection.addRange(range)
-}
-
-function shellQuote(value: string) {
-  return `'${value.split("'").join("'\"'\"'")}'`
-}
-
-function powerShellQuote(value: string) {
-  return value.split("'").join("''")
 }
 
 function agentServerHost(value: string) {
@@ -398,6 +367,10 @@ onBeforeUnmount(() => {
         <div class="agent-install-options">
           <el-form label-position="top">
             <el-form-item label="监控平台域名或地址"><el-input v-model="agentServerUrl" /></el-form-item>
+            <el-form-item label="安装源">
+              <el-segmented v-model="agentInstallSource" :options="agentInstallSourceOptions" />
+              <p class="field-help">{{ agentInstallSource === 'controller' ? '从当前总控直接下载安装器，目标服务器无需访问代码托管平台。' : '适用于访问 GitHub 困难的中国大陆服务器。' }}</p>
+            </el-form-item>
             <div class="form-grid two-fields">
               <el-form-item label="采集周期"><el-select v-model="collectionSeconds"><el-option v-for="value in [1, 3, 10, 30, 60]" :key="value" :label="`${value} 秒`" :value="value" /></el-select></el-form-item>
               <el-form-item label="磁盘白名单"><el-input v-model="diskMountpoints" placeholder="例如：/, /data" /></el-form-item>

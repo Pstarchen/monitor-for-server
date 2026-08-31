@@ -204,11 +204,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw '无法更新 Windows 服务。' }
     }
     else {
-        New-Service -Name $serviceName -DisplayName 'Guanlan Server Monitoring Agent' -BinaryPathName $command -StartupType Automatic -Description 'Collects server metrics for Guanlan Monitor.' | Out-Null
+        New-Service -Name $serviceName -DisplayName 'Xingchen Server Monitoring Agent' -BinaryPathName $command -StartupType Automatic -Description 'Collects server metrics for Xingchen Monitor.' | Out-Null
     }
     Start-Service -Name $serviceName
     Install-AgentUpdater
-    Write-Host 'Guanlan Agent 已安装并启动。可运行 Get-Service GuanlanAgent 查看状态。'
+    Write-Host '星辰监控 Agent 已安装并启动。可运行 Get-Service GuanlanAgent 查看状态。'
 }
 finally {
     Remove-Item Env:GUANLAN_AGENT_KEY -ErrorAction SilentlyContinue

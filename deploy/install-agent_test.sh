@@ -6,12 +6,13 @@ installer="${script_dir}/install-agent.sh"
 grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn' "${installer}" >/dev/null
 grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
 grep -F 'https://monitor.example.com/api/setup/agent-installer?platform=linux' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F 'cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.12.0/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F 'raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.12.0/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F -- 'curl -4 -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F -- 'wget -4 -t 3 -T 10 -O "$installer_script" "$url"' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F "head -n 1 \"\$installer_script\" | grep -q '^#!/usr/bin/env bash'" "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F "请以 root 身份运行，或安装 sudo 后重试。" "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F 'https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F -- 'curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F 'env GUANLAN_AGENT_KEY=' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+if grep -Eq 'v1\.12\.0|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|export GUANLAN_AGENT_KEY' "${script_dir}/../docs/monitored-agent.md"; then
+  echo 'Documentation still contains the retired multi-source installer command.' >&2
+  exit 1
+fi
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 fake_bin="${temp_dir}/bin"

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Activity, ArrowRight, Eye, EyeOff, FileKey2, LockKeyhole, ShieldCheck } from 'lucide-vue-next'
+import { ArrowRight, Eye, EyeOff, FileKey2, LockKeyhole, ShieldCheck } from 'lucide-vue-next'
 import { api, errorMessage, getSetupStatus } from '@/lib/api'
 import { loadBranding, siteName } from '@/lib/branding'
+import BrandMark from '@/components/BrandMark.vue'
 import type { SetupRequest } from '@/types'
 
 const submitting = ref(false)
@@ -15,7 +16,7 @@ const initialOrigin = window.location.origin === 'http://localhost:5173' ? 'http
 const form = reactive<SetupRequest>({
   publicBaseUrl: initialOrigin,
   allowedOrigins: initialOrigin,
-  siteName: '星辰云巡',
+  siteName: '星辰监控',
   timezone: 'Asia/Shanghai',
   adminUsername: 'admin',
   adminPassword: '',
@@ -58,7 +59,7 @@ onMounted(async () => {
   <main class="setup-page">
     <header class="auth-topbar setup-topbar">
       <RouterLink class="brand auth-brand" to="/login">
-        <span class="brand-mark"><Activity :size="19" /></span>
+        <BrandMark />
         <span><strong>{{ siteName }}</strong><small>PRIVATE OPS</small></span>
       </RouterLink>
       <span class="setup-topbar-label">首次运行安装向导</span>

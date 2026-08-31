@@ -48,7 +48,7 @@ public class TotpService {
     }
 
     public String otpauthUri(String secret, String issuer, String account) {
-        String safeIssuer = issuer == null || issuer.isBlank() ? "Guanlan Monitor" : issuer.trim();
+        String safeIssuer = issuer == null || issuer.isBlank() ? "星辰监控" : issuer.trim();
         String safeAccount = account == null || account.isBlank() ? "account" : account.trim();
         String label = urlEncode(safeIssuer) + ":" + urlEncode(safeAccount);
         return "otpauth://totp/" + label + "?secret=" + secret + "&issuer=" + urlEncode(safeIssuer)

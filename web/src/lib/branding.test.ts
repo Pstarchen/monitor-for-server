@@ -8,9 +8,9 @@ import { loadBranding, siteIconUrl, siteName } from './branding'
 describe('branding', () => {
   beforeEach(() => {
     get.mockReset()
-    get.mockResolvedValue({ data: { siteName: '星辰云巡', siteIconUrl: '/favicon.svg' } })
-    siteName.value = '星辰云巡'
-    siteIconUrl.value = '/favicon.svg'
+    get.mockResolvedValue({ data: { siteName: '星辰监控', siteIconUrl: '/brand-icon.png' } })
+    siteName.value = '星辰监控'
+    siteIconUrl.value = '/brand-icon.png'
   })
 
   it('requests a fresh public brand value', async () => {
@@ -19,7 +19,7 @@ describe('branding', () => {
     expect(get).toHaveBeenCalledWith('/settings/public', {
       params: expect.objectContaining({ _branding: expect.any(Number) }),
     })
-    expect(siteIconUrl.value).toBe('/favicon.svg')
+    expect(siteIconUrl.value).toBe('/brand-icon.png')
   })
 
   it('can refresh after a previous request has completed', async () => {

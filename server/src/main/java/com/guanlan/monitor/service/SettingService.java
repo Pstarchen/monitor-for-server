@@ -23,7 +23,7 @@ public class SettingService {
     private static final String COLLECTION_SECONDS = "agent.default_collection_seconds";
     private static final String SITE_NAME = "system.site_name";
     private static final String SITE_ICON_URL = "system.site_icon_url";
-    private static final String DEFAULT_SITE_ICON_URL = "/favicon.svg";
+    private static final String DEFAULT_SITE_ICON_URL = "/brand-icon.png";
     private static final String UPLOADED_SITE_ICON_URL = "/api/settings/site-icon";
     private static final String PUBLIC_BASE_URL = "system.public_base_url";
     private static final String TIMEZONE = "system.timezone";

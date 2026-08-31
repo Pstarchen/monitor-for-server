@@ -26,7 +26,7 @@ const scopeCount = computed(() => props.scopes.length)
     <div class="mobile-binding-stage">
       <div class="mobile-binding-qr-column">
         <div class="mobile-binding-qr" :data-state="qrCode ? 'ready' : 'error'">
-          <img v-if="qrCode" :src="qrCode" alt="星辰云巡鸿蒙 App 绑定二维码" />
+          <img v-if="qrCode" :src="qrCode" alt="星辰监控鸿蒙 App 绑定二维码" />
           <div v-else class="mobile-binding-fallback" role="alert">
             <TriangleAlert :size="24" />
             <strong>二维码暂不可用</strong>

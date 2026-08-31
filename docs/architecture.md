@@ -2,7 +2,7 @@
 
 ## 范围
 
-观澜监控由 Go Agent、Spring Boot 服务端、Vue 3 Web 控制台、内置 PostgreSQL 与 Redis 组成。本仓库不包含鸿蒙 APP；移动浏览器通过响应式 Web 控制台访问相同能力。
+星辰监控由 Go Agent、Spring Boot 服务端、Vue 3 Web 控制台、内置 PostgreSQL 与 Redis 组成。本仓库不包含鸿蒙 APP；移动浏览器通过响应式 Web 控制台访问相同能力。
 
 ```mermaid
 flowchart LR

@@ -81,7 +81,7 @@ class NotificationServiceTest {
         NotificationService service = genericService("GENERIC_JSON", requestBody);
 
         assertThat(service.test("generic").message()).isEqualTo("测试通知已发送");
-        assertThat(requestBody.get()).contains("\"text\":\"[观澜监控] 通知通道测试成功\"");
+        assertThat(requestBody.get()).contains("\"text\":\"[星辰监控] 通知通道测试成功\"");
     }
 
     @Test
@@ -91,7 +91,7 @@ class NotificationServiceTest {
 
         service.test("generic");
 
-        assertThat(requestBody.get()).isEqualTo("[观澜监控] 通知通道测试成功");
+        assertThat(requestBody.get()).isEqualTo("[星辰监控] 通知通道测试成功");
     }
 
     private NotificationService service(String response, String enabledChannel) throws IOException {
@@ -113,7 +113,7 @@ class NotificationServiceTest {
         SettingService.WebhookRuntime wecom = new SettingService.WebhookRuntime("wecom".equals(enabledChannel), url, "DATABASE");
         SettingService.EmailRuntime email = new SettingService.EmailRuntime(false, "", 587, "", "", "", "", true, true, "NONE");
         when(settings.notificationRuntime()).thenReturn(new SettingService.NotificationRuntime(email, dingtalk, wecom));
-        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("观澜监控", "/favicon.svg"));
+        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("星辰监控", "/brand-icon.png"));
 
         return new NotificationService(settings, audit, RestClient.builder());
     }
@@ -140,7 +140,7 @@ class NotificationServiceTest {
         when(settings.notificationRuntime()).thenReturn(new SettingService.NotificationRuntime(email,
                 new SettingService.WebhookRuntime(true, url, dingtalk.source(), dingtalk.keyword(), dingtalk.signSecret()),
                 new SettingService.WebhookRuntime(false, url, wecom.source())));
-        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("观澜监控", "/favicon.svg"));
+        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("星辰监控", "/brand-icon.png"));
         return new NotificationService(settings, audit, RestClient.builder());
     }
 
@@ -163,7 +163,7 @@ class NotificationServiceTest {
         SettingService.WebhookRuntime disabled = new SettingService.WebhookRuntime(false, url, "DATABASE");
         SettingService.WebhookRuntime generic = new SettingService.WebhookRuntime(true, url, "DATABASE", "", "", format);
         when(settings.notificationRuntime()).thenReturn(new SettingService.NotificationRuntime(email, disabled, disabled, generic));
-        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("观澜监控", "/favicon.svg"));
+        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("星辰监控", "/brand-icon.png"));
         return new NotificationService(settings, audit, RestClient.builder());
     }
 }

@@ -11,7 +11,7 @@
     <groupId>com.guanlan</groupId>
     <artifactId>monitor-server</artifactId>
     <version>1.0.0</version>
-    <name>Guanlan Monitor Server</name>
+    <name>Xingchen Monitor Server</name>
     <description>Private server monitoring backend</description>
 
     <properties>

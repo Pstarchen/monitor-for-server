@@ -348,7 +348,7 @@ install_docker_agent() {
     echo "Agent 容器启动后退出：${container_name}" >&2
     return 1
   fi
-  echo "Guanlan Agent Docker 容器已安装并启动：${container_name}"
+  echo "星辰监控 Agent Docker 容器已安装并启动：${container_name}"
   echo "检查状态：docker logs --tail 100 ${container_name}"
   install_agent_updater
 }
@@ -445,8 +445,8 @@ install_agent_updater() {
       'docker rename "${new_container}" "${container_name}"'
   } > "${updater}"
   chmod 0755 "${updater}"
-  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent image' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=10min' "ExecStart=${updater}" > "${service}"
-  printf '%s\n' '[Unit]' 'Description=Periodic Guanlan Agent image update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
+  printf '%s\n' '[Unit]' 'Description=Update Xingchen Monitor Agent image' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=10min' "ExecStart=${updater}" > "${service}"
+  printf '%s\n' '[Unit]' 'Description=Periodic Xingchen Monitor Agent image update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
   systemctl daemon-reload
   systemctl enable --now guanlan-agent-update.timer >/dev/null
   echo "Agent 自动更新已启用：systemctl status guanlan-agent-update.timer"
@@ -477,8 +477,8 @@ install_local_agent_updater() {
       'systemctl restart "${service_name}"'
   } > "${updater}"
   chmod 0755 "${updater}"
-  printf '%s\n' '[Unit]' 'Description=Update Guanlan Agent binary' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=15min' "ExecStart=${updater}" > "${service}"
-  printf '%s\n' '[Unit]' 'Description=Periodic Guanlan Agent binary update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
+  printf '%s\n' '[Unit]' 'Description=Update Xingchen Monitor Agent binary' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=15min' "ExecStart=${updater}" > "${service}"
+  printf '%s\n' '[Unit]' 'Description=Periodic Xingchen Monitor Agent binary update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
   systemctl daemon-reload
   systemctl enable --now guanlan-agent-update.timer >/dev/null
 }
@@ -537,7 +537,7 @@ fi
 unit_tmp="${temp_dir}/guanlan-agent.service"
 printf '%s\n' \
   '[Unit]' \
-  'Description=Guanlan Server Monitoring Agent' \
+  'Description=Xingchen Server Monitoring Agent' \
   'After=network-online.target' \
   'Wants=network-online.target' \
   '' \
@@ -571,5 +571,5 @@ else
 fi
 unset agent_key GUANLAN_AGENT_KEY
 if [[ "${docker_available}" != true ]]; then
-  echo "Guanlan Agent installed and started. Check with: systemctl status guanlan-agent"
+  echo "星辰监控 Agent installed and started. Check with: systemctl status guanlan-agent"
 fi

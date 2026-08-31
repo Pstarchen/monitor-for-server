@@ -38,7 +38,7 @@ class ServiceMonitorServiceTest {
         when(checks.findAllByOrderBySortOrderDescNameAsc()).thenReturn(List.of(check));
         when(checks.findByEnabledTrueOrderBySortOrderDescNameAsc()).thenReturn(List.of(check));
         when(results.findTopByServiceCheckIdOrderByCheckedAtDesc(42L)).thenReturn(Optional.empty());
-        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("星辰云巡", "/favicon.svg"));
+        when(settings.publicBrand()).thenReturn(new SettingService.PublicBrandView("星辰监控", "/brand-icon.png"));
     }
 
     @Test

@@ -1,4 +1,4 @@
-# 观澜 Agent
+# 星辰监控 Agent
 
 Agent 默认读取当前目录的 `agent.json`，也可通过 `-config` 或 `GUANLAN_AGENT_CONFIG` 指定配置文件。生产环境必须使用 HTTPS；只有本机开发地址会默认允许 HTTP。
 

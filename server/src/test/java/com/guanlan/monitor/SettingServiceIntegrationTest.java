@@ -43,7 +43,7 @@ class SettingServiceIntegrationTest {
     @Test
     void unsafeSiteIconUrlIsRejected() {
         assertThatThrownBy(() -> settings.update(new SettingService.Update(
-                30, 30, 3, "观澜监控", "javascript:alert(1)", "http://localhost:8080", "Asia/Shanghai",
+                30, 30, 3, "星辰监控", "javascript:alert(1)", "http://localhost:8080", "Asia/Shanghai",
                 disabledEmail(), new SettingService.WebhookUpdate(false, null, false),
                 new SettingService.WebhookUpdate(false, null, false)
         ))).isInstanceOf(ApiException.class).hasMessageContaining("网站图标");
@@ -60,7 +60,7 @@ class SettingServiceIntegrationTest {
     @Test
     void publicBaseUrlMustBeAnOriginWithoutAPath() {
         assertThatThrownBy(() -> settings.update(new SettingService.Update(
-                30, 30, 3, "观澜监控", "/favicon.svg", "https://monitor.example.com/status", "Asia/Shanghai",
+                30, 30, 3, "星辰监控", "/brand-icon.png", "https://monitor.example.com/status", "Asia/Shanghai",
                 disabledEmail(), new SettingService.WebhookUpdate(false, null, false), new SettingService.WebhookUpdate(false, null, false)
         ))).isInstanceOf(ApiException.class).hasMessageContaining("公网入口");
     }
@@ -68,7 +68,7 @@ class SettingServiceIntegrationTest {
     @Test
     void missingTimezoneReturnsBadRequestInsteadOfServerError() {
         assertThatThrownBy(() -> settings.update(new SettingService.Update(
-                30, 30, 3, "观澜监控", "/favicon.svg", "http://localhost:8080", null,
+                30, 30, 3, "星辰监控", "/brand-icon.png", "http://localhost:8080", null,
                 disabledEmail(), new SettingService.WebhookUpdate(false, null, false), new SettingService.WebhookUpdate(false, null, false)
         ))).isInstanceOf(ApiException.class).hasMessageContaining("时区");
     }
@@ -84,7 +84,7 @@ class SettingServiceIntegrationTest {
 
     @Test
     void mcpCanBeEnabledFromPersistedSettings() {
-        SettingService.Update update = new SettingService.Update(30, 30, 3, "观澜监控", "/favicon.svg", "http://localhost:8080", "Asia/Shanghai", true,
+        SettingService.Update update = new SettingService.Update(30, 30, 3, "星辰监控", "/brand-icon.png", "http://localhost:8080", "Asia/Shanghai", true,
                 disabledEmail(), new SettingService.WebhookUpdate(false, null, false), new SettingService.WebhookUpdate(false, null, false));
         assertThat(settings.update(update).enableMcp()).isTrue();
         assertThat(settings.mcpEnabled()).isTrue();
@@ -92,7 +92,7 @@ class SettingServiceIntegrationTest {
 
     private SettingService.Update update(SettingService.EmailUpdate email,
                                          SettingService.WebhookUpdate dingtalk) {
-        return new SettingService.Update(30, 30, 3, "观澜监控", "/custom-icon.svg", "http://localhost:8080", "Asia/Shanghai",
+        return new SettingService.Update(30, 30, 3, "星辰监控", "/custom-icon.svg", "http://localhost:8080", "Asia/Shanghai",
                 email, dingtalk, new SettingService.WebhookUpdate(false, null, false));
     }
 

@@ -82,8 +82,8 @@ class AuthAndAgentIntegrationTest {
 
         mvc.perform(get("/api/settings/public"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.siteName").value("星辰云巡"))
-                .andExpect(jsonPath("$.siteIconUrl").value("/favicon.svg"));
+                .andExpect(jsonPath("$.siteName").value("星辰监控"))
+                .andExpect(jsonPath("$.siteIconUrl").value("/brand-icon.png"));
     }
 
     @Test

@@ -13,7 +13,7 @@ import (
 
 func validSetupRequest() setupRequest {
 	return setupRequest{
-		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "星辰云巡", Timezone: "Asia/Shanghai",
+		PublicBaseURL: "https://monitor.example.com", AllowedOrigins: "https://monitor.example.com", SiteName: "星辰监控", Timezone: "Asia/Shanghai",
 		AdminUsername: "admin", AdminPassword: "administrator-password", AdminPasswordConfirm: "administrator-password",
 	}
 }
@@ -57,6 +57,9 @@ func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("installer response must not be cached")
+	}
+	if response.Header().Get("Content-Disposition") != `attachment; filename="install-agent.sh"` {
+		t.Fatalf("installer filename = %q", response.Header().Get("Content-Disposition"))
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=../../.env", nil)

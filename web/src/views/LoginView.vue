@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { errorMessage, getSetupStatus } from '@/lib/api'
 import { safeLocalPath } from '@/lib/format'
 import { setupIsReady } from '@/lib/setup-flow'
+import BrandMark from '@/components/BrandMark.vue'
 import { loadBranding, siteName } from '@/lib/branding'
 
 const route = useRoute()
@@ -111,7 +112,7 @@ onBeforeUnmount(() => {
   <main class="auth-page">
     <header class="auth-topbar">
       <div class="brand auth-brand">
-        <span class="brand-mark"><Activity :size="19" /></span>
+        <BrandMark />
         <span><strong>{{ siteName }}</strong><small>PRIVATE OPS</small></span>
       </div>
       <button class="icon-button" type="button" :aria-label="dark ? '切换浅色模式' : '切换深色模式'" :title="dark ? '浅色模式' : '深色模式'" @click="toggleTheme">
