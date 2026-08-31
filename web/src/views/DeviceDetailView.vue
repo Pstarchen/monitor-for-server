@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, Network, RefreshCw, ServerCog, ShieldAlert, ShieldCheck, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, CheckCircle2, CircleAlert, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, Network, RefreshCw, ServerCog, ShieldAlert, ShieldCheck, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import MetricChart from '@/components/MetricChart.vue'
@@ -188,6 +188,14 @@ function temperatureTone(value: number) {
   return 'normal'
 }
 
+function healthStateLabel(state: Device['health']['state']) {
+  return state === 'HEALTHY' ? 'Agent 正常' : state === 'PENDING' ? '等待 Agent 接入' : state === 'OFFLINE' ? 'Agent 已离线' : '指标数据延迟'
+}
+
+function healthAge(health: Device['health']) {
+  return health.lastSeenAgeSeconds == null ? '尚未收到上报' : relativeTime(health.lastSeenAt)
+}
+
 async function load(background = false) {
   if (background) refreshing.value = true
   else loading.value = true
@@ -262,6 +270,12 @@ onBeforeUnmount(() => {
         </template>
       </PageHeader>
 
+      <article class="device-health-banner" :data-state="device.health.state" :role="device.health.state === 'HEALTHY' ? 'status' : 'alert'">
+        <span class="device-health-banner-icon"><CheckCircle2 v-if="device.health.state === 'HEALTHY'" :size="19" /><CircleAlert v-else :size="19" /></span>
+        <div class="device-health-banner-copy"><strong>{{ healthStateLabel(device.health.state) }}</strong><p>{{ device.health.reason }}</p><small>最近上报：{{ healthAge(device.health) }} · 失联阈值：{{ device.health.offlineAfterSeconds }} 秒</small></div>
+        <el-button text :loading="refreshing" @click="load(true)"><RefreshCw :size="15" />重新检查</el-button>
+      </article>
+
       <div class="metrics-grid stagger-grid">
         <MetricCard label="CPU 使用率" :value="latest ? percent(latest.cpuUsage) : '--'" :hint="latest ? `负载 ${latest.load1.toFixed(2)} / ${latest.load5.toFixed(2)} / ${latest.load15.toFixed(2)}` : '暂无数据'" :tone="(latest?.cpuUsage ?? 0) >= 80 ? 'danger' : 'info'"><template #icon><Cpu :size="17" /></template></MetricCard>
         <MetricCard label="内存使用率" :value="latest ? percent(latest.memoryUsage) : '--'" :hint="latest ? `交换分区 ${percent(latest.swapUsage)}` : '暂无数据'" :tone="(latest?.memoryUsage ?? 0) >= 80 ? 'danger' : 'success'"><template #icon><MemoryStick :size="17" /></template></MetricCard>
@@ -311,6 +325,7 @@ onBeforeUnmount(() => {
                 <div><dt>CPU 核心</dt><dd>{{ text(section('cpu').physicalCores) }} 物理 / {{ text(section('cpu').logicalCores) }} 逻辑</dd></div>
                 <div><dt>总内存</dt><dd>{{ bytes(Number(section('memory').totalBytes ?? 0)) }}</dd></div>
                 <div><dt>采集时间</dt><dd>{{ dateTime(latest?.collectedAt) }}</dd></div>
+                <div><dt>指标年龄</dt><dd>{{ device.health.dataAgeSeconds == null ? '--' : `${device.health.dataAgeSeconds} 秒` }}</dd></div>
               </dl>
             </article>
             <article class="panel detail-list">
@@ -322,6 +337,7 @@ onBeforeUnmount(() => {
                 <div><dt>物理位置</dt><dd>{{ device.location || '未设置' }}</dd></div>
                 <div><dt>登记时间</dt><dd>{{ dateTime(device.createdAt) }}</dd></div>
                 <div><dt>操作权限</dt><dd>{{ canOperate ? '可管理设备' : '仅查看' }}</dd></div>
+                <div><dt>接入诊断</dt><dd>{{ device.health.reasonCode }}</dd></div>
               </dl>
             </article>
           </div>

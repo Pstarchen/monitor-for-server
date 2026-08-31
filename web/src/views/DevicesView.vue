@@ -36,8 +36,8 @@ const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
 const agentInstallerControllerPath = '/api/setup/agent-installer'
-const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.9.0/deploy/install-agent'
-const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.9.0/deploy/install-agent'
+const agentInstallerRawUrl = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.10.0/deploy/install-agent'
+const agentInstallerCdnUrl = 'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.10.0/deploy/install-agent'
 const agentInstallerCacheKey = 'v8'
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
           <tbody>
             <tr v-for="device in filtered" :key="device.id">
               <td><button class="device-link" type="button" @click="router.push(`/devices/${device.id}`)"><span><Server :size="17" /></span><span><strong>{{ device.name }}</strong><small>{{ device.primaryIp || device.hostname || '等待 Agent 上报地址' }}</small></span></button></td>
-              <td><StatusBadge :status="device.status" /></td>
+              <td class="device-health-cell"><StatusBadge :status="device.status" /><small class="device-health-detail" :data-state="device.health.state">{{ device.health.reason }}</small></td>
               <td><strong class="plain-cell">{{ device.groupName || '未分组' }}</strong><small class="cell-subtext">{{ device.location || '未设置位置' }}</small><span v-if="device.tags?.length" class="tag-list"><em v-for="tag in device.tags" :key="tag">{{ tag }}</em></span></td>
               <td>{{ device.latest ? percent(device.latest.cpuUsage) : '--' }}</td>
               <td>{{ device.latest ? percent(device.latest.memoryUsage) : '--' }}</td>

@@ -101,6 +101,19 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "test-admin", roles = "ADMIN")
+    void deviceHealthEndpointExplainsPendingAgentConnection() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("health-node", "lab", "tests", "127.0.0.30"));
+
+        mvc.perform(get("/api/devices/" + credential.device().id() + "/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("PENDING"))
+                .andExpect(jsonPath("$.reasonCode").value("NOT_CONNECTED"))
+                .andExpect(jsonPath("$.lastSeenAgeSeconds").doesNotExist())
+                .andExpect(jsonPath("$.checks").isArray());
+    }
+
+    @Test
     @WithMockUser(username = "operator", roles = "OPERATOR")
     void serviceMonitorRejectsMalformedHttpTarget() throws Exception {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/services")

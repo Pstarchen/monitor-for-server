@@ -307,6 +307,10 @@ p, h1, h2, h3 { margin: 0; }
 .data-table tbody tr:hover { background: color-mix(in srgb, var(--surface-subtle) 62%, transparent); }
 .data-table td > strong, .data-table td > small { display: block; }
 .data-table td > small { max-width: 290px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; }
+.device-health-cell { min-width: 150px; }
+.device-health-detail { display: block; max-width: 190px; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: normal; }
+.device-health-detail[data-state="OFFLINE"] { color: var(--danger); }
+.device-health-detail[data-state="PENDING"], .device-health-detail[data-state="DEGRADED"] { color: var(--warning); }
 .data-table td > .container-network { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .process-command { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-option-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; }
@@ -451,6 +455,8 @@ p, h1, h2, h3 { margin: 0; }
 .server-identity small { margin-top: 4px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; }
 .server-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 15px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
 .server-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-meta .device-health-line { grid-column: 1 / -1; overflow: hidden; color: var(--warning); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: normal; }
+.server-meta .device-health-line[data-state="OFFLINE"] { color: var(--danger); }
 .server-meta .server-tags { grid-column: 1 / -1; overflow: visible; white-space: normal; }
 .server-resources { display: grid; gap: 10px; padding: 14px 0; }
 .server-resources > div { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 12px; }
@@ -545,6 +551,20 @@ p, h1, h2, h3 { margin: 0; }
 
 .back-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 12px; cursor: pointer; }
 .back-link:hover { color: var(--foreground); }
+.device-health-banner { min-width: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 11px; margin: -7px 0 18px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.device-health-banner[data-state="HEALTHY"] { border-color: color-mix(in srgb, var(--success) 25%, var(--border)); background: color-mix(in srgb, var(--success-bg) 45%, var(--surface)); }
+.device-health-banner[data-state="PENDING"], .device-health-banner[data-state="DEGRADED"] { border-color: color-mix(in srgb, var(--warning) 30%, var(--border)); background: color-mix(in srgb, var(--warning-bg) 48%, var(--surface)); }
+.device-health-banner[data-state="OFFLINE"] { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); background: color-mix(in srgb, var(--danger-bg) 48%, var(--surface)); }
+.device-health-banner-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; color: var(--muted); background: var(--surface-subtle); }
+.device-health-banner[data-state="HEALTHY"] .device-health-banner-icon { color: var(--success); background: var(--success-bg); }
+.device-health-banner[data-state="PENDING"] .device-health-banner-icon, .device-health-banner[data-state="DEGRADED"] .device-health-banner-icon { color: var(--warning); background: var(--warning-bg); }
+.device-health-banner[data-state="OFFLINE"] .device-health-banner-icon { color: var(--danger); background: var(--danger-bg); }
+.device-health-banner-copy { min-width: 0; }
+.device-health-banner-copy strong, .device-health-banner-copy p, .device-health-banner-copy small { display: block; }
+.device-health-banner-copy strong { font-size: 12px; }
+.device-health-banner-copy p { margin-top: 3px; overflow-wrap: anywhere; color: var(--foreground); font-size: 11px; line-height: 1.45; }
+.device-health-banner-copy small { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.device-health-banner > .el-button { min-height: 34px; white-space: nowrap; }
 .detail-tabs { margin-top: 24px; }
 .detail-tabs > .el-tabs__header { margin-bottom: 18px; }
 .trend-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
@@ -1090,6 +1110,8 @@ p, h1, h2, h3 { margin: 0; }
   .alert-feed > button { grid-template-columns: 34px minmax(0, 1fr) auto; }
   .alert-feed time { display: none; }
   .detail-tabs .el-tabs__nav-wrap { overflow-x: auto; }
+  .device-health-banner { grid-template-columns: 34px minmax(0, 1fr); align-items: start; margin-top: 0; }
+  .device-health-banner > .el-button { grid-column: 2; justify-self: start; padding-left: 0; }
   .trend-toolbar { align-items: stretch; flex-direction: column; }
   .trend-toolbar .el-segmented { width: 100%; }
   .analytics-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }

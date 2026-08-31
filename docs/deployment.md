@@ -131,9 +131,9 @@ download_installer() {
 if ! download_installer \
   'https://monitor.example.com/api/setup/agent-installer?platform=linux'; then
   if ! download_installer \
-    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.9.0/deploy/install-agent.sh'; then
+    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.10.0/deploy/install-agent.sh'; then
     download_installer \
-      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.9.0/deploy/install-agent.sh' \
+      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.10.0/deploy/install-agent.sh' \
       || { echo '无法下载 Agent 安装器，请检查总控地址、服务器网络。' >&2; exit 1; }
   fi
 fi
@@ -236,7 +236,7 @@ Flyway 会在服务端启动时执行数据库迁移。升级前先在测试环�
 - Web 显示 502：检查 `docker compose ps` 与 `docker compose logs server`，确认服务端健康检查通过。
 - 登录后写操作返回 403：确认浏览器允许同站 Cookie，入口域名与 `ALLOWED_ORIGINS` 完全一致。
 - WebSocket 反复断开：确认外层代理转发 Upgrade 请求头，且会话 Cookie 可发送到 `/ws/metrics`。
-- 设备一直待接入：核对 Agent 配置中的设备 ID、服务端 HTTPS 地址和密钥；密钥轮换后旧值立即失效。
+- 设备一直待接入：打开设备详情查看“Agent 接入诊断”。`等待 Agent 接入` 表示尚未收到首次上报；`Agent 已离线` 表示已超过失联阈值。然后在目标机检查 `docker logs --tail 100 guanlan-agent` 或 `journalctl -u guanlan-agent -n 100 --no-pager`，核对设备 ID、服务端 HTTPS 地址和密钥；密钥轮换后旧值立即失效。
 - Agent 日志提示延迟上报：检查 DNS、证书链和防火墙。缓冲文件会保留在 spool 目录并在恢复后补传。
 - Linux 安装器仍提示 Go 1.24+：Docker 命令不存在、守护进程不可达，或显式使用了 `--no-docker`；先运行 `docker info` 检查。要强制使用本机程序，请同时指定 `--no-docker --binary /path/to/guanlan-agent`。
 - Agent 镜像无法拉取：确认 GHCR 包已设为 Public、目标机能访问 `ghcr.io`，或用 `--image` 指向可访问的镜像仓库。

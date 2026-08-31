@@ -1,6 +1,7 @@
 package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.api.dto.DeviceDtos;
+import com.guanlan.monitor.api.dto.DeviceHealthDtos;
 import com.guanlan.monitor.service.DeviceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,9 @@ public class DeviceController {
 
     @GetMapping("/{id}")
     DeviceDtos.View get(@PathVariable String id) { return devices.get(id); }
+
+    @GetMapping("/{id}/health")
+    DeviceHealthDtos.View health(@PathVariable String id) { return devices.health(id); }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

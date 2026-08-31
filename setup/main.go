@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -119,6 +120,10 @@ func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "Agent 安装器读取失败")
 		}
 		return
+	}
+	if platform == "linux" {
+		content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+		content = bytes.ReplaceAll(content, []byte("\r"), []byte("\n"))
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

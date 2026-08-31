@@ -328,6 +328,7 @@ onBeforeUnmount(() => {
               <span><MapPin :size="13" />{{ device.groupName || '未分组' }} · {{ device.location || '未设置位置' }}</span>
               <span v-if="device.tags?.length" class="server-tags"><i v-for="item in device.tags" :key="item">{{ item }}</i></span>
               <span><Clock3 :size="13" />{{ device.status === 'ONLINE' ? `运行 ${uptime(uptimeSeconds(device))}` : relativeTime(device.lastSeenAt) }}</span>
+              <span v-if="device.health.state !== 'HEALTHY'" class="device-health-line" :data-state="device.health.state">{{ device.health.reason }}</span>
             </div>
             <div class="server-resources">
               <div v-for="item in [

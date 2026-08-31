@@ -50,7 +50,8 @@ public final class DeviceDtos {
     public record View(
             String id, String name, String hostname, String os, String architecture,
             String primaryIp, String location, String groupName, List<String> tags, boolean ddnsEnabled, Long ddnsConfigId, boolean publicVisible, Device.Status status,
-            Instant lastSeenAt, String agentKeyPrefix, boolean controllerManaged, Instant createdAt, Map<String, Object> hardware, MetricView latest
+            Instant lastSeenAt, String agentKeyPrefix, boolean controllerManaged, Instant createdAt, Map<String, Object> hardware, MetricView latest,
+            DeviceHealthDtos.View health
     ) {}
 
     public record Credential(View device, String agentKey) {}

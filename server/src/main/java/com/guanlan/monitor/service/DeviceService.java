@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.api.dto.DeviceDtos;
 import com.guanlan.monitor.api.dto.MetricView;
+import com.guanlan.monitor.api.dto.DeviceHealthDtos;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.repository.DeviceRepository;
 import com.guanlan.monitor.repository.MetricSnapshotRepository;
@@ -29,6 +30,7 @@ public class DeviceService {
     private final ObjectMapper mapper;
     private final AuditService audit;
     private final DdnsConfigRepository ddnsConfigs;
+    private final DeviceHealthService health;
     private final SecureRandom random = new SecureRandom();
 
     @Transactional(readOnly = true)
@@ -38,6 +40,14 @@ public class DeviceService {
 
     @Transactional(readOnly = true)
     public DeviceDtos.View get(String id) { return view(require(id)); }
+
+    @Transactional(readOnly = true)
+    public DeviceHealthDtos.View health(String id) {
+        Device device = require(id);
+        MetricView latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(id)
+                .map(metric -> MetricView.from(metric, mapper)).orElse(null);
+        return health.describe(device, latest);
+    }
 
     @Transactional
     public DeviceDtos.Credential create(DeviceDtos.CreateRequest request) {
@@ -113,7 +123,8 @@ public class DeviceService {
         MetricView latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).map(metric -> MetricView.from(metric, mapper)).orElse(null);
         return new DeviceDtos.View(device.getId(), device.getName(), device.getHostname(), device.getOs(), device.getArchitecture(),
                 device.getPrimaryIp(), device.getLocation(), device.getGroupName(), readTags(device.getTagsJson()), device.isDdnsEnabled(), device.getDdnsConfigId(), device.isPublicVisible(), device.getStatus(), device.getLastSeenAt(),
-                device.getAgentKeyPrefix(), device.isControllerManaged(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest);
+                device.getAgentKeyPrefix(), device.isControllerManaged(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest,
+                health.describe(device, latest));
     }
 
     private Long validDdnsConfig(boolean enabled, Long id) {

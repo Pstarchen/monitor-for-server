@@ -44,7 +44,7 @@ func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspace, "deploy"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.sh"), []byte("#!/usr/bin/env bash\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.sh"), []byte("#!/usr/bin/env bash\r\nset -e\r\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	service := &setupService{}
@@ -52,7 +52,7 @@ func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=linux", nil)
 	response := httptest.NewRecorder()
 	service.agentInstaller(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "#!/usr/bin/env bash") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "#!/usr/bin/env bash") || strings.Contains(response.Body.String(), "\r") {
 		t.Fatalf("linux installer response = %d %q", response.Code, response.Body.String())
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {

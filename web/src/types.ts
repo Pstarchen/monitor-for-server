@@ -1,5 +1,8 @@
 export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
+export type DeviceHealthState = 'HEALTHY' | 'PENDING' | 'OFFLINE' | 'DEGRADED'
+export type DeviceHealthSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
+export type DeviceHealthCheckState = 'PASS' | 'PENDING' | 'WARN' | 'FAIL'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
 export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE' | 'PROCESS_MISSING' | 'SERVICE_NOT_RUNNING' | 'CUSTOM_METRIC'
@@ -152,6 +155,29 @@ export interface Device {
   createdAt: string
   hardware: Record<string, unknown>
   latest: Metric | null
+  health: DeviceHealth
+}
+
+export interface DeviceHealthCheck {
+  code: string
+  state: DeviceHealthCheckState
+  label: string
+  detail: string
+}
+
+export interface DeviceHealth {
+  deviceStatus: DeviceStatus
+  state: DeviceHealthState
+  reasonCode: string
+  reason: string
+  severity: DeviceHealthSeverity
+  lastSeenAt: string | null
+  lastSeenAgeSeconds: number | null
+  offlineAfterSeconds: number
+  latestCollectedAt: string | null
+  dataAgeSeconds: number | null
+  expectedBy: string | null
+  checks: DeviceHealthCheck[]
 }
 
 export type DdnsProvider = 'DUMMY' | 'WEBHOOK'

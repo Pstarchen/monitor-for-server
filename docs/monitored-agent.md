@@ -17,9 +17,9 @@ download_installer() {
 if ! download_installer \
   'https://monitor.example.com/api/setup/agent-installer?platform=linux'; then
   if ! download_installer \
-    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.9.0/deploy/install-agent.sh'; then
+    'https://cdn.jsdelivr.net/gh/Pstarchen/monitor-for-server@v1.10.0/deploy/install-agent.sh'; then
     download_installer \
-      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.9.0/deploy/install-agent.sh' \
+      'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.10.0/deploy/install-agent.sh' \
       || { echo '无法下载 Agent 安装器，请检查总控地址、服务器网络。' >&2; exit 1; }
   fi
 fi

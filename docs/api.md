@@ -43,6 +43,7 @@
 | --- | --- | --- | --- |
 | GET | `/api/devices` | 登录 | 设备及最新指标列表 |
 | GET | `/api/devices/{id}` | 登录 | 单台设备详情 |
+| GET | `/api/devices/{id}/health` | 登录 | Agent 接入健康诊断：连接状态、最近上报年龄、失联阈值、指标年龄和检查结果 |
 | POST | `/api/devices` | ADMIN / OPERATOR | 创建设备并一次性返回 Agent 密钥 |
 | PUT | `/api/devices/{id}` | ADMIN / OPERATOR | 更新名称、位置、分组和主 IP |
 | POST | `/api/devices/{id}/rotate-key` | ADMIN | 轮换并一次性返回新密钥 |
@@ -62,6 +63,15 @@
 ```
 
 创建和轮换密钥的响应包含 `{ "device": { ... }, "agentKey": "..." }`。`agentKey` 不会再次返回。
+
+设备列表和详情中的 `health` 字段与上述诊断接口一致。`state` 为 `HEALTHY`、`PENDING`、`OFFLINE` 或 `DEGRADED`：
+
+- `PENDING` / `NOT_CONNECTED`：尚未收到首次 Agent 上报。
+- `OFFLINE` / `HEARTBEAT_TIMEOUT`：最近上报超过系统配置的失联阈值。
+- `DEGRADED` / `DATA_STALE`：Agent 最近有连接，但指标快照为空或已过期。
+- `HEALTHY` / `HEALTHY`：连接和最新指标均在阈值内。
+
+接口只返回诊断元数据和可读原因，不返回 Agent 密钥、Webhook 或其他机密。
 
 ## 公开品牌
 
