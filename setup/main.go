@@ -62,10 +62,13 @@ func main() {
 		envPath = filepath.Join(workspace, ".env")
 		completionMarkerPath = filepath.Join(workspace, ".setup-complete")
 		controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+		controllerBackupStatePath = filepath.Join(workspace, ".controller-backup-state.json")
 	}
 	hostWorkspace = detectHostWorkspace()
 	updater := newControllerUpdateService()
 	updater.recoverStaleState()
+	backup := newControllerBackupService()
+	backup.recoverStaleState()
 	if len(os.Args) > 1 && os.Args[1] == "update-runner" {
 		if err := updater.runUpdate(); err != nil {
 			log.Fatal(err)
@@ -82,7 +85,9 @@ func main() {
 	mux.HandleFunc("/api/setup/complete", service.complete)
 	mux.HandleFunc("/api/setup/agent-installer", service.agentInstaller)
 	updater.register(mux)
+	backup.register(mux)
 	go updater.runScheduler()
+	go backup.runScheduler()
 
 	server := &http.Server{
 		Addr:              ":8090",
@@ -264,6 +269,14 @@ func writeEnvironment(request setupRequest) error {
 	if controllerAutoUpdate == "" {
 		controllerAutoUpdate = environmentValue("CONTROLLER_AUTO_UPDATE", "false")
 	}
+	controllerBackupAuto := configuredEnvironmentValue("CONTROLLER_BACKUP_AUTO")
+	if controllerBackupAuto == "" {
+		controllerBackupAuto = environmentValue("CONTROLLER_BACKUP_AUTO", "false")
+	}
+	controllerBackupRetention := configuredEnvironmentValue("CONTROLLER_BACKUP_RETENTION")
+	if controllerBackupRetention == "" {
+		controllerBackupRetention = environmentValue("CONTROLLER_BACKUP_RETENTION", "7")
+	}
 	if postgresPassword == "" {
 		return errors.New("内置 PostgreSQL 凭据缺失，请重新运行总终端安装器")
 	}
@@ -292,6 +305,8 @@ func writeEnvironment(request setupRequest) error {
 		"CONTROLLER_AGENT_NAME=" + dotenvValue(controllerAgentName),
 		"CONTROLLER_AGENT_GROUP=" + dotenvValue(controllerAgentGroup),
 		"CONTROLLER_AUTO_UPDATE=" + dotenvValue(controllerAutoUpdate),
+		"CONTROLLER_BACKUP_AUTO=" + dotenvValue(controllerBackupAuto),
+		"CONTROLLER_BACKUP_RETENTION=" + dotenvValue(controllerBackupRetention),
 	}
 	content := strings.Join(lines, "\n") + "\n"
 	if existing, err := os.ReadFile(envPath); err == nil {

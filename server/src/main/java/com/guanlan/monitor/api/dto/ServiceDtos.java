@@ -26,13 +26,14 @@ public final class ServiceDtos {
             @Min(0) @Max(30000) Integer latencyThresholdMs,
             @Min(0) @Max(3650) Integer certificateThresholdDays,
             @Min(100) @Max(599) Integer expectedStatus,
-            @Size(max = 200) String bodyContains
+            @Size(max = 200) String bodyContains,
+            @Size(max = 255) String credential
     ) {
         public Request(String name, String target, ServiceCheck.Type type, int intervalSeconds, int timeoutMs,
                        boolean publicVisible, int sortOrder, boolean enabled, Integer failureThreshold,
                        Integer latencyThresholdMs, Integer certificateThresholdDays) {
             this(name, target, type, intervalSeconds, timeoutMs, publicVisible, sortOrder, enabled,
-                    failureThreshold, latencyThresholdMs, certificateThresholdDays, null, null);
+                    failureThreshold, latencyThresholdMs, certificateThresholdDays, null, null, null);
         }
     }
 
@@ -76,7 +77,8 @@ public final class ServiceDtos {
             List<ResultView> history,
             String heartbeatTokenPrefix,
             String heartbeatToken,
-            String heartbeatPath
+            String heartbeatPath,
+            boolean credentialConfigured
     ) {}
 
     public record PublicView(

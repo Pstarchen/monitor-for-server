@@ -6,7 +6,7 @@ import com.guanlan.monitor.domain.ServiceCheck;
 import com.guanlan.monitor.domain.ServiceCheckResult;
 import com.guanlan.monitor.repository.ServiceCheckRepository;
 import com.guanlan.monitor.repository.ServiceCheckResultRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +23,6 @@ import java.util.Base64;
 import java.util.List;
 
 @Service
-@RequiredArgsConstructor
 public class ServiceMonitorService {
     private static final Duration AVAILABILITY_WINDOW = Duration.ofDays(7);
 
@@ -33,7 +32,27 @@ public class ServiceMonitorService {
     private final AuditService audit;
     private final NotificationService notifications;
     private final SettingService settings;
+    private final SecretValueCodec secrets;
     private final SecureRandom random = new SecureRandom();
+
+    public ServiceMonitorService(ServiceCheckRepository checks, ServiceCheckResultRepository results,
+                                 ServiceProbe probe, AuditService audit, NotificationService notifications,
+                                 SettingService settings) {
+        this(checks, results, probe, audit, notifications, settings, null);
+    }
+
+    @Autowired
+    public ServiceMonitorService(ServiceCheckRepository checks, ServiceCheckResultRepository results,
+                                 ServiceProbe probe, AuditService audit, NotificationService notifications,
+                                 SettingService settings, SecretValueCodec secrets) {
+        this.checks = checks;
+        this.results = results;
+        this.probe = probe;
+        this.audit = audit;
+        this.notifications = notifications;
+        this.settings = settings;
+        this.secrets = secrets;
+    }
 
     @Transactional(readOnly = true)
     public List<ServiceDtos.View> list() {
@@ -121,7 +140,9 @@ public class ServiceMonitorService {
     }
 
     private ServiceCheck run(ServiceCheck check) {
-        ServiceProbe.Result measured = probe.check(check);
+        ServiceProbe.Result measured = check.getType() == ServiceCheck.Type.SNMP
+                ? probe.check(check, decryptCredential(check))
+                : probe.check(check);
         saveResult(check, Instant.now(), measured);
         evaluateAlert(check, measured);
         return check;
@@ -182,6 +203,9 @@ public class ServiceMonitorService {
             }
         }
         if (request.type() == ServiceCheck.Type.TCPING
+                || request.type() == ServiceCheck.Type.FTP
+                || request.type() == ServiceCheck.Type.SFTP
+                || request.type() == ServiceCheck.Type.SNMP
                 || request.type() == ServiceCheck.Type.REDIS_PING
                 || request.type() == ServiceCheck.Type.POSTGRESQL
                 || request.type() == ServiceCheck.Type.MYSQL) {
@@ -196,6 +220,9 @@ public class ServiceMonitorService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "目标端口无效");
             }
             if (port < 1 || port > 65535) throw new ApiException(HttpStatus.BAD_REQUEST, "目标端口无效");
+        }
+        if (request.type() == ServiceCheck.Type.SNMP && request.credential() != null && request.credential().length() > 255) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SNMP community 长度不能超过 255 个字符");
         }
     }
 
@@ -214,6 +241,17 @@ public class ServiceMonitorService {
         check.setExpectedStatus(request.type() == ServiceCheck.Type.HTTP_GET ? request.expectedStatus() : null);
         check.setBodyContains(request.type() == ServiceCheck.Type.HTTP_GET && request.bodyContains() != null && !request.bodyContains().isBlank()
                 ? request.bodyContains().trim() : null);
+        if (request.type() == ServiceCheck.Type.SNMP) {
+            if (request.credential() != null && !request.credential().isBlank()) {
+                if (secrets == null || !secrets.available()) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "未配置设置加密密钥，无法保存 SNMP 凭据");
+                check.setCredentialCiphertext(secrets.encrypt(request.credential().trim()));
+            } else if (check.getCredentialCiphertext() == null) {
+                if (secrets == null || !secrets.available()) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "未配置设置加密密钥，无法保存 SNMP 凭据");
+                check.setCredentialCiphertext(secrets.encrypt("public"));
+            }
+        } else {
+            check.setCredentialCiphertext(null);
+        }
         if (request.type() != ServiceCheck.Type.HEARTBEAT) {
             check.setHeartbeatTokenHash(null);
             check.setHeartbeatTokenPrefix(null);
@@ -231,7 +269,17 @@ public class ServiceMonitorService {
     }
 
     private ServiceDtos.View view(ServiceCheck check, String rawToken) {
-        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.getExpectedStatus(), check.getBodyContains(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check), availabilityPercent(check), historyViews(check), check.getHeartbeatTokenPrefix(), rawToken, check.getType() == ServiceCheck.Type.HEARTBEAT ? "/api/heartbeat/" + check.getId() : null);
+        return new ServiceDtos.View(check.getId(), check.getName(), check.getTarget(), check.getType(), check.getIntervalSeconds(), check.getTimeoutMs(), check.isPublicVisible(), check.getSortOrder(), check.isEnabled(), check.getFailureThreshold(), check.getLatencyThresholdMs(), check.getCertificateThresholdDays(), check.getExpectedStatus(), check.getBodyContains(), check.isAlertActive(), check.getCreatedAt(), check.getUpdatedAt(), resultView(check), availabilityPercent(check), historyViews(check), check.getHeartbeatTokenPrefix(), rawToken, check.getType() == ServiceCheck.Type.HEARTBEAT ? "/api/heartbeat/" + check.getId() : null, check.getCredentialCiphertext() != null);
+    }
+
+    private String decryptCredential(ServiceCheck check) {
+        if (check.getCredentialCiphertext() == null || check.getCredentialCiphertext().isBlank()) return "public";
+        if (secrets == null || !secrets.available()) return "public";
+        try {
+            return secrets.decrypt(check.getCredentialCiphertext());
+        } catch (RuntimeException exception) {
+            return "";
+        }
     }
 
     private ServiceDtos.PublicView publicView(ServiceCheck check) {

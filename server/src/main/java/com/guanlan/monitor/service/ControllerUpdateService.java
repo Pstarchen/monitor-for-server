@@ -48,6 +48,22 @@ public class ControllerUpdateService {
         return request(HttpMethod.PUT, "/internal/controller-update/auto", new AutoUpdateRequest(enabled));
     }
 
+    public JsonNode backupStatus() {
+        return request(HttpMethod.GET, "/internal/controller-backup/status", null);
+    }
+
+    public JsonNode createBackup() {
+        return request(HttpMethod.POST, "/internal/controller-backup/create", null);
+    }
+
+    public JsonNode restoreBackup(String name) {
+        return request(HttpMethod.POST, "/internal/controller-backup/restore", new BackupRestoreRequest(name));
+    }
+
+    public JsonNode setBackupAuto(boolean enabled, int retention) {
+        return request(HttpMethod.PUT, "/internal/controller-backup/auto", new BackupAutoRequest(enabled, retention));
+    }
+
     private JsonNode request(HttpMethod method, String path, Object body) {
         String token = properties.getControllerUpdate().getToken();
         if (token == null || token.isBlank()) {
@@ -86,4 +102,6 @@ public class ControllerUpdateService {
     }
 
     private record AutoUpdateRequest(boolean enabled) {}
+    private record BackupRestoreRequest(String name) {}
+    private record BackupAutoRequest(boolean enabled, int retention) {}
 }

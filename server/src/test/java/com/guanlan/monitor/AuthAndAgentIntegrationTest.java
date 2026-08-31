@@ -289,6 +289,36 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void fanRpmAlertOpensAndResolvesFromAgentReports() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("fan-alert-node", "lab", "tests", "127.0.0.41"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/alert-rules")
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"风扇转速过高\",\"deviceId\":\"" + credential.device().id() + "\",\"metric\":\"FAN_RPM\",\"threshold\":2500,\"severity\":\"WARNING\",\"enabled\":true}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.metric").value("FAN_RPM"))
+                .andExpect(jsonPath("$.threshold").value(2500));
+
+        String breached = sampleReport().replace("\"temperatures\":[]", "\"temperatures\":[],\"fans\":[{\"name\":\"cpu_fan\",\"rpm\":1800},{\"name\":\"case_fan\",\"rpm\":3200}]");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id()).header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON).content(breached))
+                .andExpect(status().isAccepted());
+        assertThat(alertEvents.findAll()).anyMatch(event -> event.getDevice().getId().equals(credential.device().id())
+                && event.getStatus() == AlertEvent.Status.OPEN && event.getMessage().contains("风扇转速")
+                && event.getValue() == 3200);
+
+        String recovered = breached.replace("\"rpm\":1800},{\"name\":\"case_fan\",\"rpm\":3200", "\"rpm\":900},{\"name\":\"case_fan\",\"rpm\":1200");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id()).header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON).content(recovered))
+                .andExpect(status().isAccepted());
+        assertThat(alertEvents.findAll()).anyMatch(event -> event.getDevice().getId().equals(credential.device().id())
+                && event.getStatus() == AlertEvent.Status.RESOLVED);
+    }
+
+    @Test
     @WithMockUser(roles = "VIEWER")
     void viewerCannotReadControllerUpdateStatus() throws Exception {
         mvc.perform(get("/api/admin/controller-update"))

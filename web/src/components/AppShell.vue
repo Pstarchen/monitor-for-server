@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut,
+  Activity, Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut,
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
@@ -49,6 +49,7 @@ const navigation = [
 ]
 const administration = [
   { label: '系统设置', path: '/settings', icon: Settings },
+  { label: '备份与恢复', path: '/backups', icon: Archive },
   { label: '账号权限', path: '/users', icon: Users },
   { label: '审计日志', path: '/audit', icon: ClipboardList },
 ]

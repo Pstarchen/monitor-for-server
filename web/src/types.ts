@@ -5,7 +5,7 @@ export type DeviceHealthSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type DeviceHealthCheckState = 'PASS' | 'PENDING' | 'WARN' | 'FAIL'
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type AlertStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
-export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'DEVICE_OFFLINE' | 'PROCESS_MISSING' | 'SERVICE_NOT_RUNNING' | 'CUSTOM_METRIC'
+export type AlertMetric = 'CPU_USAGE' | 'MEMORY_USAGE' | 'DISK_USAGE' | 'LOAD_1' | 'DISK_READ_BPS' | 'DISK_WRITE_BPS' | 'CONTAINER_CPU_USAGE' | 'CONTAINER_MEMORY_USAGE' | 'GPU_USAGE' | 'BATTERY_PERCENT' | 'SMART_FAILURES' | 'INTEGRITY_CHANGES' | 'FIREWALL_INACTIVE' | 'TCP_CONNECTIONS' | 'NETWORK_RECV_BPS' | 'NETWORK_SENT_BPS' | 'TEMPERATURE' | 'FAN_RPM' | 'DEVICE_OFFLINE' | 'PROCESS_MISSING' | 'SERVICE_NOT_RUNNING' | 'CUSTOM_METRIC'
 
 export interface User {
   id: number
@@ -477,6 +477,26 @@ export interface ControllerUpdateStatus {
   services: ControllerServiceStatus[]
 }
 
+export interface ControllerBackupFile {
+  name: string
+  size: number
+  createdAt: string
+}
+
+export type ControllerBackupPhase = 'IDLE' | 'CREATING' | 'RESTORING' | 'ERROR'
+
+export interface ControllerBackupStatus {
+  state: ControllerBackupPhase
+  message?: string
+  startedAt?: string
+  finishedAt?: string
+  lastBackup?: string
+  lastAutoRunDate?: string
+  autoBackup: boolean
+  retention: number
+  backups: ControllerBackupFile[]
+}
+
 export interface ApiToken {
   id: number
   name: string
@@ -518,7 +538,7 @@ export interface AgentTask {
   error: string
 }
 
-export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING' | 'REDIS_PING' | 'POSTGRESQL' | 'MYSQL' | 'HEARTBEAT'
+export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING' | 'FTP' | 'SFTP' | 'SNMP' | 'REDIS_PING' | 'POSTGRESQL' | 'MYSQL' | 'HEARTBEAT'
 
 export interface ServiceCheckResult {
   checkedAt: string
@@ -544,6 +564,7 @@ export interface ServiceCheck {
   certificateThresholdDays: number
   expectedStatus: number | null
   bodyContains: string | null
+  credentialConfigured: boolean
   alertActive: boolean
   createdAt: string
   updatedAt: string

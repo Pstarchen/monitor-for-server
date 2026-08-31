@@ -248,7 +248,7 @@ DDNS 配置由 ADMIN / OPERATOR 管理，设备编辑时可关联配置。Agent 
 | DELETE | `/api/ddns/{id}` | ADMIN / OPERATOR | 删除配置 |
 | POST | `/api/ddns/{id}/test?ip=` | ADMIN / OPERATOR | 使用指定地址执行一次测试更新 |
 
-服务监控由总控服务执行 HTTP GET、ICMP Ping、TCPing、Redis PING、PostgreSQL 或 MySQL 协议探测，结果按指标留存策略保存。数据库探测只发送最小协议握手，不执行查询，也不需要保存数据库密码；Redis 启用认证时，`NOAUTH` 响应仍表示服务已在线。HTTP GET 可额外设置 `expectedStatus` 精确匹配状态码，以及 `bodyContains` 检查响应体是否包含业务标记（响应体最多读取 64 KiB）。另支持 `HEARTBEAT` 外部心跳类型：总控不主动连接目标，而是由 cron、CI、备份脚本等任务定时调用心跳地址；超过两个配置周期未收到上报会记录失败并触发通知。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
+服务监控由总控服务执行 HTTP GET、ICMP Ping、TCPing、FTP 握手、SFTP/SSH 握手、SNMP v2c 只读查询、Redis PING、PostgreSQL 或 MySQL 协议探测，结果按指标留存策略保存。FTP 仅验证 `220` 欢迎响应，SFTP 仅验证 `SSH-` 协议头，不执行登录，也不保存账号密码；SNMP 仅查询 `sysDescr.0`，community 使用设置加密密钥加密保存，接口只返回是否已配置；数据库探测只发送最小协议握手，不执行查询，也不需要保存数据库密码；Redis 启用认证时，`NOAUTH` 响应仍表示服务已在线。HTTP GET 可额外设置 `expectedStatus` 精确匹配状态码，以及 `bodyContains` 检查响应体是否包含业务标记（响应体最多读取 64 KiB）。另支持 `HEARTBEAT` 外部心跳类型：总控不主动连接目标，而是由 cron、CI、备份脚本等任务定时调用心跳地址；超过两个配置周期未收到上报会记录失败并触发通知。HTTPS 目标会记录 TLS 叶子证书的到期时间，并按 `certificateThresholdDays`（0-3650，0 表示关闭）触发到期告警。服务监控的写操作需要 ADMIN / OPERATOR，公开状态接口不会返回设备 IP、硬件明细或 Agent 凭据。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -312,7 +312,7 @@ curl -fsS -X POST -H 'X-Heartbeat-Token: hb_...' 'https://monitor.example.com/ap
 
 建议将命令加入 cron（例如每分钟执行一次），并将 `intervalSeconds` 设置为 60。令牌服务端只保存 SHA-256 摘要；编辑或列表接口不会再次返回明文令牌。
 
-告警规则支持 `CPU_USAGE`、`MEMORY_USAGE`、`DISK_USAGE`、`TCP_CONNECTIONS`、`NETWORK_RECV_BPS`、`NETWORK_SENT_BPS`、`TEMPERATURE` 和 `DEVICE_OFFLINE`；连接数阈值使用连接数，网络阈值使用 B/s，温度阈值使用 °C，离线阈值使用秒，其余资源阈值使用百分比。
+告警规则支持 `CPU_USAGE`、`MEMORY_USAGE`、`DISK_USAGE`、`TCP_CONNECTIONS`、`NETWORK_RECV_BPS`、`NETWORK_SENT_BPS`、`TEMPERATURE`、`FAN_RPM` 和 `DEVICE_OFFLINE`；连接数阈值使用连接数，网络阈值使用 B/s，温度阈值使用 °C，风扇阈值使用 RPM，离线阈值使用秒，其余资源阈值使用百分比。
 
 系统设置请求：
 

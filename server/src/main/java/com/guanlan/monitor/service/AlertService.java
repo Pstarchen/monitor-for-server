@@ -151,6 +151,7 @@ public class AlertService {
                 case NETWORK_RECV_BPS -> metric.getNetworkRecvBps();
                 case NETWORK_SENT_BPS -> metric.getNetworkSentBps();
                 case TEMPERATURE -> metric.getTemperatureMax();
+                case FAN_RPM -> fanRpm(metric);
                 case DEVICE_OFFLINE -> 0d;
                 case PROCESS_MISSING -> processMissing(metric, rule.getTargetName());
                 case SERVICE_NOT_RUNNING -> serviceNotRunning(metric, rule.getTargetName());
@@ -231,6 +232,9 @@ public class AlertService {
         if (request.metric() == AlertRule.Metric.FIREWALL_INACTIVE && request.threshold() != 1) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "防火墙告警阈值必须为 1（未启用）");
         }
+        if (request.metric() == AlertRule.Metric.FAN_RPM && request.threshold() > 100_000) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "风扇转速阈值必须在 0-100000 RPM 之间");
+        }
         if ((request.metric() == AlertRule.Metric.PROCESS_MISSING || request.metric() == AlertRule.Metric.SERVICE_NOT_RUNNING
                 || request.metric() == AlertRule.Metric.CUSTOM_METRIC)
                 && (request.targetName() == null || request.targetName().isBlank())) {
@@ -261,6 +265,7 @@ public class AlertService {
             case NETWORK_RECV_BPS -> "网络接收速率";
             case NETWORK_SENT_BPS -> "网络发送速率";
             case TEMPERATURE -> "最高温度";
+            case FAN_RPM -> "最高风扇转速";
             case DEVICE_OFFLINE -> "离线时长";
             case PROCESS_MISSING -> "关键进程缺失";
             case SERVICE_NOT_RUNNING -> "系统服务未运行";
@@ -274,6 +279,7 @@ public class AlertService {
             case DISK_READ_BPS, DISK_WRITE_BPS -> " B/s";
             case LOAD_1 -> "";
             case TEMPERATURE -> " °C";
+            case FAN_RPM -> " RPM";
             case PROCESS_MISSING, SERVICE_NOT_RUNNING, CUSTOM_METRIC -> "";
             default -> "%";
         };
@@ -290,6 +296,22 @@ public class AlertService {
             if (processes.isEmpty()) return null;
             boolean present = processes.stream().anyMatch(item -> sameName(item.get("name"), targetName));
             return present ? 0d : 1d;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Double fanRpm(MetricSnapshot metric) {
+        if (blank(metric.getFansJson())) return null;
+        try {
+            List<Map<String, Object>> fans = mapper.readValue(metric.getFansJson(), new TypeReference<>() {});
+            return fans.stream()
+                    .map(item -> item.get("rpm"))
+                    .filter(Number.class::isInstance)
+                    .map(value -> ((Number) value).doubleValue())
+                    .filter(value -> Double.isFinite(value) && value >= 0)
+                    .max(Double::compareTo)
+                    .orElse(null);
         } catch (Exception ignored) {
             return null;
         }

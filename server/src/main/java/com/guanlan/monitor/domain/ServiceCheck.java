@@ -19,6 +19,9 @@ public class ServiceCheck {
         HTTP_GET,
         ICMP_PING,
         TCPING,
+        FTP,
+        SFTP,
+        SNMP,
         REDIS_PING,
         POSTGRESQL,
         MYSQL,
@@ -68,6 +71,9 @@ public class ServiceCheck {
 
     @Column(name = "body_contains", length = 200)
     private String bodyContains;
+
+    @Column(name = "credential_ciphertext", length = 1000)
+    private String credentialCiphertext;
 
     @Column(name = "heartbeat_token_hash", length = 64)
     private String heartbeatTokenHash;

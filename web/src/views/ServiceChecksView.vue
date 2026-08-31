@@ -32,8 +32,8 @@ const heartbeatDialog = ref(false)
 const heartbeatCredential = ref<ServiceCheck | null>(null)
 const statusFilter = ref<'ALL' | 'HEALTHY' | 'FAILING' | 'PAUSED'>('ALL')
 const typeFilter = ref<ServiceCheckType | ''>('')
-const form = reactive({ name: '', target: '', type: 'HTTP_GET' as ServiceCheckType, intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null as number | null, bodyContains: '' })
-const labels: Record<ServiceCheckType, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', REDIS_PING: 'Redis PING', POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', HEARTBEAT: '外部心跳' }
+const form = reactive({ name: '', target: '', type: 'HTTP_GET' as ServiceCheckType, credential: '', intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null as number | null, bodyContains: '' })
+const labels: Record<ServiceCheckType, string> = { HTTP_GET: 'HTTP GET', ICMP_PING: 'ICMP Ping', TCPING: 'TCPing', FTP: 'FTP 握手', SFTP: 'SFTP / SSH 握手', SNMP: 'SNMP v2c', REDIS_PING: 'Redis PING', POSTGRESQL: 'PostgreSQL', MYSQL: 'MySQL', HEARTBEAT: '外部心跳' }
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
 const filteredChecks = computed(() => checks.value.filter((check) => {
   const stateMatches = statusFilter.value === 'ALL'
@@ -71,19 +71,22 @@ async function load(background = false) {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { name: '', target: '', type: 'HTTP_GET', intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null, bodyContains: '' })
+  Object.assign(form, { name: '', target: '', type: 'HTTP_GET', credential: '', intervalSeconds: 60, timeoutMs: 5000, publicVisible: true, sortOrder: 0, enabled: true, failureThreshold: 1, latencyThresholdMs: 0, certificateThresholdDays: 14, expectedStatus: null, bodyContains: '' })
   dialog.value = true
 }
 
 function openEdit(check: ServiceCheck) {
   editingId.value = check.id
-  Object.assign(form, { name: check.name, target: check.target, type: check.type, intervalSeconds: check.intervalSeconds, timeoutMs: check.timeoutMs, publicVisible: check.publicVisible, sortOrder: check.sortOrder, enabled: check.enabled, failureThreshold: check.failureThreshold, latencyThresholdMs: check.latencyThresholdMs, certificateThresholdDays: check.certificateThresholdDays, expectedStatus: check.expectedStatus, bodyContains: check.bodyContains ?? '' })
+  Object.assign(form, { name: check.name, target: check.target, type: check.type, credential: '', intervalSeconds: check.intervalSeconds, timeoutMs: check.timeoutMs, publicVisible: check.publicVisible, sortOrder: check.sortOrder, enabled: check.enabled, failureThreshold: check.failureThreshold, latencyThresholdMs: check.latencyThresholdMs, certificateThresholdDays: check.certificateThresholdDays, expectedStatus: check.expectedStatus, bodyContains: check.bodyContains ?? '' })
   dialog.value = true
 }
 
 function targetPlaceholder() {
   if (form.type === 'ICMP_PING') return '例如：1.1.1.1 或 example.com'
   if (form.type === 'TCPING') return '例如：example.com:443'
+  if (form.type === 'FTP') return '例如：ftp.example.com:21'
+  if (form.type === 'SFTP') return '例如：sftp.example.com:22'
+  if (form.type === 'SNMP') return '例如：switch.example.com:161'
   if (form.type === 'REDIS_PING') return '例如：redis.example.com:6379'
   if (form.type === 'POSTGRESQL') return '例如：db.example.com:5432'
   if (form.type === 'MYSQL') return '例如：db.example.com:3306'
@@ -98,7 +101,7 @@ async function save() {
   }
   saving.value = true
   try {
-    const payload = { ...form, name: form.name.trim(), target: form.type === 'HEARTBEAT' ? '' : form.target.trim() }
+    const payload = { ...form, name: form.name.trim(), target: form.type === 'HEARTBEAT' ? '' : form.target.trim(), credential: form.type === 'SNMP' && form.credential.trim() ? form.credential.trim() : null }
     let saved: ServiceCheck
     if (editingId.value) saved = (await api.put<ServiceCheck>(`/services/${editingId.value}`, payload)).data
     else saved = (await api.post<ServiceCheck>('/services', payload)).data
@@ -231,6 +234,7 @@ useVisibilityPolling(() => load(true))
           <el-form-item label="探测类型" required><el-select v-model="form.type"><el-option v-for="(label, value) in labels" :key="value" :label="label" :value="value" /></el-select></el-form-item>
           <el-form-item v-if="form.type !== 'HEARTBEAT'" label="探测目标" required><el-input v-model="form.target" :placeholder="targetPlaceholder()" /></el-form-item>
           <el-form-item v-else label="心跳接入"><div class="form-help"><Activity :size="14" />保存后生成一次性令牌，将命令配置到 cron、CI 或定时任务中。</div></el-form-item>
+          <el-form-item v-if="form.type === 'SNMP'" label="SNMP Community"><el-input v-model="form.credential" type="password" show-password autocomplete="new-password" placeholder="默认 public，建议使用只读 community" /><span class="field-suffix">仅保存加密密文</span></el-form-item>
           <el-form-item label="探测间隔"><el-input-number v-model="form.intervalSeconds" :min="15" :max="86400" /><span class="field-suffix">秒</span></el-form-item>
           <el-form-item label="超时时间"><el-input-number v-model="form.timeoutMs" :min="500" :max="30000" :step="500" /><span class="field-suffix">毫秒</span></el-form-item>
           <el-form-item label="排序权重"><el-input-number v-model="form.sortOrder" :min="-100000" :max="100000" /></el-form-item>
@@ -243,7 +247,7 @@ useVisibilityPolling(() => load(true))
           </template>
         </div>
         <div class="form-inline-options"><el-checkbox v-model="form.publicVisible">在公开状态页展示</el-checkbox><el-checkbox v-model="form.enabled">启用自动探测</el-checkbox></div>
-        <p class="form-help"><Wifi :size="14" />HTTPS 会记录证书到期时间；HTTP 会记录响应状态码；Ping、TCPing 和数据库协议探测会记录连接延迟。Redis/PostgreSQL/MySQL 只执行最小握手，不保存或要求数据库密码；外部心跳用于 cron、CI 等任务的存活监控。告警会在首次达到阈值时发送，恢复后再发送一条恢复通知。</p>
+        <p class="form-help"><Wifi :size="14" />HTTPS 会记录证书到期时间；HTTP 会记录响应状态码；Ping、TCPing、FTP、SFTP、SNMP 和数据库协议探测会记录连接延迟。Redis/PostgreSQL/MySQL 只执行最小握手，不保存或要求数据库密码；SNMP 仅执行只读 sysDescr 查询，community 会加密保存。外部心跳用于 cron、CI 等任务的存活监控。告警会在首次达到阈值时发送，恢复后再发送一条恢复通知。</p>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存监控</el-button></template>
     </el-dialog>

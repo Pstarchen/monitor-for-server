@@ -309,6 +309,32 @@ p, h1, h2, h3 { margin: 0; }
 .data-table tbody tr:hover { background: color-mix(in srgb, var(--surface-subtle) 62%, transparent); }
 .data-table td > strong, .data-table td > small { display: block; }
 .data-table td > small { max-width: 290px; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; }
+.backup-overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .85fr); gap: 12px; margin-bottom: 12px; }
+.backup-status-panel, .backup-policy-panel, .backup-list-panel { min-width: 0; overflow: hidden; }
+.backup-status-panel, .backup-policy-panel { padding: 16px; }
+.backup-status-panel .panel-heading, .backup-policy-panel .panel-heading, .backup-list-panel > .panel-heading { min-height: 38px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.backup-status-panel .panel-heading h2, .backup-policy-panel .panel-heading h2, .backup-list-panel .panel-heading h2 { margin-top: 4px; font-size: 15px; }
+.backup-state-value { display: grid; gap: 7px; min-height: 126px; align-content: center; padding: 18px 0; border-bottom: 1px solid var(--border); }
+.backup-state-value > span { display: inline-flex; align-items: center; gap: 7px; color: var(--success); font-size: 12px; font-weight: 650; }
+.backup-state-value > strong { font-size: 13px; line-height: 1.5; }
+.backup-state-value > small { color: var(--muted); font-size: 10px; }
+.backup-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-top: 14px; }
+.backup-facts > div { min-width: 0; display: grid; gap: 5px; }
+.backup-facts span { color: var(--muted); font-size: 10px; }
+.backup-facts strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.backup-policy-panel > .panel-heading > svg { color: var(--success); }
+.backup-policy-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 66px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+.backup-policy-row > div { min-width: 0; }
+.backup-policy-row strong, .backup-policy-row p { display: block; }
+.backup-policy-row strong { font-size: 12px; }
+.backup-policy-row p { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.backup-policy-row .el-input-number { width: 132px; }
+.backup-policy-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; }
+.backup-policy-actions > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.backup-policy-actions > span svg { color: var(--success); }
+.backup-list-panel > .panel-heading { min-height: 64px; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.panel-heading-meta { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.backup-list-panel .empty-state { margin: 20px 0; }
 .device-health-cell { min-width: 150px; }
 .device-health-detail { display: block; max-width: 190px; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: normal; }
 .device-health-detail[data-state="OFFLINE"] { color: var(--danger); }

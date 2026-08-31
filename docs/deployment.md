@@ -80,6 +80,19 @@ sudo bash ./deploy/update-controller.sh --auto
 
 更新器默认依次尝试可用的 `ghcr.1ms.run` 和 `ghcr.nju.edu.cn`，失败后回退到官方 GHCR；不会默认使用未将本项目加入白名单的 DaoCloud 公共镜像。首次安装和系统设置中的更新都使用这条顺序，单个镜像源默认最多等待 180 秒。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 传入逗号分隔的镜像前缀，或使用 `--no-mirror` 跳过镜像源；需要本地构建时使用 `--build`。`--auto` 会启用由 setup 服务执行的每日 04:00 自动更新，失败不会删除数据库卷。
 
+### 数据库备份与恢复
+
+管理员可在控制台“备份与恢复”创建 PostgreSQL SQL 备份、查看恢复点并恢复指定文件。备份由 setup 服务调用 PostgreSQL 容器内的 `pg_dump` 执行，不依赖 server 镜像安装额外工具；文件保存到项目目录 `backups/`，权限为 `0600`，默认保留最近 7 个，可通过 `CONTROLLER_BACKUP_RETENTION` 设置为 1-100 个。恢复任务会先停止 `server` 和 `web`，导入完成后自动拉起；任务状态可在页面轮询，失败时会尝试重新启动服务。
+
+需要每天自动备份时，在 `.env` 设置：
+
+```dotenv
+CONTROLLER_BACKUP_AUTO=true
+CONTROLLER_BACKUP_RETENTION=7
+```
+
+自动任务按 `APP_TIMEZONE` 每天 03:00 执行。备份文件和 `.env` 含有数据库及站点机密，必须限制项目目录访问并纳入离线备份策略。
+
 升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `GUANLAN_SETUP_IMAGE`、`GUANLAN_SERVER_IMAGE`、`GUANLAN_WEB_IMAGE` 和 `GUANLAN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
 
 生产环境生成的配置至少包含：

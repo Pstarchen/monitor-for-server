@@ -21,7 +21,7 @@ const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive<{ name: string; deviceId: string; metric: AlertMetric; targetName: string; threshold: number; severity: AlertSeverity; enabled: boolean }>({ name: '', deviceId: '', metric: 'CPU_USAGE', targetName: '', threshold: 80, severity: 'WARNING', enabled: true })
 const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
-const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', LOAD_1: '1 分钟负载', DISK_READ_BPS: '磁盘读取速率', DISK_WRITE_BPS: '磁盘写入速率', CONTAINER_CPU_USAGE: '容器 CPU 使用率', CONTAINER_MEMORY_USAGE: '容器内存使用率', GPU_USAGE: 'GPU 使用率', BATTERY_PERCENT: '电池电量', SMART_FAILURES: 'SMART 失败磁盘数', INTEGRITY_CHANGES: '完整性变更文件数', FIREWALL_INACTIVE: '防火墙未启用', TCP_CONNECTIONS: 'TCP 连接数', NETWORK_RECV_BPS: '网络接收速率', NETWORK_SENT_BPS: '网络发送速率', TEMPERATURE: '最高温度', DEVICE_OFFLINE: '设备离线', PROCESS_MISSING: '关键进程缺失', SERVICE_NOT_RUNNING: '系统服务未运行', CUSTOM_METRIC: '自定义监控项' }
+const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', LOAD_1: '1 分钟负载', DISK_READ_BPS: '磁盘读取速率', DISK_WRITE_BPS: '磁盘写入速率', CONTAINER_CPU_USAGE: '容器 CPU 使用率', CONTAINER_MEMORY_USAGE: '容器内存使用率', GPU_USAGE: 'GPU 使用率', BATTERY_PERCENT: '电池电量', SMART_FAILURES: 'SMART 失败磁盘数', INTEGRITY_CHANGES: '完整性变更文件数', FIREWALL_INACTIVE: '防火墙未启用', TCP_CONNECTIONS: 'TCP 连接数', NETWORK_RECV_BPS: '网络接收速率', NETWORK_SENT_BPS: '网络发送速率', TEMPERATURE: '最高温度', FAN_RPM: '最高风扇转速', DEVICE_OFFLINE: '设备离线', PROCESS_MISSING: '关键进程缺失', SERVICE_NOT_RUNNING: '系统服务未运行', CUSTOM_METRIC: '自定义监控项' }
 const targetMetrics: AlertMetric[] = ['PROCESS_MISSING', 'SERVICE_NOT_RUNNING', 'CUSTOM_METRIC']
 const presenceTargetMetrics: AlertMetric[] = ['PROCESS_MISSING', 'SERVICE_NOT_RUNNING']
 
@@ -44,6 +44,7 @@ function defaultThreshold(metric: AlertMetric) {
   if (metric === 'DISK_USAGE') return 85
   if (metric === 'TCP_CONNECTIONS') return 100
   if (metric === 'TEMPERATURE') return 75
+  if (metric === 'FAN_RPM') return 2500
   if (metric === 'LOAD_1') return 4
   if (metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS') return 10 * 1024 * 1024
   if (metric === 'CONTAINER_CPU_USAGE') return 90
@@ -66,6 +67,7 @@ function thresholdText(rule: AlertRule) {
   if (rule.metric === 'CUSTOM_METRIC') return `${rule.targetName || '未设置目标'} ≥ ${rule.threshold}`
   if (presenceTargetMetrics.includes(rule.metric)) return `${rule.targetName || '未设置目标'} 不存在或未运行`
   if (rule.metric === 'TEMPERATURE') return `${rule.threshold.toFixed(1)} °C`
+  if (rule.metric === 'FAN_RPM') return `${rule.threshold.toFixed(0)} RPM`
   if (rule.metric === 'LOAD_1') return rule.threshold.toFixed(2)
   if (rule.metric === 'DISK_READ_BPS' || rule.metric === 'DISK_WRITE_BPS') return rate(rule.threshold)
   if (rule.metric === 'NETWORK_RECV_BPS' || rule.metric === 'NETWORK_SENT_BPS') return rate(rule.threshold)
@@ -75,6 +77,7 @@ function thresholdText(rule: AlertRule) {
 function metricMax(metric: AlertMetric) {
   if (metric === 'DEVICE_OFFLINE') return 86400
   if (metric === 'TEMPERATURE') return 200
+  if (metric === 'FAN_RPM') return 100_000
   if (metric === 'LOAD_1') return 1024
   if (metric === 'SMART_FAILURES') return 100
   if (metric === 'INTEGRITY_CHANGES') return 512
@@ -89,7 +92,7 @@ function metricMin(metric: AlertMetric) {
 }
 
 function metricPrecision(metric: AlertMetric) {
-  return metric === 'DEVICE_OFFLINE' || metric === 'TCP_CONNECTIONS' || metric === 'SMART_FAILURES' || metric === 'INTEGRITY_CHANGES' || metric === 'FIREWALL_INACTIVE' || metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS' || metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS' ? 0 : metric === 'LOAD_1' ? 2 : 1
+  return metric === 'DEVICE_OFFLINE' || metric === 'TCP_CONNECTIONS' || metric === 'SMART_FAILURES' || metric === 'INTEGRITY_CHANGES' || metric === 'FIREWALL_INACTIVE' || metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS' || metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS' || metric === 'FAN_RPM' ? 0 : metric === 'LOAD_1' ? 2 : 1
 }
 
 function metricUnit(metric: AlertMetric) {
@@ -100,6 +103,7 @@ function metricUnit(metric: AlertMetric) {
   if (metric === 'FIREWALL_INACTIVE') return ''
   if (presenceTargetMetrics.includes(metric)) return ''
   if (metric === 'TEMPERATURE') return '°C'
+  if (metric === 'FAN_RPM') return 'RPM'
   if (metric === 'LOAD_1') return ''
   if (metric === 'DISK_READ_BPS' || metric === 'DISK_WRITE_BPS') return 'B/s'
   if (metric === 'NETWORK_RECV_BPS' || metric === 'NETWORK_SENT_BPS') return 'B/s'

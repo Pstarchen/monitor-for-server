@@ -6,6 +6,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.http.HttpResponse;
@@ -89,6 +91,66 @@ class ServiceProbeTest {
             assertThat(result.success()).isTrue();
             assertThat(result.error()).isNull();
             mysql.await();
+        }
+    }
+
+    @Test
+    void ftpProbeAcceptsWelcomeResponse() throws Exception {
+        try (ProtocolServer ftp = protocolServer(socket -> {
+            socket.getOutputStream().write("220 ftp.example ready\r\n".getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            socket.getInputStream().readNBytes(6);
+        })) {
+            ServiceCheck check = protocolCheck(ServiceCheck.Type.FTP, ftp.port());
+
+            ServiceProbe.Result result = new ServiceProbe().check(check);
+
+            assertThat(result.success()).isTrue();
+            assertThat(result.error()).isNull();
+            ftp.await();
+        }
+    }
+
+    @Test
+    void sftpProbeAcceptsSshBanner() throws Exception {
+        try (ProtocolServer sftp = protocolServer(socket -> {
+            socket.getOutputStream().write("SSH-2.0-OpenSSH_9.6\r\n".getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+        })) {
+            ServiceCheck check = protocolCheck(ServiceCheck.Type.SFTP, sftp.port());
+
+            ServiceProbe.Result result = new ServiceProbe().check(check);
+
+            assertThat(result.success()).isTrue();
+            assertThat(result.error()).isNull();
+            sftp.await();
+        }
+    }
+
+    @Test
+    void snmpProbeAcceptsGetResponse() throws Exception {
+        try (DatagramSocket snmp = new DatagramSocket(0)) {
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            Future<?> future = executor.submit(() -> {
+                try {
+                    byte[] request = new byte[2048];
+                    DatagramPacket received = new DatagramPacket(request, request.length);
+                    snmp.receive(received);
+                    assertThat(new String(received.getData(), 0, received.getLength(), StandardCharsets.US_ASCII)).contains("public");
+                    byte[] response = new byte[]{0x30, 0x03, (byte) 0xA2, 0x01, 0x00};
+                    snmp.send(new DatagramPacket(response, response.length, received.getAddress(), received.getPort()));
+                } catch (IOException exception) {
+                    throw new RuntimeException(exception);
+                }
+            });
+            ServiceCheck check = protocolCheck(ServiceCheck.Type.SNMP, snmp.getLocalPort());
+
+            ServiceProbe.Result result = new ServiceProbe().check(check, "public");
+
+            assertThat(result.success()).isTrue();
+            assertThat(result.error()).isNull();
+            future.get(2, TimeUnit.SECONDS);
+            executor.shutdownNow();
         }
     }
 

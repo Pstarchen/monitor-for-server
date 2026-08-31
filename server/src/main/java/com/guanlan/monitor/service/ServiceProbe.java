@@ -21,12 +21,19 @@ import java.util.Optional;
 @Component
 public class ServiceProbe {
     public Result check(ServiceCheck check) {
+        return check(check, "");
+    }
+
+    public Result check(ServiceCheck check, String credential) {
         long started = System.nanoTime();
         try {
             Result result = switch (check.getType()) {
                 case HTTP_GET -> http(check);
                 case ICMP_PING -> ping(check);
                 case TCPING -> tcp(check);
+                case FTP -> ftp(check);
+                case SFTP -> sftp(check);
+                case SNMP -> snmp(check, credential);
                 case REDIS_PING -> redis(check);
                 case POSTGRESQL -> postgres(check);
                 case MYSQL -> mysql(check);
@@ -85,6 +92,130 @@ public class ServiceProbe {
             socket.connect(new InetSocketAddress(hostPort.host(), hostPort.port()), check.getTimeoutMs());
             return new Result(true, 0, null, null, null);
         }
+    }
+
+    private Result ftp(ServiceCheck check) throws IOException {
+        HostPort hostPort = parseHostPort(check.getTarget());
+        try (Socket socket = connect(hostPort, check.getTimeoutMs())) {
+            String greeting = readLine(socket.getInputStream(), 4096);
+            boolean success = greeting.startsWith("220");
+            if (success) {
+                socket.getOutputStream().write("QUIT\r\n".getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+            }
+            return new Result(success, 0, null, success ? null : "FTP 未返回 220 欢迎响应", null);
+        }
+    }
+
+    private Result sftp(ServiceCheck check) throws IOException {
+        HostPort hostPort = parseHostPort(check.getTarget());
+        try (Socket socket = connect(hostPort, check.getTimeoutMs())) {
+            String banner = readLine(socket.getInputStream(), 255);
+            boolean success = banner.startsWith("SSH-");
+            return new Result(success, 0, null, success ? null : "SFTP 未返回 SSH 协议头", null);
+        }
+    }
+
+    private Result snmp(ServiceCheck check, String community) throws IOException {
+        HostPort hostPort = parseHostPort(check.getTarget());
+        String value = community == null || community.isBlank() ? "public" : community.trim();
+        if (value.length() > 255) throw new IOException("SNMP community 过长");
+        byte[] request = snmpGetRequest(value, 1, "1.3.6.1.2.1.1.1.0");
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setSoTimeout(check.getTimeoutMs());
+            socket.send(new DatagramPacket(request, request.length, InetAddress.getByName(hostPort.host()), hostPort.port()));
+            byte[] buffer = new byte[65535];
+            DatagramPacket response = new DatagramPacket(buffer, buffer.length);
+            socket.receive(response);
+            byte[] payload = java.util.Arrays.copyOf(response.getData(), response.getLength());
+            if (!hasBerTag(payload, 0xA2, 0)) return new Result(false, 0, null, "SNMP 未返回 GetResponse", null);
+            return new Result(true, 0, null, null, null);
+        }
+    }
+
+    private byte[] snmpGetRequest(String community, int requestId, String oid) {
+        byte[] version = berTlv(0x02, new byte[]{0x01});
+        byte[] communityValue = berTlv(0x04, community.getBytes(StandardCharsets.US_ASCII));
+        byte[] request = berTlv(0x02, integerBytes(requestId));
+        byte[] errorStatus = berTlv(0x02, new byte[]{0x00});
+        byte[] errorIndex = berTlv(0x02, new byte[]{0x00});
+        byte[] objectId = berTlv(0x06, oidBytes(oid));
+        byte[] nullValue = berTlv(0x05, new byte[0]);
+        byte[] variable = berTlv(0x30, concat(objectId, nullValue));
+        byte[] variableList = berTlv(0x30, variable);
+        byte[] pdu = berTlv(0xA0, concat(request, errorStatus, errorIndex, variableList));
+        return berTlv(0x30, concat(version, communityValue, pdu));
+    }
+
+    private boolean hasBerTag(byte[] bytes, int wanted, int depth) {
+        if (depth > 12) return false;
+        int offset = 0;
+        while (offset + 2 <= bytes.length) {
+            int tag = bytes[offset++] & 0xff;
+            int lengthByte = bytes[offset++] & 0xff;
+            int length;
+            if ((lengthByte & 0x80) == 0) {
+                length = lengthByte;
+            } else {
+                int count = lengthByte & 0x7f;
+                if (count == 0 || count > 4 || offset + count > bytes.length) return false;
+                length = 0;
+                for (int i = 0; i < count; i++) length = (length << 8) | (bytes[offset++] & 0xff);
+            }
+            if (length < 0 || offset + length > bytes.length) return false;
+            if (tag == wanted || ((tag & 0x20) != 0 && hasBerTag(java.util.Arrays.copyOfRange(bytes, offset, offset + length), wanted, depth + 1))) return true;
+            offset += length;
+        }
+        return false;
+    }
+
+    private byte[] berTlv(int tag, byte[] value) {
+        return concat(new byte[]{(byte) tag}, berLength(value.length), value);
+    }
+
+    private byte[] berLength(int length) {
+        if (length < 128) return new byte[]{(byte) length};
+        int bytes = 0;
+        int value = length;
+        while (value > 0) { bytes++; value >>= 8; }
+        byte[] result = new byte[bytes + 1];
+        result[0] = (byte) (0x80 | bytes);
+        for (int i = bytes; i > 0; i--) { result[i] = (byte) (length & 0xff); length >>= 8; }
+        return result;
+    }
+
+    private byte[] integerBytes(int value) {
+        if (value == 0) return new byte[]{0};
+        byte[] result = new byte[4];
+        int index = result.length;
+        while (value != 0) { result[--index] = (byte) value; value >>= 8; }
+        if ((result[index] & 0x80) != 0) result[--index] = 0;
+        return java.util.Arrays.copyOfRange(result, index, result.length);
+    }
+
+    private byte[] oidBytes(String oid) {
+        String[] parts = oid.split("\\.");
+        int first = Integer.parseInt(parts[0]) * 40 + Integer.parseInt(parts[1]);
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        output.write(first);
+        for (int i = 2; i < parts.length; i++) {
+            int value = Integer.parseInt(parts[i]);
+            byte[] encoded = new byte[5];
+            int index = encoded.length - 1;
+            encoded[index] = (byte) (value & 0x7f);
+            while ((value >>= 7) > 0) encoded[--index] = (byte) ((value & 0x7f) | 0x80);
+            output.write(encoded, index, encoded.length - index);
+        }
+        return output.toByteArray();
+    }
+
+    private byte[] concat(byte[]... values) {
+        int length = 0;
+        for (byte[] value : values) length += value.length;
+        byte[] result = new byte[length];
+        int offset = 0;
+        for (byte[] value : values) { System.arraycopy(value, 0, result, offset, value.length); offset += value.length; }
+        return result;
     }
 
     private Result redis(ServiceCheck check) throws IOException {
