@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity, Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut,
+  Activity, Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, ClipboardList, GitBranch, Globe2, Github, LogOut, Radar,
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
@@ -11,7 +11,7 @@ import { api, errorMessage } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import { loadBranding, siteName } from '@/lib/branding'
 import { dateTime, relativeTime } from '@/lib/format'
-import type { AlertEvent } from '@/types'
+import type { AlertEvent, Role } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,6 +44,7 @@ let active = true
 const navigation = [
   { label: '运行总览', path: '/dashboard', icon: CircleGauge },
   { label: '设备管理', path: '/devices', icon: Server },
+  { label: '网络发现', path: '/discovery', icon: Radar, roles: ['ADMIN', 'OPERATOR'] as Role[] },
   { label: '告警事件', path: '/alerts', icon: BellRing },
   { label: '告警规则', path: '/alert-rules', icon: SlidersHorizontal },
   { label: '维护静默', path: '/maintenance', icon: CalendarClock },
@@ -61,6 +62,7 @@ const administration = [
   { label: '审计日志', path: '/audit', icon: ClipboardList },
 ]
 const visibleAdministration = computed(() => auth.user?.role === 'ADMIN' ? administration : [])
+const visibleNavigation = computed(() => navigation.filter((item) => !item.roles || item.roles.includes(auth.user?.role as Role)))
 
 const pageTitle = computed(() => {
   if (route.path.startsWith('/devices/')) return '设备详情'
@@ -270,7 +272,7 @@ onBeforeUnmount(() => {
       </RouterLink>
       <nav class="side-navigation" aria-label="主导航">
         <p class="nav-caption">监控中心</p>
-        <RouterLink v-for="item in navigation" :key="item.path" :to="item.path" :class="{ active: isActive(item.path) }">
+        <RouterLink v-for="item in visibleNavigation" :key="item.path" :to="item.path" :class="{ active: isActive(item.path) }">
           <component :is="item.icon" :size="18" /><span>{{ item.label }}</span>
         </RouterLink>
         <template v-if="visibleAdministration.length">
@@ -295,7 +297,7 @@ onBeforeUnmount(() => {
       </div>
       <nav class="side-navigation" aria-label="移动端主导航">
         <p class="nav-caption">监控中心</p>
-        <RouterLink v-for="item in navigation" :key="item.path" :to="item.path" :class="{ active: isActive(item.path) }" @click="drawer = false">
+        <RouterLink v-for="item in visibleNavigation" :key="item.path" :to="item.path" :class="{ active: isActive(item.path) }" @click="drawer = false">
           <component :is="item.icon" :size="18" /><span>{{ item.label }}</span>
         </RouterLink>
         <template v-if="visibleAdministration.length">

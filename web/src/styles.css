@@ -239,6 +239,38 @@ p, h1, h2, h3 { margin: 0; }
 .topology-node-list strong, .topology-node-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topology-node-list strong { font-size: 12px; }
 .topology-node-list small, .topology-node-list b { color: var(--muted); font-size: 10px; font-weight: 400; }
+.discovery-layout { display: grid; grid-template-columns: minmax(280px, .75fr) minmax(0, 1.25fr); gap: 14px; margin-bottom: 14px; }
+.discovery-launch-panel, .discovery-history-panel, .discovery-results-panel { min-width: 0; }
+.discovery-launch-panel { padding: 16px; }
+.discovery-launch-panel .el-button { width: 100%; margin-top: 6px; }
+.discovery-safety { display: flex; align-items: flex-start; gap: 7px; margin-top: 16px; padding: 10px; color: var(--muted); background: var(--surface-subtle); font-size: 11px; line-height: 1.5; }
+.discovery-safety svg { flex: 0 0 auto; color: var(--info); }
+.discovery-task-list { display: grid; }
+.discovery-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-width: 0; padding: 13px 16px; border: 0; border-bottom: 1px solid var(--border); color: var(--foreground); background: transparent; text-align: left; cursor: pointer; }
+.discovery-task:last-child { border-bottom: 0; }
+.discovery-task:hover, .discovery-task.selected { background: var(--surface-subtle); }
+.discovery-task > span:first-child { min-width: 0; display: grid; gap: 4px; }
+.discovery-task strong, .discovery-task small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discovery-task strong { font-size: 13px; }
+.discovery-task small { color: var(--muted); font-size: 10px; }
+.discovery-task-meta { display: grid; justify-items: end; gap: 4px; white-space: nowrap; }
+.discovery-task-meta b { font-size: 12px; }
+.discovery-task-meta em { color: var(--muted); font-size: 10px; font-style: normal; }
+.discovery-task-meta em[data-status="SUCCEEDED"] { color: var(--success); }
+.discovery-task-meta em[data-status="FAILED"] { color: var(--danger); }
+.discovery-result-actions { display: flex; align-items: center; gap: 8px; }
+.discovery-progress { position: relative; width: 92px; height: 25px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); color: var(--muted); font-size: 10px; }
+.discovery-progress span { position: absolute; inset: 0 auto 0 0; background: var(--info-bg); }
+.discovery-progress { isolation: isolate; }
+.discovery-progress span { z-index: -1; }
+.discovery-table .cell-subtext { display: block; margin-top: 3px; }
+.discovery-reachable { color: var(--muted); font-size: 11px; }
+.discovery-reachable[data-reachable="true"] { color: var(--success); }
+.port-list { color: var(--foreground); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.discovery-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 20px 16px; color: var(--danger); font-size: 12px; }
+.discovery-waiting { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 160px; color: var(--muted); font-size: 12px; }
+@media (max-width: 900px) { .discovery-layout { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .discovery-result-actions { flex-wrap: wrap; justify-content: flex-end; } .discovery-result-actions .discovery-progress { order: 3; width: 100%; } .discovery-table th:nth-child(2), .discovery-table td:nth-child(2) { display: none; } }
 @media (max-width: 1024px) {
   .topology-workspace { grid-template-columns: 1fr; }
   .topology-mobile-list { display: block; }

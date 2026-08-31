@@ -286,6 +286,13 @@ onMounted(() => {
     const requestedId = typeof route.query.edit === 'string' ? route.query.edit : ''
     const requested = devices.value.find((device) => device.id === requestedId)
     if (requested) openEdit(requested)
+    const discoveredAddress = typeof route.query.add === 'string' ? route.query.add : ''
+    if (discoveredAddress && !requested) {
+      openCreate()
+      form.primaryIp = discoveredAddress
+      form.name = `发现设备 ${discoveredAddress}`
+      void router.replace({ query: { ...route.query, add: undefined } })
+    }
   })
   loadAgentBootstrap()
   window.addEventListener('guanlan:realtime', scheduleRefresh)

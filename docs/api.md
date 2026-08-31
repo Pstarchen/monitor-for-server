@@ -107,6 +107,30 @@
 
 接口只返回诊断元数据和可读原因，不返回 Agent 密钥、Webhook 或其他机密。
 
+## 网络发现
+
+网络发现由总控服务器执行，用于补齐尚未登记的私网节点。出于安全和资源保护，服务端只接受 RFC1918 私网 IPv4 的 `/24` 到 `/32` 网段（最多 256 个地址），每个任务最多 32 个端口，并限制单端口超时和并发数。网络发现仅接受浏览器登录会话，API Token 不能发起探测。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/discovery?limit=20` | ADMIN / OPERATOR | 查看最近扫描任务 |
+| POST | `/api/discovery` | ADMIN / OPERATOR | 异步创建扫描任务，返回 `202 Accepted` |
+| GET | `/api/discovery/{id}` | ADMIN / OPERATOR | 查看任务进度和发现结果 |
+| POST | `/api/discovery/{id}/cancel` | ADMIN / OPERATOR | 取消排队或运行中的任务 |
+
+创建请求示例：
+
+```json
+{
+  "cidr": "192.168.1.0/24",
+  "ports": [22, 80, 443, 8080],
+  "timeoutMs": 500,
+  "concurrency": 16
+}
+```
+
+结果只包含主机可达或至少一个端口可连接的地址；控制台可复制地址或带入设备登记表单，后续仍需配置 Agent 密钥并完成首次上报。
+
 ## 公开品牌
 
 | 方法 | 路径 | 权限 | 说明 |

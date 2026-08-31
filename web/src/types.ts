@@ -625,3 +625,37 @@ export interface PublicOverview {
   devices: PublicDevice[]
   services: PublicServiceCheck[]
 }
+
+export type DiscoveryScanStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED'
+
+export interface DiscoveryScan {
+  id: number
+  cidr: string
+  ports: number[]
+  timeoutMs: number
+  concurrency: number
+  status: DiscoveryScanStatus
+  totalHosts: number
+  scannedHosts: number
+  discoveredHosts: number
+  createdBy: string
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  error: string | null
+}
+
+export interface DiscoveryResult {
+  id: number
+  address: string
+  hostname: string | null
+  reachable: boolean
+  openPorts: number[]
+  latencyMs: number | null
+  discoveredAt: string
+}
+
+export interface DiscoveryDetail {
+  scan: DiscoveryScan
+  results: DiscoveryResult[]
+}

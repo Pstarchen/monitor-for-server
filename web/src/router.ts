@@ -4,6 +4,7 @@ import { safeLocalPath } from '@/lib/format'
 import { getSetupStatus } from '@/lib/api'
 import { setupRouteRedirect } from '@/lib/setup-flow'
 import AppShell from '@/components/AppShell.vue'
+import type { Role } from '@/types'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -17,6 +18,7 @@ const router = createRouter({
       path: '/', component: AppShell, children: [
         { path: 'dashboard', name: 'dashboard', component: () => import('@/views/DashboardView.vue') },
         { path: 'devices', name: 'devices', component: () => import('@/views/DevicesView.vue') },
+        { path: 'discovery', name: 'discovery', component: () => import('@/views/DiscoveryView.vue'), meta: { roles: ['ADMIN', 'OPERATOR'] as Role[] } },
         { path: 'devices/:id', name: 'device-detail', component: () => import('@/views/DeviceDetailView.vue') },
         { path: 'alerts', name: 'alerts', component: () => import('@/views/AlertsView.vue') },
         { path: 'alert-rules', name: 'alert-rules', component: () => import('@/views/AlertRulesView.vue') },
@@ -59,6 +61,8 @@ router.beforeEach(async (to) => {
   if (!to.meta.public && !auth.user) return { name: 'login', query: { redirect: safeLocalPath(to.fullPath) } }
   if (to.name === 'login' && auth.user) return '/dashboard'
   if (to.meta.role && auth.user?.role !== to.meta.role) return '/dashboard'
+  const roles = to.meta.roles as Role[] | undefined
+  if (roles && (!auth.user || !roles.includes(auth.user.role))) return '/dashboard'
 })
 
 export default router
