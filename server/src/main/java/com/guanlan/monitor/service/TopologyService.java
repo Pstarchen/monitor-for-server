@@ -30,7 +30,7 @@ public class TopologyService {
     @Transactional(readOnly = true)
     public TopologyDtos.View build(Set<String> visibleDeviceIds) {
         List<DeviceDtos.View> allDevices = devices.list().stream()
-                .filter(device -> visibleDeviceIds == null || visibleDeviceIds.isEmpty() || visibleDeviceIds.contains(device.id()))
+                .filter(device -> visibleDeviceIds == null || visibleDeviceIds.contains(device.id()))
                 .toList();
         Map<String, DeviceDtos.View> byIdentifier = new HashMap<>();
         List<TopologyDtos.Node> nodes = new ArrayList<>();

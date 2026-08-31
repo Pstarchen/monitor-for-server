@@ -1,12 +1,14 @@
 package com.guanlan.monitor.api.dto;
 
 import com.guanlan.monitor.domain.UserAccount;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
+import java.util.List;
 
 public final class UserDtos {
     private UserDtos() {}
@@ -33,4 +35,23 @@ public final class UserDtos {
 
     public record View(Long id, String username, String displayName, UserAccount.Role role, boolean enabled,
                        boolean twoFactorEnabled, Instant createdAt) {}
+
+    public record DevicePermissionView(
+            String deviceId,
+            String deviceName,
+            boolean canView,
+            boolean canManage,
+            boolean canAlert,
+            boolean canTask
+    ) {}
+
+    public record DevicePermissionItem(
+            @NotBlank String deviceId,
+            boolean canView,
+            boolean canManage,
+            boolean canAlert,
+            boolean canTask
+    ) {}
+
+    public record DevicePermissionRequest(@NotNull @Size(max = 1000) List<@Valid DevicePermissionItem> permissions) {}
 }

@@ -8,6 +8,7 @@ import com.guanlan.monitor.domain.AgentTask;
 import com.guanlan.monitor.security.ApiTokenPrincipal;
 import com.guanlan.monitor.service.AgentTaskService;
 import com.guanlan.monitor.service.DeviceService;
+import com.guanlan.monitor.service.DeviceAccessService;
 import com.guanlan.monitor.service.McpRateLimiter;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class McpController {
     private static final int MAX_REQUEST_BYTES = 8 * 1024 * 1024;
     private final ObjectMapper mapper;
     private final DeviceService devices;
+    private final DeviceAccessService access;
     private final AgentTaskService tasks;
     private final McpRateLimiter rateLimiter;
     private final com.guanlan.monitor.service.SettingService settings;
@@ -78,8 +80,8 @@ public class McpController {
         try {
             Map<String, Object> result = switch (name) {
                 case "meta.whoami" -> whoami(principal);
-                case "server.list" -> serverList(principal, arguments);
-                case "server.get" -> serverGet(principal, arguments);
+                case "server.list" -> serverList(principal, authentication, arguments);
+                case "server.get" -> serverGet(principal, authentication, arguments);
                 case "server.exec" -> serverExec(principal, authentication, arguments);
                 case "fs.list" -> fileTask(principal, authentication, arguments, AgentTask.Operation.FILE_LIST, "nezha:server:read");
                 case "fs.read" -> fileTask(principal, authentication, arguments, AgentTask.Operation.FILE_READ, "nezha:server:read");
@@ -99,21 +101,21 @@ public class McpController {
         return Map.of("username", principal.getUsername(), "tokenId", principal.tokenId(), "scopes", principal.scopes(), "serverIds", principal.serverIds(), "admin", principal.getAuthorities().stream().anyMatch(value -> value.getAuthority().equals("ROLE_ADMIN")));
     }
 
-    private Map<String, Object> serverList(ApiTokenPrincipal principal, JsonNode arguments) throws McpToolException {
+    private Map<String, Object> serverList(ApiTokenPrincipal principal, Authentication authentication, JsonNode arguments) throws McpToolException {
         requireScope(principal, "nezha:inventory:read");
         boolean onlineOnly = arguments.path("online_only").asBoolean(false);
         List<Map<String, Object>> result = new ArrayList<>();
         for (DeviceDtos.View device : devices.list()) {
-            if (!allowed(principal, device.id()) || (onlineOnly && device.status() != com.guanlan.monitor.domain.Device.Status.ONLINE)) continue;
+            if (!access.canView(authentication, device.id()) || (onlineOnly && device.status() != com.guanlan.monitor.domain.Device.Status.ONLINE)) continue;
             result.add(Map.of("id", device.id(), "name", device.name(), "status", device.status().name(), "os", value(device.os()), "lastSeenAt", value(device.lastSeenAt())));
         }
         return Map.of("servers", result);
     }
 
-    private Map<String, Object> serverGet(ApiTokenPrincipal principal, JsonNode arguments) throws McpToolException {
+    private Map<String, Object> serverGet(ApiTokenPrincipal principal, Authentication authentication, JsonNode arguments) throws McpToolException {
         requireScope(principal, "nezha:server:read");
         String id = text(arguments.get("server_id"));
-        if (id.isBlank() || !allowed(principal, id)) throw new McpToolException("服务器不在 Token 白名单内");
+        if (id.isBlank() || !access.canView(authentication, id)) throw new McpToolException("无权访问该服务器");
         DeviceDtos.View device = devices.get(id);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("id", device.id()); result.put("name", device.name()); result.put("status", device.status().name()); result.put("hostname", value(device.hostname())); result.put("os", value(device.os())); result.put("architecture", value(device.architecture())); result.put("lastSeenAt", value(device.lastSeenAt())); result.put("latest", value(device.latest()));
@@ -124,7 +126,7 @@ public class McpController {
         requireScope(principal, "nezha:server:exec");
         String id = text(arguments.get("server_id"));
         String command = text(arguments.get("cmd"));
-        if (id.isBlank() || command.isBlank() || !allowed(principal, id)) throw new McpToolException("服务器、命令或白名单无效");
+        if (id.isBlank() || command.isBlank() || !access.canTask(authentication, id)) throw new McpToolException("服务器、命令或设备权限无效");
         List<String> args = new ArrayList<>();
         arguments.path("args").forEach(value -> args.add(value.asText()));
         int timeout = arguments.path("timeout_seconds").asInt(30);
@@ -142,7 +144,7 @@ public class McpController {
         requireScope(principal, scope);
         String id = text(arguments.get("server_id"));
         String path = text(arguments.get("path"));
-        if (id.isBlank() || path.isBlank() || !allowed(principal, id)) throw new McpToolException("服务器、路径或白名单无效");
+        if (id.isBlank() || path.isBlank() || !access.canTask(authentication, id)) throw new McpToolException("服务器、路径或设备权限无效");
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("path", path);
         switch (operation) {
@@ -196,7 +198,6 @@ public class McpController {
 
     private Map<String, Object> tool(String name, String description, Map<String, Object> schema) { return Map.of("name", name, "description", description, "inputSchema", schema, "outputSchema", Map.of("type", "object")); }
     private Map<String, Object> objectSchema(Map<String, Object> properties, List<String> required) { return Map.of("type", "object", "properties", properties, "required", required); }
-    private boolean allowed(ApiTokenPrincipal principal, String id) { return principal.serverIds().isEmpty() || principal.serverIds().contains(id); }
     private void requireScope(ApiTokenPrincipal principal, String scope) throws McpToolException { if (!principal.allowsScope(scope)) throw new McpToolException("API Token 缺少所需权限: " + scope); }
     private Object value(Object value) { return value == null ? "" : value; }
     private String text(JsonNode node) { return node == null || node.isNull() ? "" : node.asText("").trim(); }

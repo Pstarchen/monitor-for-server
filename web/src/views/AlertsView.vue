@@ -24,7 +24,9 @@ const acknowledging = ref<number | null>(null)
 const acknowledgingMany = ref(false)
 const selectedIds = ref<number[]>([])
 const deviceId = ref('')
-const canAcknowledge = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
+const canAcknowledge = computed(() => auth.user?.role === 'ADMIN'
+  || (auth.user?.role === 'OPERATOR' && auth.devicePermissions.some((permission) => permission.canAlert)))
+const canAcknowledgeAlert = (alert: AlertEvent) => canAcknowledge.value && auth.canManageAlerts(alert.deviceId)
 const filtered = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return alerts.value.filter((alert) => (!status.value || alert.status === status.value)
@@ -34,7 +36,7 @@ const filtered = computed(() => {
 })
 const openCount = computed(() => alerts.value.filter((alert) => alert.status === 'OPEN').length)
 const acknowledgedCount = computed(() => alerts.value.filter((alert) => alert.status === 'ACKNOWLEDGED').length)
-const selectableIds = computed(() => filtered.value.filter((alert) => alert.status === 'OPEN').map((alert) => alert.id))
+const selectableIds = computed(() => filtered.value.filter((alert) => alert.status === 'OPEN' && canAcknowledgeAlert(alert)).map((alert) => alert.id))
 const selectedOpenIds = computed(() => selectedIds.value.filter((id) => selectableIds.value.includes(id)))
 const allSelected = computed(() => selectableIds.value.length > 0 && selectableIds.value.every((id) => selectedIds.value.includes(id)))
 
@@ -57,6 +59,8 @@ async function load(background = false) {
 }
 
 function toggleSelected(id: number, checked: boolean) {
+  const alert = alerts.value.find((item) => item.id === id)
+  if (!alert || !canAcknowledgeAlert(alert)) return
   if (!checked) selectedIds.value = selectedIds.value.filter((value) => value !== id)
   else if (!selectedIds.value.includes(id)) selectedIds.value = [...selectedIds.value, id]
 }
@@ -126,7 +130,7 @@ useVisibilityPolling(() => load(true))
     <LoadingState v-if="loading" />
     <div v-else-if="error" class="panel state-panel"><EmptyState title="告警加载失败" :description="error"><el-button @click="load">重新加载</el-button></EmptyState></div>
     <article v-else class="panel">
-      <div v-if="filtered.length" class="table-wrap"><table class="data-table alert-table"><thead><tr><th v-if="canAcknowledge" class="select-column"><button class="table-select-all" type="button" :aria-label="allSelected ? '取消全选待处理告警' : '全选待处理告警'" :title="allSelected ? '取消全选' : '全选'" @click="toggleAll(!allSelected)"><SquareCheck v-if="allSelected" :size="17" /><Square v-else :size="17" /></button></th><th>级别</th><th>设备 / 规则</th><th>告警内容</th><th>状态</th><th>通知</th><th>触发时间</th><th>处理信息</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="alert in filtered" :key="alert.id"><td v-if="canAcknowledge" class="select-column"><input v-if="alert.status === 'OPEN'" type="checkbox" :checked="selectedIds.includes(alert.id)" :aria-label="`选择 ${alert.deviceName} 的告警`" @change="toggleSelected(alert.id, ($event.target as HTMLInputElement).checked)" /></td><td><StatusBadge :status="alert.severity" /></td><td><strong>{{ alert.deviceName }}</strong><small>{{ alert.ruleName }}</small></td><td><span class="alert-message">{{ alert.message }}</span><small>触发值 {{ alert.value.toFixed(1) }}</small></td><td><StatusBadge :status="alert.status" /></td><td><StatusBadge v-if="alert.notificationSuppressed" status="SCHEDULED" /><span v-else-if="alert.notifiedAt">已发送<small>{{ dateTime(alert.notifiedAt) }}</small></span><span v-else>--</span></td><td>{{ dateTime(alert.startedAt) }}</td><td><span v-if="alert.acknowledgedBy">{{ alert.acknowledgedBy }}</span><small v-if="alert.acknowledgedAt">{{ dateTime(alert.acknowledgedAt) }}</small><span v-if="alert.resolvedAt" class="resolved-copy">恢复于 {{ dateTime(alert.resolvedAt) }}</span><span v-if="!alert.acknowledgedAt && !alert.resolvedAt">--</span></td><td class="row-actions"><el-button v-if="canAcknowledge && alert.status === 'OPEN'" size="small" :loading="acknowledging === alert.id" @click="acknowledge(alert)"><CheckCheck :size="15" />确认</el-button></td></tr></tbody></table></div>
+      <div v-if="filtered.length" class="table-wrap"><table class="data-table alert-table"><thead><tr><th v-if="canAcknowledge" class="select-column"><button class="table-select-all" type="button" :aria-label="allSelected ? '取消全选待处理告警' : '全选待处理告警'" :title="allSelected ? '取消全选' : '全选'" @click="toggleAll(!allSelected)"><SquareCheck v-if="allSelected" :size="17" /><Square v-else :size="17" /></button></th><th>级别</th><th>设备 / 规则</th><th>告警内容</th><th>状态</th><th>通知</th><th>触发时间</th><th>处理信息</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="alert in filtered" :key="alert.id"><td v-if="canAcknowledge" class="select-column"><input v-if="alert.status === 'OPEN' && canAcknowledgeAlert(alert)" type="checkbox" :checked="selectedIds.includes(alert.id)" :aria-label="`选择 ${alert.deviceName} 的告警`" @change="toggleSelected(alert.id, ($event.target as HTMLInputElement).checked)" /></td><td><StatusBadge :status="alert.severity" /></td><td><strong>{{ alert.deviceName }}</strong><small>{{ alert.ruleName }}</small></td><td><span class="alert-message">{{ alert.message }}</span><small>触发值 {{ alert.value.toFixed(1) }}</small></td><td><StatusBadge :status="alert.status" /></td><td><StatusBadge v-if="alert.notificationSuppressed" status="SCHEDULED" /><span v-else-if="alert.notifiedAt">已发送<small>{{ dateTime(alert.notifiedAt) }}</small></span><span v-else>--</span></td><td>{{ dateTime(alert.startedAt) }}</td><td><span v-if="alert.acknowledgedBy">{{ alert.acknowledgedBy }}</span><small v-if="alert.acknowledgedAt">{{ dateTime(alert.acknowledgedAt) }}</small><span v-if="alert.resolvedAt" class="resolved-copy">恢复于 {{ dateTime(alert.resolvedAt) }}</span><span v-if="!alert.acknowledgedAt && !alert.resolvedAt">--</span></td><td class="row-actions"><el-button v-if="canAcknowledgeAlert(alert) && alert.status === 'OPEN'" size="small" :loading="acknowledging === alert.id" @click="acknowledge(alert)"><CheckCheck :size="15" />确认</el-button></td></tr></tbody></table></div>
       <EmptyState v-else title="没有匹配的告警" description="当前筛选范围内没有需要展示的事件。"><BellRing :size="1" /></EmptyState>
     </article>
   </section>

@@ -30,6 +30,7 @@ public final class MaintenanceDtos {
             String deviceName,
             Long ruleId,
             String ruleName,
+            String scopeDeviceId,
             Instant startsAt,
             Instant endsAt,
             String timezone,

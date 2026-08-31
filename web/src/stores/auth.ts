@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api, clearCsrf, refreshCsrf } from '@/lib/api'
-import type { User } from '@/types'
+import { canUseDevice } from '@/lib/device-permissions'
+import type { DevicePermission, User } from '@/types'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
+  const devicePermissions = ref<DevicePermission[]>([])
   const initialized = ref(false)
 
   async function initialize() {
@@ -12,8 +14,10 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await refreshCsrf()
       user.value = (await api.get<User>('/auth/me')).data
+      await loadDevicePermissions()
     } catch {
       user.value = null
+      devicePermissions.value = []
     } finally {
       initialized.value = true
     }
@@ -26,10 +30,12 @@ export const useAuthStore = defineStore('auth', () => {
     })
     if (response.data.requiresTwoFactor) {
       user.value = null
+      devicePermissions.value = []
       initialized.value = false
     } else {
       user.value = response.data.user
       initialized.value = true
+      await loadDevicePermissions()
     }
     await refreshCsrf()
     return { returnTo: response.data.returnTo, requiresTwoFactor: response.data.requiresTwoFactor }
@@ -39,6 +45,7 @@ export const useAuthStore = defineStore('auth', () => {
     const response = await api.post<{ user: User; returnTo: string; requiresTwoFactor: false }>('/auth/2fa/verify', { code, returnTo })
     user.value = response.data.user
     initialized.value = true
+    await loadDevicePermissions()
     await refreshCsrf()
     return response.data.returnTo
   }
@@ -46,8 +53,10 @@ export const useAuthStore = defineStore('auth', () => {
   async function reload() {
     try {
       user.value = (await api.get<User>('/auth/me')).data
+      await loadDevicePermissions()
     } catch {
       user.value = null
+      devicePermissions.value = []
     }
     initialized.value = true
     return user.value
@@ -56,6 +65,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function logout() {
     await api.post('/auth/logout')
     user.value = null
+    devicePermissions.value = []
     clearCsrf()
   }
 
@@ -70,5 +80,22 @@ export const useAuthStore = defineStore('auth', () => {
     return response.data
   }
 
-  return { user, initialized, initialize, login, verifyTwoFactor, reload, logout, updateProfile }
+  async function loadDevicePermissions() {
+    if (!user.value) {
+      devicePermissions.value = []
+      return
+    }
+    try {
+      devicePermissions.value = (await api.get<DevicePermission[]>('/device-access/me')).data
+    } catch {
+      devicePermissions.value = []
+    }
+  }
+
+  const canViewDevice = (deviceId: string) => canUseDevice(user.value, devicePermissions.value, deviceId, 'canView')
+  const canManageDevice = (deviceId: string) => canUseDevice(user.value, devicePermissions.value, deviceId, 'canManage')
+  const canManageAlerts = (deviceId: string) => canUseDevice(user.value, devicePermissions.value, deviceId, 'canAlert')
+  const canRunTasks = (deviceId: string) => canUseDevice(user.value, devicePermissions.value, deviceId, 'canTask')
+
+  return { user, devicePermissions, initialized, initialize, login, verifyTwoFactor, reload, logout, updateProfile, loadDevicePermissions, canViewDevice, canManageDevice, canManageAlerts, canRunTasks }
 })

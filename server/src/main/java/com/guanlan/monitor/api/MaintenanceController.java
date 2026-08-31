@@ -1,7 +1,7 @@
 package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.api.dto.MaintenanceDtos;
-import com.guanlan.monitor.security.ApiTokenPrincipal;
+import com.guanlan.monitor.service.DeviceAccessService;
 import com.guanlan.monitor.service.MaintenanceWindowService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,21 +17,21 @@ import java.util.List;
 @RequestMapping("/api/maintenance-windows")
 public class MaintenanceController {
     private final MaintenanceWindowService maintenance;
+    private final DeviceAccessService access;
 
     @GetMapping
     List<MaintenanceDtos.WindowView> list(Authentication authentication) {
         List<MaintenanceDtos.WindowView> result = maintenance.list();
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
-            result = result.stream().filter(window -> window.deviceId() == null || principal.serverIds().contains(window.deviceId())).toList();
-        }
-        return result;
+        var visible = access.visibleDeviceIds(authentication);
+        return visible == null ? result : result.stream()
+                .filter(window -> window.scopeDeviceId() == null || visible.contains(window.scopeDeviceId())).toList();
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     MaintenanceDtos.WindowView create(Authentication authentication, @Valid @RequestBody MaintenanceDtos.WindowRequest request) {
-        requireTarget(authentication, request.deviceId());
+        access.requireAlertScope(authentication, maintenance.deviceId(request));
         return maintenance.create(request);
     }
 
@@ -39,7 +39,8 @@ public class MaintenanceController {
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     MaintenanceDtos.WindowView update(Authentication authentication, @PathVariable Long id,
                                       @Valid @RequestBody MaintenanceDtos.WindowRequest request) {
-        requireTarget(authentication, request.deviceId());
+        access.requireAlertScope(authentication, maintenance.deviceId(id));
+        access.requireAlertScope(authentication, maintenance.deviceId(request));
         return maintenance.update(id, request);
     }
 
@@ -47,15 +48,7 @@ public class MaintenanceController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     void delete(Authentication authentication, @PathVariable Long id) {
-        requireTarget(authentication, maintenance.deviceId(id));
+        access.requireAlertScope(authentication, maintenance.deviceId(id));
         maintenance.delete(id);
-    }
-
-    private void requireTarget(Authentication authentication, String deviceId) {
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal
-                && !principal.serverIds().isEmpty()
-                && (deviceId == null || !principal.serverIds().contains(deviceId))) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "API Token 未获准管理该维护窗口");
-        }
     }
 }

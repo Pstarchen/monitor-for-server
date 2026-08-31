@@ -1,7 +1,7 @@
 package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.api.dto.DeviceNoteDtos;
-import com.guanlan.monitor.security.ApiTokenPrincipal;
+import com.guanlan.monitor.service.DeviceAccessService;
 import com.guanlan.monitor.service.DeviceNoteService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -16,12 +16,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DeviceNoteController {
     private final DeviceNoteService notes;
+    private final DeviceAccessService access;
 
     @GetMapping("/api/devices/{deviceId}/notes")
     List<DeviceNoteDtos.View> list(@PathVariable String deviceId,
                                    @RequestParam(defaultValue = "50") int limit,
                                    Authentication authentication) {
-        requireAccess(authentication, deviceId);
+        access.requireView(authentication, deviceId);
         return notes.list(deviceId, limit);
     }
 
@@ -29,7 +30,7 @@ public class DeviceNoteController {
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     DeviceNoteDtos.View create(@PathVariable String deviceId, @Valid @RequestBody DeviceNoteDtos.CreateRequest request, Authentication authentication) {
-        requireAccess(authentication, deviceId);
+        access.requireManage(authentication, deviceId);
         return notes.create(deviceId, request);
     }
 
@@ -37,23 +38,14 @@ public class DeviceNoteController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     void delete(@PathVariable String deviceId, @PathVariable Long id, Authentication authentication) {
-        requireAccess(authentication, deviceId);
+        access.requireManage(authentication, deviceId);
         notes.delete(deviceId, id);
     }
 
     @GetMapping("/api/device-notes/recent")
     List<DeviceNoteDtos.View> recent(@RequestParam(defaultValue = "8") int limit, Authentication authentication) {
         List<DeviceNoteDtos.View> result = notes.recent(limit);
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
-            result = result.stream().filter(note -> principal.serverIds().contains(note.deviceId())).toList();
-        }
-        return result;
-    }
-
-    private void requireAccess(Authentication authentication, String deviceId) {
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal
-                && !principal.serverIds().isEmpty() && !principal.serverIds().contains(deviceId)) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "API Token 未获准访问该服务器");
-        }
+        var visible = access.visibleDeviceIds(authentication);
+        return visible == null ? result : result.stream().filter(note -> visible.contains(note.deviceId())).toList();
     }
 }

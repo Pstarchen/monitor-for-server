@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.security.core.Authentication;
-import com.guanlan.monitor.security.ApiTokenPrincipal;
+import com.guanlan.monitor.service.DeviceAccessService;
 
 import java.util.Comparator;
 import java.util.List;
@@ -24,11 +24,14 @@ public class DashboardController {
     private final AlertEventRepository alertRepository;
     private final DeviceService deviceService;
     private final AlertService alertService;
+    private final DeviceAccessService access;
 
     @GetMapping
     DashboardView get(Authentication authentication) {
         List<DeviceDtos.View> allDevices = deviceService.list();
-        List<DeviceDtos.View> devices = allDevices.stream().filter(device -> visible(authentication, device.id())).toList();
+        var visible = access.visibleDeviceIds(authentication);
+        List<DeviceDtos.View> devices = visible == null ? allDevices
+                : allDevices.stream().filter(device -> visible.contains(device.id())).toList();
         List<DeviceDtos.View> measured = devices.stream()
                 .filter(device -> device.status() == Device.Status.ONLINE && device.latest() != null).toList();
         List<DeviceDtos.View> top = measured.stream()
@@ -50,15 +53,9 @@ public class DashboardController {
         );
     }
 
-    private boolean visible(Authentication authentication, String deviceId) {
-        return !(authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal
-                && !principal.serverIds().isEmpty())
-                || ((ApiTokenPrincipal) authentication.getPrincipal()).serverIds().contains(deviceId);
-    }
-
     private long activeAlerts(Authentication authentication, List<DeviceDtos.View> devices) {
         List<AlertEvent.Status> active = List.of(AlertEvent.Status.OPEN, AlertEvent.Status.ACKNOWLEDGED);
-        if (!(authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal) || principal.serverIds().isEmpty()) {
+        if (access.visibleDeviceIds(authentication) == null) {
             return alertRepository.countByStatusIn(active);
         }
         List<String> ids = devices.stream().map(DeviceDtos.View::id).toList();
@@ -67,9 +64,8 @@ public class DashboardController {
 
     private List<AlertDtos.EventView> recentAlerts(Authentication authentication) {
         List<AlertDtos.EventView> alerts = alertService.listEvents(500);
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
-            alerts = alerts.stream().filter(alert -> principal.serverIds().contains(alert.deviceId())).toList();
-        }
+        var visible = access.visibleDeviceIds(authentication);
+        if (visible != null) alerts = alerts.stream().filter(alert -> visible.contains(alert.deviceId())).toList();
         return alerts.stream().limit(6).toList();
     }
 

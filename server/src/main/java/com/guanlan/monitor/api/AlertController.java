@@ -2,6 +2,7 @@ package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.api.dto.AlertDtos;
 import com.guanlan.monitor.service.AlertService;
+import com.guanlan.monitor.service.DeviceAccessService;
 import com.guanlan.monitor.domain.AlertEvent;
 import com.guanlan.monitor.domain.AlertRule;
 import jakarta.validation.Valid;
@@ -17,6 +18,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AlertController {
     private final AlertService alerts;
+    private final DeviceAccessService access;
 
     @GetMapping("/api/alerts")
     List<AlertDtos.EventView> events(@RequestParam(defaultValue = "100") int limit,
@@ -24,10 +26,10 @@ public class AlertController {
                                      @RequestParam(required = false) AlertRule.Severity severity,
                                      @RequestParam(required = false) String deviceId,
                                      Authentication authentication) {
-        List<AlertDtos.EventView> result = alerts.listEvents(limit, status, severity, deviceId);
-        if (authentication != null && authentication.getPrincipal() instanceof com.guanlan.monitor.security.ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
-            result = result.stream().filter(event -> principal.serverIds().contains(event.deviceId())).toList();
-        }
+        if (deviceId != null && !deviceId.isBlank()) access.requireView(authentication, deviceId);
+        List<AlertDtos.EventView> result = alerts.listEvents(500, status, severity, deviceId);
+        var visible = access.visibleDeviceIds(authentication);
+        if (visible != null) result = result.stream().filter(event -> visible.contains(event.deviceId())).toList();
         return result.stream().limit(Math.min(Math.max(limit, 1), 500)).toList();
     }
 
@@ -47,36 +49,32 @@ public class AlertController {
     }
 
     private void requireAlertAccess(Authentication authentication, List<Long> ids) {
-        if (authentication == null || !(authentication.getPrincipal() instanceof com.guanlan.monitor.security.ApiTokenPrincipal principal)
-                || principal.serverIds().isEmpty()) return;
         for (Long id : ids) {
-            if (!principal.serverIds().contains(alerts.deviceId(id))) {
-                throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "API Token 未获准访问该服务器");
-            }
+            access.requireAlert(authentication, alerts.deviceId(id));
         }
     }
 
     @GetMapping("/api/alert-rules")
     List<AlertDtos.RuleView> rules(Authentication authentication) {
         List<AlertDtos.RuleView> result = alerts.listRules();
-        if (authentication != null && authentication.getPrincipal() instanceof com.guanlan.monitor.security.ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
-            result = result.stream().filter(rule -> rule.deviceId() == null || principal.serverIds().contains(rule.deviceId())).toList();
-        }
-        return result;
+        var visible = access.visibleDeviceIds(authentication);
+        return visible == null ? result : result.stream()
+                .filter(rule -> rule.deviceId() == null || visible.contains(rule.deviceId())).toList();
     }
 
     @PostMapping("/api/alert-rules")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     AlertDtos.RuleView create(Authentication authentication, @Valid @RequestBody AlertDtos.RuleRequest request) {
-        requireRuleTarget(authentication, request.deviceId());
+        access.requireAlertScope(authentication, request.deviceId());
         return alerts.createRule(request);
     }
 
     @PutMapping("/api/alert-rules/{id}")
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     AlertDtos.RuleView update(Authentication authentication, @PathVariable Long id, @Valid @RequestBody AlertDtos.RuleRequest request) {
-        requireRuleTarget(authentication, request.deviceId());
+        access.requireAlertScope(authentication, alerts.ruleDeviceId(id));
+        access.requireAlertScope(authentication, request.deviceId());
         return alerts.updateRule(id, request);
     }
 
@@ -84,15 +82,7 @@ public class AlertController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     void delete(Authentication authentication, @PathVariable Long id) {
-        requireRuleTarget(authentication, alerts.ruleDeviceId(id));
+        access.requireAlertScope(authentication, alerts.ruleDeviceId(id));
         alerts.deleteRule(id);
-    }
-
-    private void requireRuleTarget(Authentication authentication, String deviceId) {
-        if (authentication != null && authentication.getPrincipal() instanceof com.guanlan.monitor.security.ApiTokenPrincipal principal
-                && !principal.serverIds().isEmpty()
-                && (deviceId == null || !principal.serverIds().contains(deviceId))) {
-            throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "API Token 未获准访问该服务器规则");
-        }
     }
 }

@@ -17,6 +17,15 @@ export interface User {
   createdAt: string
 }
 
+export interface DevicePermission {
+  deviceId: string
+  deviceName: string
+  canView: boolean
+  canManage: boolean
+  canAlert: boolean
+  canTask: boolean
+}
+
 export interface DiskMetric {
   device: string
   mountpoint: string
@@ -274,6 +283,7 @@ export interface MaintenanceWindow {
   deviceName: string | null
   ruleId: number | null
   ruleName: string | null
+  scopeDeviceId: string | null
   startsAt: string
   endsAt: string
   timezone: string

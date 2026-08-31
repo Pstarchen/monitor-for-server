@@ -9,12 +9,14 @@ import com.guanlan.monitor.domain.DdnsConfig;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.domain.SystemSetting;
 import com.guanlan.monitor.domain.UserAccount;
+import com.guanlan.monitor.domain.UserDevicePermission;
 import com.guanlan.monitor.repository.AlertEventRepository;
 import com.guanlan.monitor.repository.AgentTaskRepository;
 import com.guanlan.monitor.repository.DeviceRepository;
 import com.guanlan.monitor.repository.DdnsConfigRepository;
 import com.guanlan.monitor.repository.SystemSettingRepository;
 import com.guanlan.monitor.repository.UserAccountRepository;
+import com.guanlan.monitor.repository.UserDevicePermissionRepository;
 import com.guanlan.monitor.service.AlertService;
 import com.guanlan.monitor.service.ApiTokenService;
 import com.guanlan.monitor.service.DeviceService;
@@ -58,6 +60,7 @@ class AuthAndAgentIntegrationTest {
     @Autowired MaintenanceJobs maintenanceJobs;
     @Autowired SystemSettingRepository settings;
     @Autowired UserAccountRepository userAccounts;
+    @Autowired UserDevicePermissionRepository devicePermissions;
     @Autowired PasswordEncoder passwordEncoder;
     @Autowired TotpService totp;
 
@@ -119,6 +122,7 @@ class AuthAndAgentIntegrationTest {
     @WithMockUser(username = "operator", roles = "OPERATOR")
     void deviceAssetsAndNotesArePersistedAndScopedToDevice() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("asset-node", "lab", "tests", "127.0.0.31"));
+        grantAccess("operator", UserAccount.Role.OPERATOR, credential.device().id(), true, false, false);
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/devices/" + credential.device().id())
                         .with(csrf()).contentType(MediaType.APPLICATION_JSON)
@@ -145,6 +149,7 @@ class AuthAndAgentIntegrationTest {
     @WithMockUser(roles = "VIEWER")
     void agentStatusTransitionsAreRecorded() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("history-node", "lab", "tests", "127.0.0.32"));
+        grantAccess("user", UserAccount.Role.VIEWER, credential.device().id(), false, false, false);
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
                         .header("X-Device-Id", credential.device().id())
@@ -271,7 +276,7 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "operator", roles = "OPERATOR")
+    @WithMockUser(username = "test-admin", roles = "ADMIN")
     void resourceAlertThresholdCannotExceedPercentRange() throws Exception {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/alert-rules")
                         .with(csrf()).contentType(MediaType.APPLICATION_JSON)
@@ -280,7 +285,7 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
-    @WithMockUser(username = "operator", roles = "OPERATOR")
+    @WithMockUser(username = "test-admin", roles = "ADMIN")
     void tcpConnectionAlertRuleAcceptsConnectionCountThreshold() throws Exception {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/alert-rules")
                         .with(csrf()).contentType(MediaType.APPLICATION_JSON)
@@ -359,6 +364,7 @@ class AuthAndAgentIntegrationTest {
     @WithMockUser(username = "operator", roles = "OPERATOR")
     void fanRpmAlertOpensAndResolvesFromAgentReports() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("fan-alert-node", "lab", "tests", "127.0.0.41"));
+        grantAccess("operator", UserAccount.Role.OPERATOR, credential.device().id(), false, true, false);
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/alert-rules")
                         .with(csrf()).contentType(MediaType.APPLICATION_JSON)
@@ -575,6 +581,7 @@ class AuthAndAgentIntegrationTest {
     @WithMockUser(username = "operator", roles = "OPERATOR")
     void agentTaskCanBeQueuedClaimedAndCompleted() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("task-node", "lab", "tests", "127.0.0.4"));
+        grantAccess("operator", UserAccount.Role.OPERATOR, credential.device().id(), false, false, true);
         String body = "{\"deviceId\":\"" + credential.device().id() + "\",\"command\":\"uname\",\"args\":[\"-a\"],\"timeoutSeconds\":10,\"maxOutputBytes\":4096}";
 
         var created = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/tasks")
@@ -605,6 +612,7 @@ class AuthAndAgentIntegrationTest {
     @WithMockUser(username = "operator", roles = "OPERATOR")
     void staleRunningAgentTaskIsRecoveredAsTimedOut() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("stale-task-node", "lab", "tests", "127.0.0.22"));
+        grantAccess("operator", UserAccount.Role.OPERATOR, credential.device().id(), false, false, true);
         String body = "{\"deviceId\":\"" + credential.device().id() + "\",\"command\":\"uname\",\"args\":[],\"timeoutSeconds\":1,\"maxOutputBytes\":4096}";
         var created = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/tasks")
                         .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
@@ -686,6 +694,29 @@ class AuthAndAgentIntegrationTest {
         assertThat(updated).isNotNull();
         assertThat(updated.getLastDdnsIpv4()).isEqualTo("203.0.113.7");
         assertThat(ddnsConfigs.findById(ddnsId).orElseThrow().getLastStatus()).isEqualTo("SUCCEEDED");
+    }
+
+    private void grantAccess(String username, UserAccount.Role role, String deviceId,
+                             boolean manage, boolean alert, boolean task) {
+        UserAccount user = userAccounts.findByUsernameIgnoreCase(username).orElseGet(() -> {
+            UserAccount created = new UserAccount();
+            created.setUsername(username);
+            created.setDisplayName(username);
+            created.setPasswordHash(passwordEncoder.encode("Test-only-password-123"));
+            created.setRole(role);
+            created.setEnabled(true);
+            return userAccounts.save(created);
+        });
+        UserDevicePermission permission = devicePermissions
+                .findByUserUsernameIgnoreCaseAndDeviceId(username, deviceId)
+                .orElseGet(UserDevicePermission::new);
+        permission.setUser(user);
+        permission.setDevice(deviceRepository.findById(deviceId).orElseThrow());
+        permission.setCanView(true);
+        permission.setCanManage(manage);
+        permission.setCanAlert(alert);
+        permission.setCanTask(task);
+        devicePermissions.save(permission);
     }
 
     private String sampleReport() throws Exception {

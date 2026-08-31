@@ -42,7 +42,7 @@ let refreshTimer = 0
 
 const deviceId = computed(() => String(route.params.id))
 const latest = computed(() => device.value?.latest ?? null)
-const canOperate = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
+const canOperate = computed(() => (auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR') && auth.canManageDevice(deviceId.value))
 const labels = computed(() => history.value.map((item) => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: rangeHours.value === 1 ? '2-digit' : undefined }).format(new Date(item.collectedAt))))
 const resourceSeries = computed(() => [
   { name: 'CPU', data: history.value.map((item) => item.cpuUsage), color: '#2867a6' },

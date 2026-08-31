@@ -8,6 +8,7 @@ import {
 import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
 import { api, errorMessage } from '@/lib/api'
+import StatusBadge from '@/components/StatusBadge.vue'
 import { useAuthStore } from '@/stores/auth'
 import { loadBranding, siteName } from '@/lib/branding'
 import { dateTime, relativeTime } from '@/lib/format'

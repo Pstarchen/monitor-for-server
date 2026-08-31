@@ -33,8 +33,16 @@ public class MaintenanceWindowService {
 
     @Transactional(readOnly = true)
     public String deviceId(Long id) {
-        MaintenanceWindow window = require(id);
-        return window.getDevice() == null ? null : window.getDevice().getId();
+        return scopeDeviceId(require(id));
+    }
+
+    @Transactional(readOnly = true)
+    public String deviceId(MaintenanceDtos.WindowRequest request) {
+        if (request.deviceId() != null && !request.deviceId().isBlank()) return request.deviceId();
+        if (request.ruleId() == null) return null;
+        AlertRule rule = rules.findById(request.ruleId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "告警规则不存在"));
+        return rule.getDevice() == null ? null : rule.getDevice().getId();
     }
 
     @Transactional
@@ -153,7 +161,16 @@ public class MaintenanceWindowService {
                 window.getDevice() == null ? null : window.getDevice().getName(),
                 window.getRule() == null ? null : window.getRule().getId(),
                 window.getRule() == null ? null : window.getRule().getName(),
+                scopeDeviceId(window),
                 window.getStartsAt(), window.getEndsAt(), window.getTimezone(), window.getRecurrence(),
                 window.getRepeatUntil(), window.getReason(), window.isEnabled(), isActive(window, now), window.getUpdatedAt());
+    }
+
+    private String scopeDeviceId(MaintenanceWindow window) {
+        if (window.getDevice() != null) return window.getDevice().getId();
+        if (window.getRule() != null && window.getRule().getDevice() != null) {
+            return window.getRule().getDevice().getId();
+        }
+        return null;
     }
 }

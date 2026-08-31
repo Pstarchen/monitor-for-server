@@ -109,7 +109,7 @@ public class MetricService {
         MetricView view = MetricView.from(metric, mapper);
         alerts.evaluateMetric(device, metric);
         presence.markOnline(deviceId, view, settings.offlineSeconds());
-        realtime.broadcast(Map.of("type", "metric.updated", "payload", view));
+        realtime.broadcast("metric.updated", deviceId);
         return view;
     }
 

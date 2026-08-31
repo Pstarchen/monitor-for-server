@@ -177,6 +177,7 @@ function openCreate() {
 }
 
 function openEdit(device: Device) {
+  if (!auth.canManageDevice(device.id)) return
   editingId.value = device.id
   Object.assign(form, { name: device.name, location: device.location ?? '', groupName: device.groupName ?? '', primaryIp: device.primaryIp ?? '', tags: [...(device.tags ?? [])], assetTag: device.assetTag ?? '', ownerName: device.ownerName ?? '', vendor: device.vendor ?? '', model: device.model ?? '', serialNumber: device.serialNumber ?? '', environment: device.environment ?? '', purchaseDate: device.purchaseDate ?? '', warrantyExpiresAt: device.warrantyExpiresAt ?? '', description: device.description ?? '', ddnsEnabled: device.ddnsEnabled, ddnsConfigId: device.ddnsConfigId, publicVisible: device.publicVisible })
   dialog.value = true
@@ -285,7 +286,7 @@ onMounted(() => {
   load().then(() => {
     const requestedId = typeof route.query.edit === 'string' ? route.query.edit : ''
     const requested = devices.value.find((device) => device.id === requestedId)
-    if (requested) openEdit(requested)
+    if (requested && auth.canManageDevice(requested.id)) openEdit(requested)
     const discoveredAddress = typeof route.query.add === 'string' ? route.query.add : ''
     if (discoveredAddress && !requested) {
       openCreate()
@@ -299,7 +300,7 @@ onMounted(() => {
 })
 watch(() => route.query.edit, (value) => {
   const requested = devices.value.find((device) => device.id === value)
-  if (requested) openEdit(requested)
+  if (requested && auth.canManageDevice(requested.id)) openEdit(requested)
 })
 useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
@@ -353,7 +354,7 @@ onBeforeUnmount(() => {
               <td>{{ device.latest ? percent(device.latest.memoryUsage) : '--' }}</td>
               <td>{{ relativeTime(device.lastSeenAt) }}</td>
               <td class="row-actions">
-                <button v-if="canEdit" class="table-icon-button" type="button" title="编辑设备" aria-label="编辑设备" @click="openEdit(device)"><Pencil :size="16" /></button>
+                <button v-if="canEdit && auth.canManageDevice(device.id)" class="table-icon-button" type="button" title="编辑设备" aria-label="编辑设备" @click="openEdit(device)"><Pencil :size="16" /></button>
                 <button v-if="auth.user?.role === 'ADMIN' && !device.controllerManaged" class="table-icon-button" type="button" title="轮换密钥" aria-label="轮换密钥" @click="rotateKey(device)"><KeyRound :size="16" /></button>
                 <button v-if="auth.user?.role === 'ADMIN' && !device.controllerManaged" class="table-icon-button danger-command" type="button" title="删除设备" aria-label="删除设备" @click="remove(device)"><Trash2 :size="16" /></button>
               </td>

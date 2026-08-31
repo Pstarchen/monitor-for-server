@@ -8,7 +8,6 @@ import com.guanlan.monitor.api.dto.AgentTaskDtos;
 import com.guanlan.monitor.domain.AgentTask;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.repository.AgentTaskRepository;
-import com.guanlan.monitor.security.ApiTokenPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -38,11 +37,12 @@ public class AgentTaskService {
     private final DeviceService devices;
     private final ObjectMapper mapper;
     private final AuditService audit;
+    private final DeviceAccessService access;
 
     @Transactional
     public AgentTaskDtos.View create(AgentTaskDtos.CreateRequest request, String actor, Authentication authentication) {
         Device device = devices.require(request.deviceId());
-        requireTarget(authentication, device.getId());
+        access.requireTask(authentication, device.getId());
         String command = normalizeCommand(request.command());
         List<String> args = normalizeArgs(request.args());
         int timeout = request.timeoutSeconds() == null ? DEFAULT_TIMEOUT_SECONDS : request.timeoutSeconds();
@@ -70,7 +70,7 @@ public class AgentTaskService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "文件任务类型无效");
         }
         Device device = devices.require(deviceId);
-        requireTarget(authentication, device.getId());
+        access.requireTask(authentication, device.getId());
         Map<String, Object> normalized = normalizeFilePayload(operation, payload);
         int timeout = timeoutSeconds == null ? DEFAULT_TIMEOUT_SECONDS : timeoutSeconds;
         int maxOutput = maxOutputBytes == null ? DEFAULT_MAX_OUTPUT_BYTES : maxOutputBytes;
@@ -92,23 +92,20 @@ public class AgentTaskService {
 
     @Transactional(readOnly = true)
     public List<AgentTaskDtos.View> list(String deviceId, int limit, Authentication authentication) {
-        if (deviceId != null && !deviceId.isBlank()) requireTarget(authentication, deviceId);
+        if (deviceId != null && !deviceId.isBlank()) access.requireView(authentication, deviceId);
         PageRequest page = PageRequest.of(0, Math.min(Math.max(limit, 1), 200));
         List<AgentTaskDtos.View> result = (deviceId == null || deviceId.isBlank()
                 ? tasks.findAllByOrderByCreatedAtDesc(page)
                 : tasks.findAllByDeviceIdOrderByCreatedAtDesc(deviceId, page))
                 .stream().map(this::view).toList();
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
-            Set<String> allowed = principal.serverIds();
-            return result.stream().filter(task -> allowed.contains(task.deviceId())).toList();
-        }
-        return result;
+        Set<String> visible = access.visibleDeviceIds(authentication);
+        return visible == null ? result : result.stream().filter(task -> visible.contains(task.deviceId())).toList();
     }
 
     @Transactional(readOnly = true)
     public AgentTaskDtos.View get(Long id, Authentication authentication) {
         AgentTaskDtos.View result = view(require(id));
-        requireTarget(authentication, result.deviceId());
+        access.requireView(authentication, result.deviceId());
         return result;
     }
 
@@ -126,7 +123,7 @@ public class AgentTaskService {
     @Transactional
     public void cancel(Long id, String actor, Authentication authentication) {
         AgentTask task = require(id);
-        requireTarget(authentication, task.getDevice().getId());
+        access.requireTask(authentication, task.getDevice().getId());
         if (task.getStatus() == AgentTask.Status.QUEUED || task.getStatus() == AgentTask.Status.RUNNING) {
             task.setStatus(AgentTask.Status.CANCELED);
             task.setFinishedAt(Instant.now());
@@ -164,13 +161,6 @@ public class AgentTaskService {
         task.setError(trim(request.error(), 500));
         audit.record("AGENT_TASK_RESULT", "task:" + id, "Agent 返回命令任务结果 " + status.name());
         return view(task);
-    }
-
-    public void requireTarget(Authentication authentication, String deviceId) {
-        if (authentication == null || !(authentication.getPrincipal() instanceof ApiTokenPrincipal principal)) return;
-        if (!principal.serverIds().isEmpty() && !principal.serverIds().contains(deviceId)) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "API Token 未获准访问该服务器");
-        }
     }
 
     private AgentTask require(Long id) {

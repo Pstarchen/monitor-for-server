@@ -11,6 +11,7 @@ import com.guanlan.monitor.repository.MetricSnapshotRepository;
 import com.guanlan.monitor.repository.DdnsConfigRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,7 @@ public class DeviceService {
     private final DdnsConfigRepository ddnsConfigs;
     private final DeviceHealthService health;
     private final DeviceStatusHistoryService statusHistory;
+    private final DeviceAccessService access;
     private final SecureRandom random = new SecureRandom();
 
     @Transactional(readOnly = true)
@@ -53,6 +55,11 @@ public class DeviceService {
 
     @Transactional
     public DeviceDtos.Credential create(DeviceDtos.CreateRequest request) {
+        return create(request, null);
+    }
+
+    @Transactional
+    public DeviceDtos.Credential create(DeviceDtos.CreateRequest request, Authentication authentication) {
         String rawKey = newKey();
         Device device = new Device();
         device.setName(request.name());
@@ -67,6 +74,7 @@ public class DeviceService {
         device.setAgentKeyPrefix(rawKey.substring(0, 8));
         device.setAgentKeyHash(passwordEncoder.encode(rawKey));
         devices.save(device);
+        access.grantCreatorAccess(authentication, device);
         statusHistory.record(device, null, Device.Status.PENDING, "设备登记，等待 Agent 首次上报");
         audit.record("DEVICE_CREATE", "device:" + device.getId(), "创建设备 " + device.getName());
         return new DeviceDtos.Credential(view(device), rawKey);

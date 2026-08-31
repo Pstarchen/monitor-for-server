@@ -188,18 +188,18 @@ public class AlertService {
                 notifications.send(event);
                 event.setNotifiedAt(Instant.now());
             }
-            realtime.broadcast(Map.of("type", "alert.opened", "payload", eventView(event)));
+            realtime.broadcast("alert.opened", device.getId());
         } else if (breached && active.isPresent() && active.get().isNotificationSuppressed() && !muted) {
             AlertEvent event = active.get();
             event.setNotificationSuppressed(false);
             event.setNotifiedAt(Instant.now());
             notifications.send(event);
-            realtime.broadcast(Map.of("type", "alert.updated", "payload", eventView(event)));
+            realtime.broadcast("alert.updated", device.getId());
         } else if (!breached && active.isPresent()) {
             AlertEvent event = active.get();
             event.setStatus(AlertEvent.Status.RESOLVED);
             event.setResolvedAt(Instant.now());
-            realtime.broadcast(Map.of("type", "alert.resolved", "payload", eventView(event)));
+            realtime.broadcast("alert.resolved", device.getId());
         }
     }
 

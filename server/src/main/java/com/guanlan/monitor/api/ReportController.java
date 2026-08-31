@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import com.guanlan.monitor.security.ApiTokenPrincipal;
+import com.guanlan.monitor.service.DeviceAccessService;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -22,19 +22,20 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ReportController {
     private final ReportService reports;
+    private final DeviceAccessService access;
 
     @GetMapping("/summary")
     ReportService.Summary summary(@RequestParam(required = false) Instant from,
                                   @RequestParam(required = false) Instant to,
                                   Authentication authentication) {
-        return reports.summary(from, to, allowed(authentication));
+        return reports.summary(from, to, access.visibleDeviceIds(authentication));
     }
 
     @GetMapping(value = "/summary.csv", produces = "text/csv")
     ResponseEntity<byte[]> csv(@RequestParam(required = false) Instant from,
                                @RequestParam(required = false) Instant to,
                                Authentication authentication) {
-        ReportService.Summary summary = reports.summary(from, to, allowed(authentication));
+        ReportService.Summary summary = reports.summary(from, to, access.visibleDeviceIds(authentication));
         StringBuilder csv = new StringBuilder("# 观澜监控运行报告\n");
         csv.append("时间范围,开始,结束\n");
         csv.append("报告," ).append(summary.from()).append(',').append(summary.to()).append("\n\n");
@@ -63,10 +64,4 @@ public class ReportController {
         return safe.contains(",") || safe.contains("\n") ? "\"" + safe + "\"" : safe;
     }
 
-    private Set<String> allowed(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
-            return principal.serverIds();
-        }
-        return null;
-    }
 }

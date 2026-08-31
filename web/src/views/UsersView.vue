@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Pencil, Plus, RefreshCw, ShieldCheck, UserRound } from 'lucide-vue-next'
+import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, UserRound } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { dateTime } from '@/lib/format'
-import type { Role, User } from '@/types'
+import { applyDevicePermissionChange, normalizeDevicePermission } from '@/lib/device-permissions'
+import type { DevicePermissionAction } from '@/lib/device-permissions'
+import type { DevicePermission, Role, User } from '@/types'
 
 const users = ref<User[]>([])
 const loading = ref(true)
@@ -16,9 +18,15 @@ const error = ref('')
 const dialog = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
+const permissionDialog = ref(false)
+const permissionUser = ref<User | null>(null)
+const permissionLoading = ref(false)
+const permissionSaving = ref(false)
+const permissionError = ref('')
+const devicePermissions = ref<DevicePermission[]>([])
 const form = reactive<{ username: string; password: string; displayName: string; role: Role; enabled: boolean; newPassword: string }>({ username: '', password: '', displayName: '', role: 'VIEWER', enabled: true, newPassword: '' })
 const roleLabels: Record<Role, string> = { ADMIN: '管理员', OPERATOR: '运维人员', VIEWER: '只读用户' }
-const roleDescriptions: Record<Role, string> = { ADMIN: '管理系统设置、账号、设备和规则', OPERATOR: '管理设备与告警规则、确认告警', VIEWER: '查看监控数据与告警，不可修改' }
+const roleDescriptions: Record<Role, string> = { ADMIN: '管理系统设置、账号、设备和规则', OPERATOR: '管理已授权设备、告警和任务', VIEWER: '查看已授权设备的监控数据与告警' }
 
 async function load() {
   loading.value = true
@@ -70,6 +78,39 @@ async function save() {
   }
 }
 
+async function openPermissions(user: User) {
+  permissionUser.value = user
+  permissionDialog.value = true
+  permissionLoading.value = true
+  permissionError.value = ''
+  try {
+    devicePermissions.value = (await api.get<DevicePermission[]>(`/admin/users/${user.id}/device-permissions`)).data
+  } catch (cause) {
+    permissionError.value = errorMessage(cause)
+  } finally {
+    permissionLoading.value = false
+  }
+}
+
+function permissionChanged(permission: DevicePermission, action: DevicePermissionAction) {
+  Object.assign(permission, applyDevicePermissionChange(permission, action))
+}
+
+async function savePermissions() {
+  if (!permissionUser.value) return
+  permissionSaving.value = true
+  try {
+    const permissions = devicePermissions.value.map(normalizeDevicePermission)
+    await api.put(`/admin/users/${permissionUser.value.id}/device-permissions`, { permissions })
+    permissionDialog.value = false
+    ElMessage.success('设备权限已更新')
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    permissionSaving.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -84,7 +125,7 @@ onMounted(load)
     <LoadingState v-if="loading" />
     <div v-else-if="error" class="panel state-panel"><EmptyState title="账号列表加载失败" :description="error"><el-button @click="load">重新加载</el-button></EmptyState></div>
     <article v-else class="panel section">
-      <div v-if="users.length" class="table-wrap"><table class="data-table"><thead><tr><th>用户</th><th>用户名</th><th>角色</th><th>状态</th><th>登录保护</th><th>创建时间</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="user in users" :key="user.id"><td><div class="user-cell"><span><UserRound :size="16" /></span><strong>{{ user.displayName }}</strong></div></td><td class="mono-value">{{ user.username }}</td><td>{{ roleLabels[user.role] }}</td><td><StatusBadge :status="user.enabled ? 'ONLINE' : 'OFFLINE'" /></td><td><StatusBadge :status="user.twoFactorEnabled ? 'ONLINE' : 'OFFLINE'" /><small class="table-secondary-text">{{ user.twoFactorEnabled ? 'TOTP 已启用' : '仅密码' }}</small></td><td>{{ dateTime(user.createdAt) }}</td><td class="row-actions"><button class="table-icon-button" type="button" title="编辑账号" aria-label="编辑账号" @click="openEdit(user)"><Pencil :size="16" /></button></td></tr></tbody></table></div>
+      <div v-if="users.length" class="table-wrap"><table class="data-table"><thead><tr><th>用户</th><th>用户名</th><th>角色</th><th>状态</th><th>登录保护</th><th>创建时间</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="user in users" :key="user.id"><td><div class="user-cell"><span><UserRound :size="16" /></span><strong>{{ user.displayName }}</strong></div></td><td class="mono-value">{{ user.username }}</td><td>{{ roleLabels[user.role] }}</td><td><StatusBadge :status="user.enabled ? 'ONLINE' : 'OFFLINE'" /></td><td><StatusBadge :status="user.twoFactorEnabled ? 'ONLINE' : 'OFFLINE'" /><small class="table-secondary-text">{{ user.twoFactorEnabled ? 'TOTP 已启用' : '仅密码' }}</small></td><td>{{ dateTime(user.createdAt) }}</td><td class="row-actions"><button v-if="user.role !== 'ADMIN'" class="table-icon-button" type="button" title="设备权限" aria-label="设备权限" @click="openPermissions(user)"><KeyRound :size="16" /></button><button class="table-icon-button" type="button" title="编辑账号" aria-label="编辑账号" @click="openEdit(user)"><Pencil :size="16" /></button></td></tr></tbody></table></div>
       <EmptyState v-else title="暂无账号" description="创建第一个可登录的系统账号。" />
     </article>
 
@@ -101,6 +142,19 @@ onMounted(load)
         <div class="role-notice"><ShieldCheck :size="16" /><span>{{ roleDescriptions[form.role] }}</span></div>
       </el-form>
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ editingId ? '保存修改' : '创建账号' }}</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="permissionDialog" :title="`${permissionUser?.displayName ?? ''} · 设备权限`" width="min(820px, calc(100vw - 28px))" destroy-on-close>
+      <LoadingState v-if="permissionLoading" />
+      <EmptyState v-else-if="permissionError" title="设备权限加载失败" :description="permissionError"><el-button @click="permissionUser && openPermissions(permissionUser)">重新加载</el-button></EmptyState>
+      <div v-else-if="devicePermissions.length" class="table-wrap permission-table-wrap">
+        <table class="data-table">
+          <thead><tr><th>设备</th><th>查看数据</th><th>管理资料</th><th>处理告警</th><th>执行任务</th></tr></thead>
+          <tbody><tr v-for="permission in devicePermissions" :key="permission.deviceId"><td><strong>{{ permission.deviceName }}</strong><small class="cell-subtext mono-value">{{ permission.deviceId }}</small></td><td><el-checkbox v-model="permission.canView" :aria-label="`${permission.deviceName} 查看数据`" @change="permissionChanged(permission, 'canView')" /></td><td><el-checkbox v-model="permission.canManage" :aria-label="`${permission.deviceName} 管理资料`" @change="permissionChanged(permission, 'canManage')" /></td><td><el-checkbox v-model="permission.canAlert" :aria-label="`${permission.deviceName} 处理告警`" @change="permissionChanged(permission, 'canAlert')" /></td><td><el-checkbox v-model="permission.canTask" :aria-label="`${permission.deviceName} 执行任务`" @change="permissionChanged(permission, 'canTask')" /></td></tr></tbody>
+        </table>
+      </div>
+      <EmptyState v-else title="暂无设备" description="添加设备后即可为账号分配访问范围。" />
+      <template #footer><el-button @click="permissionDialog = false">取消</el-button><el-button type="primary" :loading="permissionSaving" :disabled="permissionLoading || Boolean(permissionError)" @click="savePermissions">保存权限</el-button></template>
     </el-dialog>
   </section>
 </template>

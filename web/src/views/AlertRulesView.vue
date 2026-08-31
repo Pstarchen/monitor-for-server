@@ -20,7 +20,11 @@ const dialog = ref(false)
 const saving = ref(false)
 const editingId = ref<number | null>(null)
 const form = reactive<{ name: string; deviceId: string; metric: AlertMetric; targetName: string; threshold: number; severity: AlertSeverity; enabled: boolean }>({ name: '', deviceId: '', metric: 'CPU_USAGE', targetName: '', threshold: 80, severity: 'WARNING', enabled: true })
-const canEdit = computed(() => auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR')
+const alertDevices = computed(() => devices.value.filter((device) => auth.canManageAlerts(device.id)))
+const canCreate = computed(() => auth.user?.role === 'ADMIN'
+  || (auth.user?.role === 'OPERATOR' && alertDevices.value.length > 0))
+const canEditRule = (rule: AlertRule) => auth.user?.role === 'ADMIN'
+  || (auth.user?.role === 'OPERATOR' && Boolean(rule.deviceId) && auth.canManageAlerts(rule.deviceId!))
 const metricLabels: Record<AlertMetric, string> = { CPU_USAGE: 'CPU 使用率', MEMORY_USAGE: '内存使用率', DISK_USAGE: '磁盘使用率', LOAD_1: '1 分钟负载', DISK_READ_BPS: '磁盘读取速率', DISK_WRITE_BPS: '磁盘写入速率', CONTAINER_CPU_USAGE: '容器 CPU 使用率', CONTAINER_MEMORY_USAGE: '容器内存使用率', GPU_USAGE: 'GPU 使用率', BATTERY_PERCENT: '电池电量', SMART_FAILURES: 'SMART 失败磁盘数', INTEGRITY_CHANGES: '完整性变更文件数', FIREWALL_INACTIVE: '防火墙未启用', TCP_CONNECTIONS: 'TCP 连接数', NETWORK_RECV_BPS: '网络接收速率', NETWORK_SENT_BPS: '网络发送速率', TEMPERATURE: '最高温度', FAN_RPM: '最高风扇转速', DEVICE_OFFLINE: '设备离线', PROCESS_MISSING: '关键进程缺失', SERVICE_NOT_RUNNING: '系统服务未运行', CUSTOM_METRIC: '自定义监控项' }
 const targetMetrics: AlertMetric[] = ['PROCESS_MISSING', 'SERVICE_NOT_RUNNING', 'CUSTOM_METRIC']
 const presenceTargetMetrics: AlertMetric[] = ['PROCESS_MISSING', 'SERVICE_NOT_RUNNING']
@@ -112,7 +116,7 @@ function metricUnit(metric: AlertMetric) {
 
 function openCreate() {
   editingId.value = null
-  Object.assign(form, { name: '', deviceId: '', metric: 'CPU_USAGE', targetName: '', threshold: 80, severity: 'WARNING', enabled: true })
+  Object.assign(form, { name: '', deviceId: auth.user?.role === 'ADMIN' ? '' : alertDevices.value[0]?.id || '', metric: 'CPU_USAGE', targetName: '', threshold: 80, severity: 'WARNING', enabled: true })
   dialog.value = true
 }
 
@@ -168,20 +172,20 @@ onMounted(load)
 <template>
   <section>
     <PageHeader eyebrow="POLICIES" title="告警规则" description="为全局或指定设备设置资源阈值与离线检测规则。">
-      <template #actions><el-button @click="load"><RefreshCw :size="16" />刷新</el-button><el-button v-if="canEdit" type="primary" class="button-press" @click="openCreate"><Plus :size="16" />新建规则</el-button></template>
+      <template #actions><el-button @click="load"><RefreshCw :size="16" />刷新</el-button><el-button v-if="canCreate" type="primary" class="button-press" @click="openCreate"><Plus :size="16" />新建规则</el-button></template>
     </PageHeader>
     <LoadingState v-if="loading" />
     <div v-else-if="error" class="panel state-panel"><EmptyState title="规则加载失败" :description="error"><el-button @click="load">重新加载</el-button></EmptyState></div>
     <article v-else class="panel">
-      <div v-if="rules.length" class="table-wrap"><table class="data-table"><thead><tr><th>规则</th><th>监控范围</th><th>指标 / 目标</th><th>触发阈值</th><th>级别</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="rule in rules" :key="rule.id"><td><strong>{{ rule.name }}</strong></td><td>{{ rule.deviceName || '全部设备' }}</td><td><strong>{{ metricLabels[rule.metric] }}</strong><small v-if="rule.targetName" class="cell-subtext mono-value">{{ rule.targetName }}</small></td><td>{{ thresholdText(rule) }}</td><td><StatusBadge :status="rule.severity" /></td><td><StatusBadge :status="rule.enabled ? 'ONLINE' : 'OFFLINE'" /></td><td>{{ dateTime(rule.updatedAt) }}</td><td class="row-actions"><button v-if="canEdit" class="table-icon-button" type="button" title="编辑规则" aria-label="编辑规则" @click="openEdit(rule)"><Pencil :size="16" /></button><button v-if="canEdit" class="table-icon-button danger-command" type="button" title="删除规则" aria-label="删除规则" @click="remove(rule)"><Trash2 :size="16" /></button></td></tr></tbody></table></div>
-      <EmptyState v-else title="暂无告警规则" description="创建规则后，服务端会在每次 Agent 上报时自动评估指标。"><el-button v-if="canEdit" type="primary" @click="openCreate"><SlidersHorizontal :size="16" />新建规则</el-button></EmptyState>
+      <div v-if="rules.length" class="table-wrap"><table class="data-table"><thead><tr><th>规则</th><th>监控范围</th><th>指标 / 目标</th><th>触发阈值</th><th>级别</th><th>状态</th><th>更新时间</th><th class="actions-column">操作</th></tr></thead><tbody><tr v-for="rule in rules" :key="rule.id"><td><strong>{{ rule.name }}</strong></td><td>{{ rule.deviceName || '全部设备' }}</td><td><strong>{{ metricLabels[rule.metric] }}</strong><small v-if="rule.targetName" class="cell-subtext mono-value">{{ rule.targetName }}</small></td><td>{{ thresholdText(rule) }}</td><td><StatusBadge :status="rule.severity" /></td><td><StatusBadge :status="rule.enabled ? 'ONLINE' : 'OFFLINE'" /></td><td>{{ dateTime(rule.updatedAt) }}</td><td class="row-actions"><button v-if="canEditRule(rule)" class="table-icon-button" type="button" title="编辑规则" aria-label="编辑规则" @click="openEdit(rule)"><Pencil :size="16" /></button><button v-if="canEditRule(rule)" class="table-icon-button danger-command" type="button" title="删除规则" aria-label="删除规则" @click="remove(rule)"><Trash2 :size="16" /></button></td></tr></tbody></table></div>
+      <EmptyState v-else title="暂无告警规则" description="创建规则后，服务端会在每次 Agent 上报时自动评估指标。"><el-button v-if="canCreate" type="primary" @click="openCreate"><SlidersHorizontal :size="16" />新建规则</el-button></EmptyState>
     </article>
 
     <el-dialog v-model="dialog" :title="editingId ? '编辑告警规则' : '新建告警规则'" width="min(540px, calc(100vw - 28px))" destroy-on-close>
       <el-form label-position="top">
         <el-form-item label="规则名称" required><el-input v-model="form.name" maxlength="100" placeholder="例如：生产节点 CPU 过高" /></el-form-item>
         <div class="form-grid two-fields">
-          <el-form-item label="监控范围"><el-select v-model="form.deviceId" placeholder="全部设备" clearable><el-option label="全部设备" value="" /><el-option v-for="device in devices" :key="device.id" :label="device.name" :value="device.id" /></el-select></el-form-item>
+          <el-form-item label="监控范围"><el-select v-model="form.deviceId" :placeholder="auth.user?.role === 'ADMIN' ? '全部设备' : '选择设备'" :clearable="auth.user?.role === 'ADMIN'"><el-option v-if="auth.user?.role === 'ADMIN'" label="全部设备" value="" /><el-option v-for="device in alertDevices" :key="device.id" :label="device.name" :value="device.id" /></el-select></el-form-item>
           <el-form-item label="监控指标" required><el-select v-model="form.metric" @change="metricChanged"><el-option v-for="(label, value) in metricLabels" :key="value" :label="label" :value="value" /></el-select></el-form-item>
           <el-form-item label="告警级别" required><el-select v-model="form.severity"><el-option label="提示" value="INFO" /><el-option label="警告" value="WARNING" /><el-option label="严重" value="CRITICAL" /></el-select></el-form-item>
         <el-form-item v-if="!presenceTargetMetrics.includes(form.metric)" label="触发阈值"><el-input-number v-model="form.threshold" :min="metricMin(form.metric)" :max="metricMax(form.metric)" :precision="metricPrecision(form.metric)" /><span class="field-suffix">{{ metricUnit(form.metric) }}</span></el-form-item>

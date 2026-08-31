@@ -1,7 +1,7 @@
 package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.api.dto.TopologyDtos;
-import com.guanlan.monitor.security.ApiTokenPrincipal;
+import com.guanlan.monitor.service.DeviceAccessService;
 import com.guanlan.monitor.service.TopologyService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -16,12 +16,10 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class TopologyController {
     private final TopologyService topology;
+    private final DeviceAccessService access;
 
     @GetMapping
     TopologyDtos.View get(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof ApiTokenPrincipal principal) {
-            return topology.build(principal.serverIds());
-        }
-        return topology.build(Set.of());
+        return topology.build(access.visibleDeviceIds(authentication));
     }
 }

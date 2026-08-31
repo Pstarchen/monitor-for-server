@@ -225,12 +225,15 @@ Agent 端配置：
 | GET | `/api/admin/users` | ADMIN | 账号列表 |
 | POST | `/api/admin/users` | ADMIN | 创建账号，密码至少 12 位 |
 | PUT | `/api/admin/users/{id}` | ADMIN | 更新名称、角色、状态和可选新密码 |
+| GET | `/api/device-access/me` | 登录 | 查看当前账号可见设备及其操作权限 |
+| GET | `/api/admin/users/{id}/device-permissions` | ADMIN | 查看指定账号的设备权限矩阵 |
+| PUT | `/api/admin/users/{id}/device-permissions` | ADMIN | 整体替换指定账号的设备权限矩阵 |
 | GET | `/api/admin/audit-logs?limit=100` | ADMIN | 最近审计记录，最大 200 条 |
 | GET | `/actuator/health` | 公开 | 服务健康状态 |
 
 ### API Token
 
-登录会话可在 `/api/api-tokens` 创建和吊销个人 API Token。明文只在创建响应中返回一次，服务端只保存 SHA-256 哈希；PAT 使用 `Authorization: Bearer nzp_...` 调用接口，并且同时受用户角色、scope 和服务器 ID 白名单约束。
+登录会话可在 `/api/api-tokens` 创建和吊销个人 API Token。明文只在创建响应中返回一次，服务端只保存 SHA-256 哈希；PAT 使用 `Authorization: Bearer nzp_...` 调用接口，并且同时受用户角色、用户设备权限、scope 和服务器 ID 白名单约束。设备实际范围是用户设备权限与 Token 白名单的交集；空白名单表示不额外缩小用户已有的设备范围。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
