@@ -18,6 +18,7 @@ class DeviceHealthServiceTest {
     @BeforeEach
     void setUp() {
         when(settings.offlineSeconds()).thenReturn(30);
+        when(settings.agentCollectionSeconds()).thenReturn(30);
     }
 
     @Test
@@ -56,7 +57,7 @@ class DeviceHealthServiceTest {
         device.setStatus(Device.Status.ONLINE);
         device.setLastSeenAt(Instant.now().minusSeconds(3));
         MetricView latest = mock(MetricView.class);
-        when(latest.collectedAt()).thenReturn(Instant.now().minusSeconds(2));
+        when(latest.collectedAt()).thenReturn(Instant.now().minusSeconds(45));
 
         var healthy = service.describe(device, latest);
         assertThat(healthy.state()).isEqualTo(com.guanlan.monitor.api.dto.DeviceHealthDtos.State.HEALTHY);

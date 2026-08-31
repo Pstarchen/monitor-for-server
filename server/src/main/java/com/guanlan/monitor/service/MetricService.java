@@ -45,7 +45,8 @@ public class MetricService {
         Device.Status previousStatus = device.getStatus();
         MetricSnapshot latest = metrics.findTopByDeviceIdOrderByCollectedAtDesc(device.getId()).orElse(null);
         boolean advancesLatest = latest == null || collectedAt.isAfter(latest.getCollectedAt());
-        boolean live = advancesLatest && !collectedAt.isBefore(receivedAt.minusSeconds(Math.max(5, settings.offlineSeconds())));
+        int liveWindowSeconds = Math.max(Math.max(5, settings.offlineSeconds()), Math.max(1, settings.agentCollectionSeconds()) * 2);
+        boolean live = advancesLatest && !collectedAt.isBefore(receivedAt.minusSeconds(liveWindowSeconds));
         if (live) {
             device.setHostname(report.host().hostname());
             device.setOs(join(report.host().platform(), report.host().platformVersion()));

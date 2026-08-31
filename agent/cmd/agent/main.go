@@ -17,6 +17,11 @@ import (
 	"guanlan-monitor/agent/internal/worker"
 )
 
+const (
+	maxReplayReportsPerCycle = 10
+	replayBudget             = 5 * time.Second
+)
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg, err := config.Load(os.Args[1:])
@@ -112,7 +117,11 @@ func collectAndSend(ctx context.Context, logger *slog.Logger, metrics *collector
 		logger.Error("report buffer listing failed", "error", err)
 		return updatedInterval
 	}
-	for _, path := range paths {
+	deliveryStarted := time.Now()
+	for index, path := range paths {
+		if index > maxReplayReportsPerCycle || (index > 1 && time.Since(deliveryStarted) >= replayBudget) {
+			break
+		}
 		payload, readErr := os.ReadFile(path)
 		if readErr != nil {
 			logger.Warn("buffered report is unreadable", "error", readErr)

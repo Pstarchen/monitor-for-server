@@ -19,6 +19,7 @@ public class DeviceHealthService {
     public DeviceHealthDtos.View describe(Device device, MetricView latest) {
         Instant now = Instant.now();
         int offlineAfterSeconds = Math.max(5, settings.offlineSeconds());
+        int dataStaleAfterSeconds = Math.max(offlineAfterSeconds, Math.max(1, settings.agentCollectionSeconds()) * 2);
         Long lastSeenAge = ageSeconds(device.getLastSeenAt(), now);
         Long dataAge = latest == null ? null : ageSeconds(latest.collectedAt(), now);
         Instant expectedBy = device.getLastSeenAt() == null
@@ -26,7 +27,7 @@ public class DeviceHealthService {
                 : device.getLastSeenAt().plusSeconds(offlineAfterSeconds);
         List<DeviceHealthDtos.Check> checks = new ArrayList<>();
         checks.add(connectionCheck(device, lastSeenAge, offlineAfterSeconds));
-        checks.add(dataCheck(latest, dataAge, offlineAfterSeconds));
+        checks.add(dataCheck(latest, dataAge, dataStaleAfterSeconds));
 
         if (device.getLastSeenAt() == null) {
             return new DeviceHealthDtos.View(
@@ -43,7 +44,7 @@ public class DeviceHealthService {
                     offlineAfterSeconds, latest == null ? null : latest.collectedAt(), dataAge,
                     expectedBy, List.copyOf(checks));
         }
-        if (latest == null || (dataAge != null && dataAge > offlineAfterSeconds)) {
+        if (latest == null || (dataAge != null && dataAge > dataStaleAfterSeconds)) {
             return new DeviceHealthDtos.View(
                     device.getStatus(), DeviceHealthDtos.State.DEGRADED, "DATA_STALE",
                     "Agent 已连接，但最近没有可用的指标快照",
