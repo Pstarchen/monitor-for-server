@@ -7,9 +7,13 @@ grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn' "${installer
 grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
 grep -F 'https://monitor.example.com/api/setup/agent-installer?platform=linux' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F 'https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F -- 'curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F 'env GUANLAN_AGENT_KEY=' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-if grep -Eq 'v1\.12\.0|raw\.githubusercontent\.com|cdn\.jsdelivr\.net|export GUANLAN_AGENT_KEY' "${script_dir}/../docs/monitored-agent.md"; then
+grep -F './xingchen-agent.sh install --server-url' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F '/opt/xingchen/agent/agent.sh update' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F 'manager_update()' "${installer}" >/dev/null
+if grep -Eq 'v1\.12\.0|cdn\.jsdelivr\.net|export GUANLAN_AGENT_KEY' "${script_dir}/../docs/monitored-agent.md"; then
   echo 'Documentation still contains the retired multi-source installer command.' >&2
   exit 1
 fi
@@ -27,7 +31,11 @@ fi
 cat > "${fake_bin}/docker" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >> "${TEST_LOG}"
-if [[ "${1:-}" == "info" ]]; then
+if [[ "${1:-}" == "pull" && "${TEST_FAIL_AGENT_PULLS:-0}" == "1" ]]; then
+  exit 1
+elif [[ "${1:-}" == "build" && "${TEST_FAIL_GITEE_BUILD:-0}" == "1" && "$*" == *gitee.com* ]]; then
+  exit 1
+elif [[ "${1:-}" == "info" ]]; then
   [[ "${TEST_DOCKER_AVAILABLE:-0}" == "1" ]]
 elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
   exit 1
@@ -51,6 +59,11 @@ cat > "${fake_bin}/install" <<'SCRIPT'
 printf 'install %s\n' "$*" >> "${TEST_LOG}"
 arguments=("$@")
 count="${#arguments[@]}"
+if [[ " ${*} " == *" -d "* ]]; then
+  for argument in "${arguments[@]}"; do
+    [[ "${argument}" == /* ]] && mkdir -p "${argument}"
+  done
+fi
 if (( count >= 2 )) && [[ "${arguments[count-1]}" == "/etc/guanlan-agent/agent.json" ]]; then
   cp "${arguments[count-2]}" "${TEST_CONFIG}"
 fi
@@ -91,7 +104,12 @@ run_installer() {
     "TEST_DOCKER_AVAILABLE=${docker_available}"
     "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
     "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
+    "TEST_FAIL_AGENT_PULLS=${TEST_FAIL_AGENT_PULLS:-0}"
+    "TEST_FAIL_GITEE_BUILD=${TEST_FAIL_GITEE_BUILD:-0}"
     "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
+    "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+    "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
+    "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
     "GUANLAN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
@@ -114,6 +132,9 @@ run_installer_stdin() {
     "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
     "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
     "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
+    "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+    "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
+    "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
     "GUANLAN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
@@ -135,6 +156,34 @@ grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 grep -F '"docker_socket": "/run/guanlan-agent-docker.sock"' "${config_file}" >/dev/null
 grep -F '"allow_command_execution": false' "${config_file}" >/dev/null
 grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
+test -x "${temp_dir}/manager/update-agent.sh"
+grep -F 'CONTAINER_NAME=guanlan-agent' "${temp_dir}/manager/install.env" >/dev/null
+
+: > "${log_file}"
+manager_environment=(
+  "PATH=${fake_bin}:/usr/bin:/bin"
+  "TEST_LOG=${log_file}"
+  "TEST_DOCKER_AVAILABLE=1"
+  "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+  "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
+  "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
+)
+if [[ "${EUID}" -eq 0 ]]; then
+  env "${manager_environment[@]}" bash "${installer}" update
+else
+  sudo env "${manager_environment[@]}" bash "${installer}" update
+fi
+grep -F 'docker image inspect --format {{.Id}} ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
+
+: > "${log_file}"
+server_url=https://monitor.example.com
+TEST_FAIL_AGENT_PULLS=1
+TEST_FAIL_GITEE_BUILD=1
+run_installer 1
+grep -F 'docker build --pull --tag ghcr.io/pstarchen/monitor-for-server-agent:latest https://gitee.com/starchen520/monitor-for-server.git#main:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --tag ghcr.io/pstarchen/monitor-for-server-agent:latest https://github.com/Pstarchen/monitor-for-server.git#main:agent' "${log_file}" >/dev/null
+TEST_FAIL_AGENT_PULLS=0
+TEST_FAIL_GITEE_BUILD=0
 
 : > "${log_file}"
 server_url=https://monitor.example.com
@@ -222,6 +271,9 @@ auto_update_environment=(
   "TEST_CONFIG=${config_file}"
   "TEST_DOCKER_AVAILABLE=1"
   "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
+  "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+  "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
+  "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
   "GUANLAN_AGENT_KEY=test-agent-key"
 )
 if [[ "${EUID}" -eq 0 ]]; then

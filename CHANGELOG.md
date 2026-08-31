@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.18.0
+
+- Linux Agent 保持 Docker 优先安装，继续使用镜像源回退、只读宿主机挂载、host network/PID 和失败回滚机制。
+- Agent 一键命令简化为下载、授权、安装三个串联动作，脚本自行处理 root/sudo，不再生成多行分支命令。
+- Linux 安装脚本新增统一管理菜单及 `status`、`logs`、`restart`、`update`、`uninstall` 动作，同时兼容 Docker 容器与本机 systemd 回退模式。
+- 关闭定时自动更新时仍保留手动更新器；卸载默认保留配置和离线缓存，只有显式 `--purge` 才彻底删除。
+- 总控与 Agent 安装/更新新增 Gitee、GitHub 双源码回退；镜像代理与 GHCR 均不可用时可从源码构建 Docker 镜像，控制台也可明确选择总控直连、Gitee 或 GitHub 安装脚本。
+
 ## v1.17.0
 
 - 项目用户可见品牌统一为“星辰监控”，首页、登录页、控制台、通知、报表、TOTP 和文档同步更新，并使用新的星空服务器图标。

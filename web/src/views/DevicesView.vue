@@ -45,8 +45,14 @@ const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], assetTag: '', ownerName: '', vendor: '', model: '', serialNumber: '', environment: '', purchaseDate: '', warrantyExpiresAt: '', description: '', ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
 const agentInstallSourceOptions: Array<{ label: string; value: AgentInstallSource }> = [
   { label: '总控直连', value: 'controller' },
-  { label: 'Gitee 镜像', value: 'gitee' },
+  { label: 'Gitee', value: 'gitee' },
+  { label: 'GitHub', value: 'github' },
 ]
+const agentInstallSourceHelp: Record<AgentInstallSource, string> = {
+  controller: '从当前总控下载安装脚本，Agent 镜像会自动选择可用镜像源。',
+  gitee: '从 Gitee 下载安装脚本，适用于访问 GitHub 困难的中国大陆服务器。',
+  github: '从 GitHub 官方仓库下载安装脚本。',
+}
 const agentKeyElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
@@ -370,8 +376,8 @@ onBeforeUnmount(() => {
           <el-form label-position="top">
             <el-form-item label="监控平台域名或地址"><el-input v-model="agentServerUrl" /></el-form-item>
             <el-form-item label="安装源">
-              <el-segmented v-model="agentInstallSource" :options="agentInstallSourceOptions" />
-              <p class="field-help">{{ agentInstallSource === 'controller' ? '从当前总控直接下载安装器，目标服务器无需访问代码托管平台。' : '适用于访问 GitHub 困难的中国大陆服务器。' }}</p>
+              <el-segmented v-model="agentInstallSource" :options="agentInstallSourceOptions" aria-label="Agent 安装源" />
+              <p class="field-help">{{ agentInstallSourceHelp[agentInstallSource] }}</p>
             </el-form-item>
             <div class="form-grid two-fields">
               <el-form-item label="采集周期"><el-select v-model="collectionSeconds"><el-option v-for="value in [1, 3, 10, 30, 60]" :key="value" :label="`${value} 秒`" :value="value" /></el-select></el-form-item>

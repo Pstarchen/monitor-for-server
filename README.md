@@ -30,15 +30,24 @@
 
 ## 快速启动
 
-总终端只需要 Docker Engine 和 Compose v2。安装器默认先从国内镜像源拉取预构建的总控 `setup`、`server` 和 `web` 镜像，失败后回退到官方 GHCR，并自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis；数据库端口不会暴露到公网。只有需要离线或本地验证时才使用 `--build` 从源码构建。
+总终端只需要 Docker Engine 和 Compose v2。安装器默认先从国内镜像源拉取预构建的总控 `setup`、`server` 和 `web` 镜像，再回退官方 GHCR；镜像仓库均不可用时，会依次尝试 Gitee、GitHub 源码并在本机构建 Docker 镜像。运行方式始终保持 Docker，并自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis；数据库端口不会暴露到公网。
 
+GitHub 安装：
 ```bash
 git clone https://github.com/Pstarchen/monitor-for-server.git
 cd monitor-for-server
 bash ./deploy/install-controller.sh
 ```
 
-需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查镜像、`--apply` 手动更新；更新器先尝试配置的国内镜像源，再回退 GHCR。网络环境可以访问官方源时可显式添加 `--no-mirror` 跳过镜像源。
+Gitee 安装：
+
+```bash
+git clone https://gitee.com/starchen520/monitor-for-server.git
+cd monitor-for-server
+bash ./deploy/install-controller.sh
+```
+
+需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查镜像、`--apply` 手动更新；更新器按镜像代理、GHCR、Gitee 源码、GitHub 源码的顺序回退。网络环境可以访问官方源时可添加 `--no-mirror`，需要直接跳过镜像仓库时可添加 `--source-build`。
 
 使用本地源码构建总控镜像：
 

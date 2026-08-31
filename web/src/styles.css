@@ -618,6 +618,8 @@ p, h1, h2, h3 { margin: 0; }
 .agent-install-options { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 .agent-install-options .el-form-item { margin-bottom: 14px; }
 .agent-install-options .el-select { width: 100%; }
+.agent-install-options .el-segmented { width: 100%; }
+.agent-install-options .el-segmented .el-segmented__item { flex: 1; min-width: 0; }
 .install-tabs { margin-top: 14px; }
 .install-tabs .el-tabs__header { margin-bottom: 10px; }
 .install-command { min-height: 92px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 30px; align-items: start; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: #171717; }

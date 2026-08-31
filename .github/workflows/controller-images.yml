@@ -32,7 +32,7 @@ jobs:
         run: bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/install-agent.sh deploy/update-controller.sh && bash deploy/update-controller_test.sh
+        run: bash -n deploy/install-agent.sh deploy/install-controller.sh deploy/update-controller.sh && bash deploy/update-controller_test.sh
 
       - name: Set up Java
         uses: actions/setup-java@v4

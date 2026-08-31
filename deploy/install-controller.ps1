@@ -3,15 +3,17 @@ param(
     [switch] $Help,
     [switch] $Cleanup,
     [switch] $Build,
+    [switch] $SourceBuild,
     [switch] $AutoUpdate,
-    [switch] $NoMirror
+    [switch] $NoMirror,
+    [switch] $NoSourceFallback
 )
 
 $ErrorActionPreference = 'Stop'
 
 if ($Help) {
     @'
-Usage: install-controller.ps1 [-Cleanup] [-Build]
+Usage: install-controller.ps1 [-Cleanup] [-Build | -SourceBuild]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -20,13 +22,16 @@ browser guide at /setup.
 -Cleanup stops this Compose project and removes its local images before build.
          PostgreSQL and Redis volumes are preserved.
 -Build builds controller images locally instead of pulling them from GHCR.
+-SourceBuild builds Docker images from Gitee/GitHub source repositories.
 -AutoUpdate enables the controller's daily 04:00 automatic update.
 -NoMirror skips mainland-China mirror registries and uses official GHCR.
+-NoSourceFallback does not build from source when all image registries fail.
 '@
     exit 0
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if ($Build -and $SourceBuild) { throw '-Build 与 -SourceBuild 不能同时使用。' }
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安装 Docker Engine。' }
 & docker compose version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
@@ -85,7 +90,9 @@ try {
         Write-Host '正在拉取总控预构建镜像（优先使用国内镜像源）...'
         $updateScript = Join-Path $PSScriptRoot 'update-controller.ps1'
         $updateArgs = @('-Check')
+        if ($SourceBuild) { $updateArgs += '-SourceBuild' }
         if ($NoMirror) { $updateArgs += '-NoMirror' }
+        if ($NoSourceFallback) { $updateArgs += '-NoSourceFallback' }
         & $updateScript @updateArgs
     }
     if ($LASTEXITCODE -ne 0) { throw '总控镜像准备失败；如需本地构建请重试 -Build。' }

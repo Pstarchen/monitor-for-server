@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-controller.sh [--cleanup] [--build] [--auto-update] [--no-mirror]
+Usage: install-controller.sh [--cleanup] [--build|--source-build] [--auto-update] [--no-mirror] [--no-source-fallback]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -12,21 +12,27 @@ browser guide at /setup.
   --cleanup  stop this Compose project and remove its old images before build.
              PostgreSQL/Redis volumes are preserved.
   --build    build controller images locally instead of pulling them from GHCR.
+  --source-build  build Docker images from Gitee/GitHub source repositories.
   --auto-update  enable the controller's daily 04:00 automatic update.
   --no-mirror  skip mainland-China mirror registries and use official GHCR.
+  --no-source-fallback  do not build from source when all image registries fail.
 USAGE
 }
 
 cleanup=false
 build=false
+source_build=false
 auto_update=false
 no_mirror=false
+source_fallback=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cleanup) cleanup=true; shift ;;
     --build) build=true; shift ;;
+    --source-build) source_build=true; shift ;;
     --auto-update) auto_update=true; shift ;;
     --no-mirror) no_mirror=true; shift ;;
+    --no-source-fallback) source_fallback=false; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -147,14 +153,23 @@ controller_services=(setup server web)
 if [[ "$(uname -s)" == "Linux" ]]; then
   controller_services+=(controller-agent)
 fi
-if [[ "${build}" == true ]]; then
+if [[ "${build}" == true && "${source_build}" == true ]]; then
+  echo "--build 与 --source-build 不能同时使用。" >&2
+  exit 2
+elif [[ "${build}" == true ]]; then
   echo "使用本地源码构建总控镜像..."
   docker compose "${profile_args[@]}" build --pull "${controller_services[@]}"
 else
   echo "正在拉取总控预构建镜像（优先使用国内镜像源）..."
   update_args=(--check)
+  if [[ "${source_build}" == true ]]; then
+    update_args+=(--source-build)
+  fi
   if [[ "${no_mirror}" == true ]]; then
     update_args+=(--no-mirror)
+  fi
+  if [[ "${source_fallback}" != true ]]; then
+    update_args+=(--no-source-fallback)
   fi
   bash "${script_dir}/update-controller.sh" "${update_args[@]}"
 fi

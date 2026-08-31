@@ -4,7 +4,11 @@ param(
     [Parameter(Mandatory = $true)] [string] $DeviceId,
     [ValidateSet('1s', '3s', '10s', '30s', '60s')] [string] $Interval = '3s',
     [string] $BinaryPath,
-    [string] $RepositoryUrl = 'https://github.com/Pstarchen/monitor-for-server.git',
+    [string[]] $RepositoryUrl = @(
+        'https://gitee.com/starchen520/monitor-for-server.git',
+        'https://github.com/Pstarchen/monitor-for-server.git'
+    ),
+    [string] $SourceRef = 'main',
     [string[]] $MonitoredService = @(),
     [string[]] $MonitoredProcess = @(),
     [string[]] $DiskMountpoint = @(),
@@ -38,6 +42,12 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 if ([string]::IsNullOrWhiteSpace($agentKey)) {
     throw '请通过 GUANLAN_AGENT_KEY 环境变量提供一次性 Agent 密钥。'
+}
+if ($RepositoryUrl.Count -eq 0 -or @($RepositoryUrl | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+    throw 'Agent 源码仓库地址不能为空。'
+}
+if ($SourceRef -notmatch '^[a-zA-Z0-9._/-]+$' -or $SourceRef.StartsWith('-') -or $SourceRef.Contains('..')) {
+    throw 'Agent 源码 Git ref 无效。'
 }
 
 function Test-LocalHost([string] $HostName) {
@@ -94,15 +104,24 @@ function Install-AgentUpdater {
     if ($NoAutoUpdate) { return }
     $updaterPath = Join-Path $dataDir 'update-agent.ps1'
     $taskName = 'GuanlanAgentUpdate'
+    $repositoryList = ($RepositoryUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
     $script = @"
 `$ErrorActionPreference = 'SilentlyContinue'
 if (-not (Get-Command git -ErrorAction SilentlyContinue) -or -not (Get-Command go -ErrorAction SilentlyContinue)) { exit 0 }
+`$repositories = @($repositoryList)
 `$temp = Join-Path ([IO.Path]::GetTempPath()) ('guanlan-agent-update-' + [Guid]::NewGuid().ToString('N'))
 try {
-    & git clone --depth 1 --filter=blob:none --sparse '$RepositoryUrl' `$temp | Out-Null
-    if (`$LASTEXITCODE -ne 0) { exit 0 }
-    & git -C `$temp sparse-checkout set agent | Out-Null
-    if (`$LASTEXITCODE -ne 0) { exit 0 }
+    `$cloned = `$false
+    foreach (`$repository in `$repositories) {
+        if (Test-Path -LiteralPath `$temp) { Remove-Item -LiteralPath `$temp -Recurse -Force -ErrorAction SilentlyContinue }
+        Write-Host "正在尝试 Agent 源码仓库：`$repository ($SourceRef)"
+        & git clone --branch '$SourceRef' --depth 1 --filter=blob:none --sparse `$repository `$temp | Out-Null
+        if (`$LASTEXITCODE -eq 0) {
+            & git -C `$temp sparse-checkout set agent | Out-Null
+            if (`$LASTEXITCODE -eq 0) { `$cloned = `$true; break }
+        }
+    }
+    if (-not `$cloned) { Write-Error 'GitHub 与 Gitee Agent 源码均不可用。'; exit 1 }
     `$built = Join-Path `$temp 'guanlan-agent.exe'
     Push-Location (Join-Path `$temp 'agent')
     try { `$env:CGO_ENABLED = '0'; & go build -trimpath -ldflags '-s -w' -o `$built ./cmd/agent } finally { Pop-Location; Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue }
@@ -116,6 +135,19 @@ try {
     $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updaterPath`""
     $trigger = New-ScheduledTaskTrigger -Daily -At 4:15am
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -RunLevel Highest -Force | Out-Null
+}
+
+function Get-AgentSource([string] $Destination) {
+    foreach ($repository in $RepositoryUrl) {
+        if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Recurse -Force }
+        Write-Host "正在尝试 Agent 源码仓库：$repository ($SourceRef)"
+        & git clone --branch $SourceRef --depth 1 --filter=blob:none --sparse $repository $Destination
+        if ($LASTEXITCODE -eq 0) {
+            & git -C $Destination sparse-checkout set agent
+            if ($LASTEXITCODE -eq 0) { return $true }
+        }
+    }
+    return $false
 }
 
 $resolvedServer = Resolve-ServerUrl
@@ -133,10 +165,7 @@ try {
                 throw '未找到 Agent 源码。请安装 git，或通过 -BinaryPath 提供预编译 Agent。'
             }
             $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
-            & git clone --depth 1 --filter=blob:none --sparse $RepositoryUrl $temporarySource
-            if ($LASTEXITCODE -ne 0) { throw 'Agent 源码下载失败。' }
-            & git -C $temporarySource sparse-checkout set agent
-            if ($LASTEXITCODE -ne 0) { throw 'Agent 源码准备失败。' }
+            if (-not (Get-AgentSource $temporarySource)) { throw 'GitHub 与 Gitee Agent 源码均不可用。' }
             $sourceRoot = $temporarySource
         }
         if (-not (Get-Command go -ErrorAction SilentlyContinue)) {

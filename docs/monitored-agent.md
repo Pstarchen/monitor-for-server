@@ -6,29 +6,21 @@
 
 在线安装器默认优先使用 Docker：Docker 命令和守护进程可用时，直接拉取公开的 `ghcr.io/pstarchen/monitor-for-server-agent:latest` 镜像并启动容器，不需要 Go 或 git。只有 Docker 不可用时，安装器才使用 `--binary` 指定的本机程序，或拉取源码并用 Go 1.24+ 构建。
 
-控制台默认使用总控同域入口，目标服务器无需访问 GitHub。中国大陆服务器也可在命令上方切换为“Gitee 镜像”。复制按钮输出的是纯文本命令，不包含 Markdown 链接、历史版本号或多级下载回退。
+控制台默认使用总控同域入口，目标服务器无需访问代码托管平台；也可在命令上方明确切换到 Gitee 或 GitHub。复制按钮输出的是纯文本命令，不包含 Markdown 链接、历史版本号或多级下载回退。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
-  'https://monitor.example.com/api/setup/agent-installer?platform=linux' \
-  -o xingchen-agent.sh &&
-chmod +x xingchen-agent.sh &&
-if [ "$(id -u)" -eq 0 ]; then
-  env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh \
-    --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s
-else
-  sudo env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh \
-    --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s
-fi
+curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh install --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s
 ```
 
-Gitee 镜像只替换下载地址，安装参数和密钥注入方式保持一致：
+Gitee 源只替换安装脚本下载地址，安装参数和密钥注入方式保持一致：
 
 ```bash
 curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
   'https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh' \
   -o xingchen-agent.sh
 ```
+
+GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`，控制台选择后会自动生成完整命令。
 
 `--server-url` 只填写域名或 `域名:端口` 即可。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 HTTP 并在配置中启用明文连接。也支持直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS；HTTP 仅适合没有证书的临时或内网部署。安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
 
@@ -49,18 +41,25 @@ curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
 
 安装器会自动探测这两个标准路径；使用非标准 Docker/Podman socket 时，显式传入 `--docker-socket /path/to/runtime.sock`（或设置 `GUANLAN_DOCKER_SOCKET`）。Docker 模式会把它以只读方式映射到 Agent 容器的固定路径，自动更新时也会保留映射；本机 systemd 模式会将 Agent 服务加入 socket 所属组，避免常见的 `root:docker 0660` 权限导致容器列表为空。若指定路径不存在或不是 Unix socket，安装器会直接报错并停止。
 
+安装完成后，安装脚本会保存为 `/opt/xingchen/agent/agent.sh`。直接执行可打开管理菜单，也可以非交互执行：
+
 ```bash
-docker ps --filter name=guanlan-agent
-docker logs --tail 100 guanlan-agent
+/opt/xingchen/agent/agent.sh status
+/opt/xingchen/agent/agent.sh logs
+/opt/xingchen/agent/agent.sh restart
+/opt/xingchen/agent/agent.sh update
+/opt/xingchen/agent/agent.sh uninstall
 ```
 
-内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定镜像。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；也可用 `--no-docker --binary /path/to/guanlan-agent` 强制本机模式。未提供二进制时会通过 `--source-url` 指定的仓库拉取源码构建。
+默认卸载会保留配置和离线缓存；彻底删除时使用 `uninstall --purge`。管理脚本会自动识别当前是 Docker 容器还是本机 systemd 服务。
 
-Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试可用的 `ghcr.1ms.run` 和 `ghcr.nju.edu.cn`，失败后回退到官方 GHCR；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
+内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定 OCI 镜像。镜像代理和 GHCR 都不可用时，Docker 安装/更新会依次从 Gitee、GitHub 源码构建镜像；Gitee Git 仓库本身不作为 OCI 镜像仓库。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；未提供二进制时同样按 Gitee、GitHub 顺序拉取源码。可重复传入 `--source-url` 配置私有源码源，并用 `--source-ref` 固定分支或标签。
+
+Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR，全部失败后从 Gitee、GitHub 源码构建 Docker 镜像；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
 
 ```bash
 systemctl status guanlan-agent-update.timer
-sudo systemctl start guanlan-agent-update.service
+/opt/xingchen/agent/agent.sh update
 ```
 
 支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。本机回退模式安装后检查：

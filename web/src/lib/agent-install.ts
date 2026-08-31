@@ -1,5 +1,5 @@
 export type AgentInstallPlatform = 'linux' | 'windows'
-export type AgentInstallSource = 'controller' | 'gitee'
+export type AgentInstallSource = 'controller' | 'gitee' | 'github'
 
 export interface AgentInstallCommandOptions {
   platform: AgentInstallPlatform
@@ -16,6 +16,7 @@ export interface AgentInstallCommandOptions {
 
 const controllerInstallerPath = '/api/setup/agent-installer'
 const giteeInstallerRoot = 'https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent'
+const githubInstallerRoot = 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent'
 
 function shellQuote(value: string): string {
   return `'${value.split("'").join("'\"'\"'")}'`
@@ -28,6 +29,9 @@ function powerShellQuote(value: string): string {
 function installerUrl(options: AgentInstallCommandOptions): string {
   if (options.source === 'gitee') {
     return `${giteeInstallerRoot}.${options.platform === 'linux' ? 'sh' : 'ps1'}`
+  }
+  if (options.source === 'github') {
+    return `${githubInstallerRoot}.${options.platform === 'linux' ? 'sh' : 'ps1'}`
   }
   return `${options.serverUrl}${controllerInstallerPath}?platform=${options.platform}`
 }
@@ -42,16 +46,10 @@ function linuxCommand(options: AgentInstallCommandOptions): string {
   const key = shellQuote(options.agentKey)
 
   return [
-    `curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ${shellQuote(installerUrl(options))} -o xingchen-agent.sh &&`,
-    'chmod +x xingchen-agent.sh &&',
-    'if [ "$(id -u)" -eq 0 ]; then',
-    `  env GUANLAN_AGENT_KEY=${key} ./xingchen-agent.sh ${installArgs}`,
-    'elif command -v sudo >/dev/null 2>&1; then',
-    `  sudo env GUANLAN_AGENT_KEY=${key} ./xingchen-agent.sh ${installArgs}`,
-    'else',
-    "  echo '请以 root 身份运行，或安装 sudo 后重试。' >&2; exit 1",
-    'fi',
-  ].join('\n')
+    `curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 ${shellQuote(installerUrl(options))} -o xingchen-agent.sh`,
+    'chmod +x xingchen-agent.sh',
+    `env GUANLAN_AGENT_KEY=${key} ./xingchen-agent.sh install ${installArgs}`,
+  ].join(' && ')
 }
 
 function windowsCommand(options: AgentInstallCommandOptions): string {

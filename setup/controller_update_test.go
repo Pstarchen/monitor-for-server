@@ -122,6 +122,15 @@ func TestControllerUpdateStateExpiryIsRecoverable(t *testing.T) {
 	}
 }
 
+func TestControllerUpdateStaleWindowsOutliveCommandTimeouts(t *testing.T) {
+	if controllerUpdateCheckStaleAfter <= controllerUpdateCheckTimeout {
+		t.Fatalf("check stale window %s must exceed command timeout %s", controllerUpdateCheckStaleAfter, controllerUpdateCheckTimeout)
+	}
+	if controllerUpdateApplyStaleAfter <= controllerUpdateApplyTimeout {
+		t.Fatalf("apply stale window %s must exceed command timeout %s", controllerUpdateApplyStaleAfter, controllerUpdateApplyTimeout)
+	}
+}
+
 func TestControllerUpdateRunnerStartExpiry(t *testing.T) {
 	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 	service := &controllerUpdateService{now: func() time.Time { return now }}

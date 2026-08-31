@@ -12,6 +12,12 @@ mkdir -p "${fake_bin}"
 cat > "${fake_bin}/docker" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >> "${TEST_LOG}"
+if [[ "${1:-}" == "pull" && "${TEST_FAIL_ALL_PULLS:-false}" == "true" ]]; then
+  exit 1
+fi
+if [[ "${1:-}" == "build" && "${TEST_FAIL_GITEE_BUILD:-false}" == "true" && "$*" == *gitee.com* ]]; then
+  exit 1
+fi
 if [[ "${1:-}" == "pull" && ( "${2:-}" == ghcr.nju.edu.cn/* || "${2:-}" == ghcr.1ms.run/* ) ]]; then
   exit 1
 fi
@@ -40,6 +46,22 @@ if grep -q 'ghcr.m.daocloud.io' "${log_file}"; then
 fi
 if grep -q ' compose .* up ' "${log_file}"; then
   echo 'Check mode unexpectedly restarted controller services.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
+grep -E 'docker build --pull --tag xingchen-controller-source-[^ ]+-0:candidate https://gitee.com/starchen520/monitor-for-server.git#main:setup' "${log_file}" >/dev/null
+grep -E 'docker build --pull --tag xingchen-controller-source-[^ ]+-0:candidate https://github.com/Pstarchen/monitor-for-server.git#main:setup' "${log_file}" >/dev/null
+grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+
+: > "${log_file}"
+if TEST_FAIL_ALL_PULLS=true run_update --check --no-source-fallback; then
+  echo 'Update succeeded even though image pulls failed and source fallback was disabled.' >&2
+  exit 1
+fi
+if grep -q 'docker build ' "${log_file}"; then
+  echo 'Disabled source fallback still invoked docker build.' >&2
   exit 1
 fi
 

@@ -12,7 +12,7 @@
 
 ## Docker Compose 部署
 
-Linux 生产环境应使用总终端安装器启动。它默认先从国内镜像源拉取总控 `setup`、`server`、`web` 镜像，失败后回退 GHCR，并自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境应使用总终端安装器启动。它默认按国内镜像代理、GHCR、Gitee 源码、GitHub 源码的顺序准备总控 `setup`、`server`、`web` Docker 镜像，并自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
 bash ./deploy/install-controller.sh
@@ -23,6 +23,12 @@ docker compose --profile host-monitoring ps
 
 ```bash
 bash ./deploy/install-controller.sh --build
+```
+
+需要跳过镜像仓库并直接从 Gitee/GitHub 构建 Docker 镜像时：
+
+```bash
+bash ./deploy/install-controller.sh --source-build
 ```
 
 然后打开：
@@ -76,9 +82,9 @@ sudo bash ./deploy/update-controller.sh --apply
 sudo bash ./deploy/update-controller.sh --auto
 ```
 
-更新器默认允许单个镜像最多拉取 600 秒、Compose 操作最多执行 900 秒，适配带宽受限或首次下载镜像的环境。可通过 `GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS` 和 `GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；更新状态会在命令明确失败时记录错误，不会删除数据库卷。
+更新器默认允许单个镜像最多拉取 180 秒、单个源码镜像最多构建 1200 秒、Compose 操作最多执行 900 秒。可通过 `GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS`、`GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；外层任务上限覆盖完整回退链，不会在单个来源仍正常工作时提前标记中断。更新失败不会删除数据库卷。
 
-更新器默认依次尝试可用的 `ghcr.1ms.run` 和 `ghcr.nju.edu.cn`，失败后回退到官方 GHCR；不会默认使用未将本项目加入白名单的 DaoCloud 公共镜像。首次安装和系统设置中的更新都使用这条顺序，单个镜像源默认最多等待 180 秒。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 传入逗号分隔的镜像前缀，或使用 `--no-mirror` 跳过镜像源；需要本地构建时使用 `--build`。`--auto` 会启用由 setup 服务执行的每日 04:00 自动更新，失败不会删除数据库卷。
+更新器默认依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR；这些 OCI 镜像源全部失败后，再依次使用 Gitee、GitHub Git 仓库作为 Docker 远程构建上下文。Gitee Git 仓库本身不是 OCI 镜像仓库。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 配置镜像前缀，通过 `GUANLAN_SOURCE_REPOSITORIES` 配置逗号分隔的源码仓库，通过 `GUANLAN_SOURCE_REF` 固定分支或标签。`--source-build` 会直接走双源码构建，`--no-source-fallback` 会在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
 
 ### 数据库备份与恢复
 
@@ -133,41 +139,38 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 安装器默认检测 Docker 守护进程，成功时直接拉取 GHCR 预构建镜像并启动容器，不要求 Go。控制台生成的命令只把密钥注入安装进程，不会用 `export` 留在当前 Shell；复制的命令仍包含密钥，执行后应按服务器安全策略清理终端历史。
 
-总控同域入口是默认安装源，目标服务器无需直接访问 GitHub；中国大陆服务器可在控制台切换到 Gitee 镜像。
+总控同域入口是默认安装源，目标服务器无需直接访问代码托管平台；控制台也可以明确切换到 Gitee 或 GitHub 安装脚本。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
-  'https://monitor.example.com/api/setup/agent-installer?platform=linux' \
-  -o xingchen-agent.sh &&
-chmod +x xingchen-agent.sh &&
-if [ "$(id -u)" -eq 0 ]; then
-  env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh \
-    --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s --disk / --disk /data
-else
-  sudo env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh \
-    --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s --disk / --disk /data
-fi
+curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh install --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s --disk / --disk /data
 ```
 
-Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh`。控制台切换安装源后会自动生成完整命令，无需手工替换。
+Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh`，GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`。控制台切换安装源后会自动生成完整命令，无需手工替换。
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。使用 `--process java`（可重复指定，最多 32 个）可额外保留关键进程，即使其不在 CPU 排名前 12；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。Windows 安装器对应使用 `-MonitoredProcess java`、`-CollectAllProcesses`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
 需要个性化指标时，在 Agent 配置的 `custom_metrics` 数组中添加最多 32 个参数化程序。程序不经过 Shell，每项最多运行 3 秒，`kind` 支持 `number`、`text`、`exit_code`；服务端设备详情会展示结果，告警规则可对数值项设置阈值。详见 `docs/monitored-agent.md` 中的 JSON 示例。Linux 还可添加 `--system-logs` 采集存在的标准系统日志文件（最多展示每个文件最近 20 行）。
 
-`--server-url` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。也可以直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS，HTTP 仅适合没有证书的临时或内网部署。默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。可用 `--image` 或 `GUANLAN_AGENT_IMAGE` 指向固定版本/内部仓库，`--container` 可覆盖容器名。Docker 模式会以只读方式映射 `/dev` 供可选 SMART 检测使用；虚拟磁盘或未授予设备访问权限时，SMART 会显示为未采集，不影响其他指标。Docker 模式安装结果：
+`--server-url` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。镜像代理与 GHCR 都失败时，安装器会从 Gitee、GitHub 源码构建同名 Docker 镜像；可用 `--source-url`（可重复）和 `--source-ref` 覆盖源码。`--image` 或 `GUANLAN_AGENT_IMAGE` 可指向内部 OCI 仓库，`--container` 可覆盖容器名。
 
 - 容器：`guanlan-agent`，重启策略为 `unless-stopped`
 - 配置：`/etc/guanlan-agent/agent.json`，只读挂载到容器
 - 缓冲：Docker 卷 `guanlan-agent-spool`
 - 宿主机：只读挂载到 `/host`，并使用 host network/PID 采集主机指标
 
+安装器会保存统一管理脚本，不需要再记 Docker 与 systemd 的不同命令：
+
 ```bash
-docker ps --filter name=guanlan-agent
-docker logs --tail 100 guanlan-agent
+/opt/xingchen/agent/agent.sh status
+/opt/xingchen/agent/agent.sh logs
+/opt/xingchen/agent/agent.sh restart
+/opt/xingchen/agent/agent.sh update
+/opt/xingchen/agent/agent.sh uninstall
 ```
 
-Docker 不可用时，`--binary /path/to/guanlan-agent` 会使用本机 systemd 服务；`--no-docker --binary /path/to/guanlan-agent` 可强制跳过 Docker。未提供二进制时，在线安装器会拉取源码，因此需要 Go 1.24+、git 和 systemd；可通过 `--source-url` 指向内部源码镜像。此回退模式安装结果：
+直接运行 `/opt/xingchen/agent/agent.sh` 会打开交互菜单。默认卸载会保留配置和离线缓存，只有 `uninstall --purge` 才会一并删除。
+
+Docker 不可用时，`--binary /path/to/guanlan-agent` 会使用本机 systemd 服务；`--no-docker --binary /path/to/guanlan-agent` 可强制跳过 Docker。未提供二进制时，在线安装器会依次拉取 Gitee、GitHub 源码，因此需要 Go 1.24+、git 和 systemd；可重复使用 `--source-url` 指定一个或多个私有源码源。此回退模式安装结果：
 
 - 程序：`/usr/local/bin/guanlan-agent`
 - 配置：`/etc/guanlan-agent/agent.json`，权限 `0600`

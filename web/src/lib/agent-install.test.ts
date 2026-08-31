@@ -21,10 +21,11 @@ describe('buildAgentInstallCommand', () => {
     expect(command).toContain('https://monitor.example.com/api/setup/agent-installer?platform=linux')
     expect(command).toContain('curl -fL --retry 3')
     expect(command).toContain('chmod +x xingchen-agent.sh')
-    expect(command).toContain("env GUANLAN_AGENT_KEY='agent'\"'\"'key'")
+    expect(command).toContain("env GUANLAN_AGENT_KEY='agent'\"'\"'key' ./xingchen-agent.sh install")
     expect(command).toContain("--disk '/' --disk '/data'")
     expect(command).toContain('--all-processes --process-limit 128')
     expect(command).not.toContain('export GUANLAN_AGENT_KEY')
+    expect(command).not.toContain('if [ "$(id -u)"')
     expect(command).not.toMatch(/v1\.12\.0|v12|jsdelivr|raw\.githubusercontent/)
     expect(command).not.toContain('](')
   })
@@ -35,6 +36,13 @@ describe('buildAgentInstallCommand', () => {
     expect(command).toContain('https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh')
     expect(command).toContain('--skip-processes --skip-connections')
     expect(command).not.toContain('--all-processes')
+  })
+
+  it('uses the GitHub main-branch installer when explicitly selected', () => {
+    const command = buildAgentInstallCommand({ ...baseOptions, source: 'github' })
+
+    expect(command).toContain('https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh')
+    expect(command).not.toContain('gitee.com')
   })
 
   it('builds a Windows command for the selected source and clears the temporary key', () => {

@@ -3,18 +3,22 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: update-controller.sh [--check|--apply|--auto] [--build] [--no-mirror]
+Usage: update-controller.sh [--check|--apply|--auto] [--build|--source-build] [--no-mirror] [--no-source-fallback]
 
   --check       pull candidate images and report that an update is ready.
   --apply       pull images and restart the controller services.
   --auto        enable the controller's daily 04:00 automatic update.
   --build       build from local source instead of pulling images.
+  --source-build  build Docker images from Gitee/GitHub source repositories.
   --no-mirror   skip configured mainland-China mirror registries.
+  --no-source-fallback  fail instead of building from source when all image registries are unavailable.
 USAGE
 }
 
 mode=check
 build=false
+source_build=false
+source_fallback=true
 use_mirror=true
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -22,7 +26,9 @@ while [[ $# -gt 0 ]]; do
     --apply) mode=apply; shift ;;
     --auto) mode=auto; shift ;;
     --build) build=true; shift ;;
+    --source-build) source_build=true; shift ;;
     --no-mirror) use_mirror=false; shift ;;
+    --no-source-fallback) source_fallback=false; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -77,6 +83,27 @@ read_env_value() {
   awk -v key="${key}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true
 }
 
+source_ref="${GUANLAN_SOURCE_REF:-$(read_env_value GUANLAN_SOURCE_REF)}"
+source_ref="${source_ref:-main}"
+source_build_timeout_seconds="${GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS)}"
+source_build_timeout_seconds="${source_build_timeout_seconds:-1200}"
+source_repository_list="${GUANLAN_SOURCE_REPOSITORIES:-$(read_env_value GUANLAN_SOURCE_REPOSITORIES)}"
+IFS=',' read -r -a source_repositories <<< "${source_repository_list:-https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git}"
+if [[ ! "${source_build_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS 必须是正整数秒数。" >&2
+  exit 2
+fi
+if ((${#source_repositories[@]} == 0)) || [[ -z "${source_ref}" || "${source_ref}" == -* || "${source_ref}" == *..* || ! "${source_ref}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  echo "总控源码仓库列表或 Git ref 无效。" >&2
+  exit 2
+fi
+for source_repository in "${source_repositories[@]}"; do
+  if [[ -z "${source_repository}" ]]; then
+    echo "总控源码仓库地址不能为空。" >&2
+    exit 2
+  fi
+done
+
 compose_args=()
 controller_agent_enabled="${CONTROLLER_AGENT_ENABLED:-}"
 if [[ -z "${controller_agent_enabled}" && -f .env ]]; then
@@ -88,8 +115,10 @@ fi
 compose_project_root="${GUANLAN_HOST_PROJECT_ROOT:-${project_root}}"
 compose_args+=(-f "${project_root}/docker-compose.yml" --project-directory "${compose_project_root}" --env-file "${project_root}/.env")
 services=(setup server web)
+source_contexts=(setup server web)
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   services+=(controller-agent)
+  source_contexts+=(agent)
 fi
 
 image_value() {
@@ -100,6 +129,15 @@ image_value() {
   fi
   printf '%s' "${value:-${default}}"
 }
+
+source_images=(
+  "$(image_value GUANLAN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:latest)"
+  "$(image_value GUANLAN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:latest)"
+  "$(image_value GUANLAN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:latest)"
+)
+if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
+  source_images+=("$(image_value GUANLAN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:latest)")
+fi
 
 pull_one() {
   local image="$1"
@@ -126,13 +164,57 @@ pull_one() {
 }
 
 pull_images() {
-  local image
-  pull_one "$(image_value GUANLAN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:latest)"
-  pull_one "$(image_value GUANLAN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:latest)"
-  pull_one "$(image_value GUANLAN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:latest)"
-  if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
-    pull_one "$(image_value GUANLAN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:latest)"
-  fi
+  local image failed=false
+  for image in "${source_images[@]}"; do
+    if ! pull_one "${image}"; then
+      failed=true
+    fi
+  done
+  [[ "${failed}" == false ]]
+}
+
+remove_source_build_images() {
+  local temporary_image
+  for temporary_image in "$@"; do
+    docker image rm -f "${temporary_image}" >/dev/null 2>&1 || true
+  done
+}
+
+build_images_from_repositories() {
+  local repository context temporary_image
+  local index success
+  local build_prefix="xingchen-controller-source-$$-${RANDOM}"
+  local temporary_images=()
+  for image in "${source_images[@]}"; do
+    if [[ "${image}" == *@* ]]; then
+      echo "固定摘要镜像无法使用源码构建回退：${image}" >&2
+      return 1
+    fi
+  done
+  for repository in "${source_repositories[@]}"; do
+    temporary_images=()
+    success=true
+    echo "正在尝试总控源码仓库：${repository} (${source_ref})"
+    for ((index = 0; index < ${#source_contexts[@]}; index++)); do
+      context="${repository}#${source_ref}:${source_contexts[index]}"
+      temporary_image="${build_prefix}-${index}:candidate"
+      temporary_images+=("${temporary_image}")
+      if ! run_with_timeout "${source_build_timeout_seconds}" docker build --pull --tag "${temporary_image}" "${context}"; then
+        success=false
+        break
+      fi
+    done
+    if [[ "${success}" == true ]]; then
+      for ((index = 0; index < ${#source_images[@]}; index++)); do
+        docker tag "${temporary_images[index]}" "${source_images[index]}"
+      done
+      remove_source_build_images "${temporary_images[@]}"
+      return 0
+    fi
+    remove_source_build_images "${temporary_images[@]}"
+  done
+  echo "GitHub 与 Gitee 总控源码均无法完成 Docker 构建。" >&2
+  return 1
 }
 
 set_env_value() {
@@ -166,11 +248,23 @@ if [[ "${mode}" == auto ]]; then
   exit 0
 fi
 
-if [[ "${build}" == true ]]; then
+if [[ "${build}" == true && "${source_build}" == true ]]; then
+  echo "--build 与 --source-build 不能同时使用。" >&2
+  exit 2
+elif [[ "${build}" == true ]]; then
   echo "使用本地源码构建总控镜像..."
   run_with_timeout "${compose_timeout_seconds}" docker compose "${compose_args[@]}" build --pull "${services[@]}"
+elif [[ "${source_build}" == true ]]; then
+  build_images_from_repositories
 else
-  pull_images
+  if ! pull_images; then
+    if [[ "${source_fallback}" != true ]]; then
+      echo "总控镜像拉取失败，且源码构建回退已关闭。" >&2
+      exit 1
+    fi
+    echo "所有总控镜像源均不可用，开始从 Gitee/GitHub 源码构建 Docker 镜像。"
+    build_images_from_repositories
+  fi
 fi
 
 if [[ "${mode}" == check ]]; then

@@ -1,14 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+manager_root="${GUANLAN_AGENT_MANAGER_ROOT:-/opt/xingchen/agent}"
+manager_path="${manager_root}/agent.sh"
+manager_metadata_path="${manager_root}/install.env"
+manager_updater_path="${manager_root}/update-agent.sh"
+systemd_dir="${GUANLAN_SYSTEMD_DIR:-/etc/systemd/system}"
+legacy_updater_path="${GUANLAN_LEGACY_AGENT_UPDATER_PATH:-/usr/local/sbin/guanlan-agent-update}"
+original_args=("$@")
+action="install"
+if [[ $# -eq 0 ]]; then
+  action="menu"
+elif [[ "$1" =~ ^(install|update|restart|status|logs|uninstall|menu)$ ]]; then
+  action="$1"
+  shift
+fi
+
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 --server-url HOST_OR_URL --device-id ID [--allow-insecure-http] [--allow-command-execution] [--allow-file-operations] [--no-auto-update] [--binary PATH] [--image IMAGE] [--container NAME] [--no-docker] [--docker-socket PATH] [--source-url URL] [--interval 1s|3s|10s|30s|60s] [--service NAME] [--process NAME] [--disk MOUNTPOINT] [--log-path PATH] [--system-logs] [--integrity-path PATH] [--skip-processes] [--all-processes] [--process-limit N] [--skip-connections] [--skip-ports] [--port-limit N] [--skip-containers] [--container-limit N]"
+  echo "Usage: GUANLAN_AGENT_KEY=... $0 install --server-url HOST_OR_URL --device-id ID [安装参数]"
+  echo "       [--source-url GIT_URL]... [--source-ref GIT_REF]"
+  echo "       $0 update|restart|status|logs|uninstall [--purge]"
+  echo "       $0 menu"
 }
 
 server_url="${GUANLAN_SERVER_URL:-}"
 device_id="${GUANLAN_DEVICE_ID:-}"
 agent_key="${GUANLAN_AGENT_KEY:-}"
-repository_url="${GUANLAN_REPOSITORY_URL:-https://github.com/Pstarchen/monitor-for-server.git}"
+repository_urls=()
+if [[ -n "${GUANLAN_REPOSITORY_URL:-}" ]]; then
+  repository_urls+=("${GUANLAN_REPOSITORY_URL}")
+else
+  IFS=',' read -r -a repository_urls <<< "${GUANLAN_REPOSITORY_URLS:-https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git}"
+fi
+source_url_overridden=false
+source_ref="${GUANLAN_SOURCE_REF:-main}"
+source_build_timeout="${GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
 agent_image="${GUANLAN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${GUANLAN_AGENT_VERSION:-latest}}"
 container_name="${GUANLAN_AGENT_CONTAINER:-guanlan-agent}"
 binary_path=""
@@ -32,6 +58,7 @@ allow_file_operations=false
 no_docker=false
 allow_insecure_http=false
 auto_update=true
+purge=false
 docker_socket="${GUANLAN_DOCKER_SOCKET:-}"
 docker_socket_target="/run/guanlan-agent-docker.sock"
 
@@ -48,7 +75,15 @@ while [[ $# -gt 0 ]]; do
     --container) container_name="${2:-}"; shift 2 ;;
     --no-docker) no_docker=true; shift ;;
     --docker-socket) docker_socket="${2:-}"; shift 2 ;;
-    --source-url) repository_url="${2:-}"; shift 2 ;;
+    --source-url)
+      if [[ "${source_url_overridden}" == false ]]; then
+        repository_urls=()
+        source_url_overridden=true
+      fi
+      repository_urls+=("${2:-}")
+      shift 2
+      ;;
+    --source-ref) source_ref="${2:-}"; shift 2 ;;
     --interval) interval="${2:-}"; shift 2 ;;
     --service) services+=("${2:-}"); shift 2 ;;
     --process) processes+=("${2:-}"); shift 2 ;;
@@ -64,15 +99,138 @@ while [[ $# -gt 0 ]]; do
     --port-limit) port_limit="${2:-}"; shift 2 ;;
     --skip-containers) skip_containers=true; shift ;;
     --container-limit) container_limit="${2:-}"; shift 2 ;;
+    --purge) purge=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
+script_source="${BASH_SOURCE[0]-}"
 if [[ "${EUID}" -ne 0 ]]; then
-  echo "Run this installer as root." >&2
+  if command -v sudo >/dev/null 2>&1 && [[ -n "${script_source}" && -f "${script_source}" ]]; then
+    exec sudo --preserve-env=GUANLAN_AGENT_KEY,GUANLAN_AGENT_IMAGE,GUANLAN_AGENT_IMAGE_MIRRORS,GUANLAN_REPOSITORY_URL,GUANLAN_REPOSITORY_URLS,GUANLAN_SOURCE_REF,GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
+  fi
+  echo "请以 root 身份运行，或安装 sudo 后重试。" >&2
   exit 1
 fi
+
+load_manager_metadata() {
+  [[ -r "${manager_metadata_path}" ]] || return 0
+  local saved_container saved_volume
+  saved_container="$(sed -n 's/^CONTAINER_NAME=//p' "${manager_metadata_path}" | head -n 1)"
+  saved_volume="$(sed -n 's/^SPOOL_VOLUME=//p' "${manager_metadata_path}" | head -n 1)"
+  if [[ "${saved_container}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+    container_name="${saved_container}"
+  fi
+  if [[ "${saved_volume}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+    manager_spool_volume="${saved_volume}"
+  fi
+}
+
+manager_mode() {
+  if command -v docker >/dev/null 2>&1 && docker container inspect "${container_name}" >/dev/null 2>&1; then
+    printf 'docker'
+  elif command -v systemctl >/dev/null 2>&1 && systemctl cat guanlan-agent.service >/dev/null 2>&1; then
+    printf 'systemd'
+  else
+    printf 'missing'
+  fi
+}
+
+manager_status() {
+  case "$(manager_mode)" in
+    docker) docker ps -a --filter "name=^/${container_name}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' ;;
+    systemd) systemctl status guanlan-agent.service --no-pager ;;
+    missing) echo "Agent 尚未安装。" >&2; return 1 ;;
+  esac
+}
+
+manager_logs() {
+  case "$(manager_mode)" in
+    docker) docker logs --tail 100 "${container_name}" ;;
+    systemd) journalctl -u guanlan-agent.service -n 100 --no-pager ;;
+    missing) echo "Agent 尚未安装。" >&2; return 1 ;;
+  esac
+}
+
+manager_restart() {
+  case "$(manager_mode)" in
+    docker) docker restart "${container_name}" >/dev/null ;;
+    systemd) systemctl restart guanlan-agent.service ;;
+    missing) echo "Agent 尚未安装。" >&2; return 1 ;;
+  esac
+  echo "Agent 已重新启动。"
+}
+
+manager_update() {
+  if [[ ! -x "${manager_updater_path}" ]]; then
+    echo "当前安装缺少更新器，请从总控重新复制安装命令覆盖安装。" >&2
+    return 1
+  fi
+  "${manager_updater_path}"
+  echo "Agent 更新检查已完成。"
+}
+
+manager_uninstall() {
+  local mode
+  mode="$(manager_mode)"
+  if [[ "${mode}" == docker ]]; then
+    docker rm -f "${container_name}" >/dev/null
+  elif [[ "${mode}" == systemd ]]; then
+    systemctl disable --now guanlan-agent.service >/dev/null 2>&1 || true
+    rm -f "${systemd_dir}/guanlan-agent.service" /usr/local/bin/guanlan-agent
+  fi
+  systemctl disable --now guanlan-agent-update.timer >/dev/null 2>&1 || true
+  rm -f "${systemd_dir}/guanlan-agent-update.service" "${systemd_dir}/guanlan-agent-update.timer" "${manager_updater_path}" "${legacy_updater_path}"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  if [[ "${purge}" == true ]]; then
+    rm -rf -- /etc/guanlan-agent /var/lib/guanlan-agent
+    if [[ -n "${manager_spool_volume:-}" ]] && command -v docker >/dev/null 2>&1; then
+      docker volume rm "${manager_spool_volume}" >/dev/null 2>&1 || true
+    fi
+    echo "Agent、配置和本地缓存已卸载。"
+  else
+    echo "Agent 已卸载；配置和离线缓存已保留。使用 uninstall --purge 可彻底删除。"
+  fi
+  rm -f "${manager_path}" "${manager_metadata_path}"
+}
+
+manager_menu() {
+  local choice answer executable="${script_source}"
+  [[ -x "${manager_path}" ]] && executable="${manager_path}"
+  while true; do
+    printf '\n星辰监控 Agent 管理\n'
+    printf '1. 查看状态\n2. 查看日志\n3. 重启 Agent\n4. 立即更新\n5. 卸载 Agent\n0. 退出\n'
+    read -r -p '请选择操作 [0-5]: ' choice
+    case "${choice}" in
+      1) "${executable}" status || true ;;
+      2) "${executable}" logs || true ;;
+      3) "${executable}" restart || true ;;
+      4) "${executable}" update || true ;;
+      5)
+        read -r -p '是否同时删除配置和离线缓存？[y/N]: ' answer
+        if [[ "${answer}" =~ ^[Yy]$ ]]; then "${executable}" uninstall --purge; else "${executable}" uninstall; fi
+        return
+        ;;
+      0) return ;;
+      *) echo "请输入 0-5。" ;;
+    esac
+  done
+}
+
+if [[ "${action}" != install ]]; then
+  load_manager_metadata
+  case "${action}" in
+    update) manager_update ;;
+    restart) manager_restart ;;
+    status) manager_status ;;
+    logs) manager_logs ;;
+    uninstall) manager_uninstall ;;
+    menu) manager_menu ;;
+  esac
+  exit $?
+fi
+
 if [[ -z "${server_url}" || -z "${device_id}" || -z "${agent_key}" ]]; then
   echo "Server URL, device ID and GUANLAN_AGENT_KEY are required." >&2
   usage >&2
@@ -86,6 +244,20 @@ if [[ -z "${agent_image}" ]]; then
   echo "Agent image cannot be empty." >&2
   exit 2
 fi
+if ((${#repository_urls[@]} == 0)) || [[ -z "${source_ref}" || "${source_ref}" == -* || "${source_ref}" == *..* || ! "${source_ref}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  echo "Agent source repository list or Git ref is invalid." >&2
+  exit 2
+fi
+if [[ ! "${source_build_timeout}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS 必须是正整数秒数。" >&2
+  exit 2
+fi
+for repository_url in "${repository_urls[@]}"; do
+  if [[ -z "${repository_url}" ]]; then
+    echo "Agent source repository URL cannot be empty." >&2
+    exit 2
+  fi
+done
 if [[ ! "${container_name}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   echo "Container name contains invalid characters: ${container_name}" >&2
   exit 2
@@ -175,7 +347,6 @@ run_with_timeout() {
   fi
 }
 
-script_source="${BASH_SOURCE[0]-}"
 script_dir=""
 project_root=""
 if [[ -n "${script_source}" && -f "${script_source}" ]]; then
@@ -306,7 +477,7 @@ agent_spool_path="/var/lib/guanlan-agent/spool"
 install_docker_agent() {
   echo "正在拉取 Agent 镜像 ${agent_image}..."
   if ! pull_agent_image; then
-    echo "无法拉取 Agent 镜像 ${agent_image}。请检查镜像权限/网络，或使用 --no-docker --binary PATH 强制本机安装。" >&2
+    echo "无法从镜像仓库或 GitHub/Gitee 源码准备 Agent 镜像 ${agent_image}。请检查网络，或使用 --no-docker --binary PATH 强制本机安装。" >&2
     return 1
   fi
 
@@ -370,7 +541,26 @@ pull_agent_image() {
     done
   fi
   echo "正在尝试 Agent 官方镜像源 ${agent_image}..."
-  run_with_timeout "${pull_timeout}" docker pull "${agent_image}"
+  if run_with_timeout "${pull_timeout}" docker pull "${agent_image}"; then
+    return 0
+  fi
+  build_agent_image_from_source
+}
+
+build_agent_image_from_source() {
+  local repository_url context
+  if [[ "${agent_image}" == *@* ]]; then
+    echo "固定摘要镜像无法使用源码构建回退：${agent_image}" >&2
+    return 1
+  fi
+  for repository_url in "${repository_urls[@]}"; do
+    context="${repository_url}#${source_ref}:agent"
+    echo "镜像源不可用，尝试从源码构建 Agent：${repository_url} (${source_ref})"
+    if run_with_timeout "${source_build_timeout}" docker build --pull --tag "${agent_image}" "${context}"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 shell_quote() {
@@ -378,15 +568,14 @@ shell_quote() {
 }
 
 install_agent_updater() {
-  [[ "${auto_update}" == true ]] || return 0
+  local systemd_available=true
   if [[ "$(uname -s)" != "Linux" ]] || ! command -v systemctl >/dev/null 2>&1 || ! systemctl show-environment >/dev/null 2>&1; then
-    echo "未检测到可用的 systemd，Agent 已启动但未安装自动更新任务。" >&2
-    return 0
+    systemd_available=false
   fi
-  local updater="/usr/local/sbin/guanlan-agent-update"
-  local service="/etc/systemd/system/guanlan-agent-update.service"
-  local timer="/etc/systemd/system/guanlan-agent-update.timer"
-  install -d -m 0755 /usr/local/sbin
+  local updater="${manager_updater_path}"
+  local service="${systemd_dir}/guanlan-agent-update.service"
+  local timer="${systemd_dir}/guanlan-agent-update.timer"
+  install -d -m 0755 "${manager_root}"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf 'image=%s\n' "$(shell_quote "${agent_image}")"
@@ -394,6 +583,13 @@ install_agent_updater() {
     printf 'config_path=%s\n' "$(shell_quote "${agent_config_path}")"
     printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
     printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}")"
+    printf 'source_ref=%s\n' "$(shell_quote "${source_ref}")"
+    printf 'source_build_timeout=%s\n' "$(shell_quote "${source_build_timeout}")"
+    printf 'repositories=('
+    for repository_url in "${repository_urls[@]}"; do
+      printf ' %s' "$(shell_quote "${repository_url}")"
+    done
+    printf ' )\n'
     printf 'docker_socket_source=%s\n' "$(shell_quote "${docker_socket}")"
     printf 'docker_socket_target=%s\n' "$(shell_quote "${docker_socket_target}")"
     printf '%s\n' \
@@ -413,7 +609,13 @@ install_agent_updater() {
       '      if run_with_timeout 120 docker pull "${candidate}" >/dev/null && run_with_timeout 30 docker tag "${candidate}" "${image}"; then return 0; fi' \
       '    done' \
       '  fi' \
-      '  run_with_timeout 120 docker pull "${image}"' \
+      '  if run_with_timeout 120 docker pull "${image}"; then return 0; fi' \
+      '  [[ "${image}" == *@* ]] && return 1' \
+      '  for repository in "${repositories[@]}"; do' \
+      '    echo "镜像源不可用，尝试从源码构建 Agent：${repository} (${source_ref})"' \
+      '    if run_with_timeout "${source_build_timeout}" docker build --pull --tag "${image}" "${repository}#${source_ref}:agent"; then return 0; fi' \
+      '  done' \
+      '  return 1' \
       '}' \
       'before="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
       'pull_image' \
@@ -445,6 +647,15 @@ install_agent_updater() {
       'docker rename "${new_container}" "${container_name}"'
   } > "${updater}"
   chmod 0755 "${updater}"
+  if [[ "${auto_update}" != true ]]; then
+    echo "Agent 自动更新未启用，可运行 ${manager_path} update 手动检查。"
+    return 0
+  fi
+  if [[ "${systemd_available}" != true ]]; then
+    echo "未检测到可用的 systemd，Agent 已启动但未安装自动更新任务；可运行 ${manager_path} update 手动检查。" >&2
+    return 0
+  fi
+  install -d -m 0755 "${systemd_dir}"
   printf '%s\n' '[Unit]' 'Description=Update Xingchen Monitor Agent image' 'After=docker.service network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=10min' "ExecStart=${updater}" > "${service}"
   printf '%s\n' '[Unit]' 'Description=Periodic Xingchen Monitor Agent image update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
   systemctl daemon-reload
@@ -452,15 +663,32 @@ install_agent_updater() {
   echo "Agent 自动更新已启用：systemctl status guanlan-agent-update.timer"
 }
 
+clone_agent_source() {
+  local destination="$1" repository_url
+  for repository_url in "${repository_urls[@]}"; do
+    rm -rf -- "${destination}"
+    echo "正在尝试 Agent 源码仓库：${repository_url} (${source_ref})"
+    if git clone --branch "${source_ref}" --depth 1 --filter=blob:none --sparse "${repository_url}" "${destination}" >/dev/null \
+      && git -C "${destination}" sparse-checkout set agent >/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 install_local_agent_updater() {
-  [[ "${auto_update}" == true ]] || return 0
-  local updater="/usr/local/sbin/guanlan-agent-update"
-  local service="/etc/systemd/system/guanlan-agent-update.service"
-  local timer="/etc/systemd/system/guanlan-agent-update.timer"
-  install -d -m 0755 /usr/local/sbin
+  local updater="${manager_updater_path}"
+  local service="${systemd_dir}/guanlan-agent-update.service"
+  local timer="${systemd_dir}/guanlan-agent-update.timer"
+  install -d -m 0755 "${manager_root}" "${systemd_dir}"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
-    printf 'repository_url=%s\n' "$(shell_quote "${repository_url}")"
+    printf 'source_ref=%s\n' "$(shell_quote "${source_ref}")"
+    printf 'repositories=('
+    for repository_url in "${repository_urls[@]}"; do
+      printf ' %s' "$(shell_quote "${repository_url}")"
+    done
+    printf ' )\n'
     printf 'binary_path=%s\n' "$(shell_quote "/usr/local/bin/guanlan-agent")"
     printf 'service_name=%s\n' "$(shell_quote "guanlan-agent.service")"
     printf '%s\n' \
@@ -469,14 +697,25 @@ install_local_agent_updater() {
       'trap '\''rm -rf "${temp_dir}"'\'' EXIT' \
       'command -v git >/dev/null 2>&1 || exit 0' \
       'command -v go >/dev/null 2>&1 || exit 0' \
-      'git clone --depth 1 --filter=blob:none --sparse "${repository_url}" "${temp_dir}/source" >/dev/null || exit 0' \
-      'git -C "${temp_dir}/source" sparse-checkout set agent >/dev/null || exit 0' \
+      'clone_source() {' \
+      '  local repository' \
+      '  for repository in "${repositories[@]}"; do' \
+      '    rm -rf -- "${temp_dir}/source"' \
+      '    echo "正在尝试 Agent 源码仓库：${repository} (${source_ref})"' \
+      '    if git clone --branch "${source_ref}" --depth 1 --filter=blob:none --sparse "${repository}" "${temp_dir}/source" >/dev/null && git -C "${temp_dir}/source" sparse-checkout set agent >/dev/null; then return 0; fi' \
+      '  done' \
+      '  return 1' \
+      '}' \
+      'clone_source || { echo "GitHub 与 Gitee Agent 源码均不可用。" >&2; exit 1; }' \
       '(cd "${temp_dir}/source/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/guanlan-agent" ./cmd/agent) || exit 0' \
       'cmp -s "${temp_dir}/guanlan-agent" "${binary_path}" && exit 0' \
       'install -m 0755 "${temp_dir}/guanlan-agent" "${binary_path}"' \
       'systemctl restart "${service_name}"'
   } > "${updater}"
   chmod 0755 "${updater}"
+  if [[ "${auto_update}" != true ]]; then
+    return 0
+  fi
   printf '%s\n' '[Unit]' 'Description=Update Xingchen Monitor Agent binary' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=15min' "ExecStart=${updater}" > "${service}"
   printf '%s\n' '[Unit]' 'Description=Periodic Xingchen Monitor Agent binary update' '' '[Timer]' 'OnCalendar=*-*-* 04:15' 'RandomizedDelaySec=30m' 'Persistent=true' 'Unit=guanlan-agent-update.service' '' '[Install]' 'WantedBy=timers.target' > "${timer}"
   systemctl daemon-reload
@@ -492,8 +731,10 @@ install_local_agent() {
       exit 1
     fi
     echo "正在下载 Agent 源码..."
-    git clone --depth 1 --filter=blob:none --sparse "${repository_url}" "${temp_dir}/source" >/dev/null
-    git -C "${temp_dir}/source" sparse-checkout set agent >/dev/null
+    if ! clone_agent_source "${temp_dir}/source"; then
+      echo "GitHub 与 Gitee Agent 源码均不可用。" >&2
+      exit 1
+    fi
     source_root="${temp_dir}/source"
   fi
   if ! command -v go >/dev/null 2>&1; then
@@ -557,11 +798,30 @@ printf '%s\n' \
   '' \
   '[Install]' \
   'WantedBy=multi-user.target' > "${unit_tmp}"
-install -m 0644 "${unit_tmp}" /etc/systemd/system/guanlan-agent.service
+install -d -m 0755 "${systemd_dir}"
+install -m 0644 "${unit_tmp}" "${systemd_dir}/guanlan-agent.service"
 
 systemctl daemon-reload
 systemctl enable --now guanlan-agent.service
 install_local_agent_updater
+}
+
+install_manager() {
+  if [[ -z "${script_source}" || ! -f "${script_source}" ]]; then
+    echo "当前通过标准输入运行，未保存管理脚本；请使用控制台生成的下载到文件命令。" >&2
+    return 0
+  fi
+  install -d -m 0755 "${manager_root}"
+  local source_path manager_real_path
+  source_path="$(cd -- "$(dirname -- "${script_source}")" && pwd)/$(basename -- "${script_source}")"
+  manager_real_path="${manager_path}"
+  if [[ "${source_path}" != "${manager_real_path}" ]]; then
+    install -m 0755 "${script_source}" "${manager_path}"
+  fi
+  printf 'CONTAINER_NAME=%s\nSPOOL_VOLUME=%s\n' "${container_name}" "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}" > "${manager_metadata_path}"
+  chmod 0600 "${manager_metadata_path}"
+  rm -f "${legacy_updater_path}"
+  echo "Agent 管理入口：${manager_path}"
 }
 
 if [[ "${docker_available}" == true ]]; then
@@ -569,6 +829,7 @@ if [[ "${docker_available}" == true ]]; then
 else
   install_local_agent
 fi
+install_manager
 unset agent_key GUANLAN_AGENT_KEY
 if [[ "${docker_available}" != true ]]; then
   echo "星辰监控 Agent installed and started. Check with: systemctl status guanlan-agent"

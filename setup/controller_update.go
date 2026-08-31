@@ -21,14 +21,14 @@ const controllerUpdateRunnerName = "guanlan-controller-update-run"
 const controllerUpdateRunnerProjectSuffix = "-update-runner"
 
 const (
-	controllerUpdateCheckTimeout       = 15 * time.Minute
-	controllerUpdateApplyTimeout       = 45 * time.Minute
+	controllerUpdateCheckTimeout       = 3 * time.Hour
+	controllerUpdateApplyTimeout       = 4 * time.Hour
 	controllerUpdateRunnerStartTimeout = 30 * time.Second
 	controllerUpdateRunnerGracePeriod  = 2 * time.Minute
 	controllerUpdateInspectTimeout     = 2 * time.Second
 	controllerUpdateInspectionCache    = 2 * time.Second
-	controllerUpdateCheckStaleAfter    = 20 * time.Minute
-	controllerUpdateApplyStaleAfter    = 75 * time.Minute
+	controllerUpdateCheckStaleAfter    = 3*time.Hour + 15*time.Minute
+	controllerUpdateApplyStaleAfter    = 4*time.Hour + 15*time.Minute
 )
 
 type controllerUpdateService struct {
