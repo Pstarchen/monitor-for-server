@@ -18,7 +18,18 @@ if grep -Eq 'v1\.12\.0|cdn\.jsdelivr\.net|export GUANLAN_AGENT_KEY' "${script_di
   exit 1
 fi
 temp_dir="$(mktemp -d)"
-trap 'rm -rf "${temp_dir}"' EXIT
+run_as_root() {
+  if [[ "${EUID}" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+cleanup() {
+  [[ -n "${temp_dir}" && "${temp_dir}" == /tmp/* ]] || return 1
+  run_as_root rm -rf -- "${temp_dir}"
+}
+trap cleanup EXIT
 fake_bin="${temp_dir}/bin"
 log_file="${temp_dir}/commands.log"
 config_file="${temp_dir}/agent.json"
@@ -156,8 +167,8 @@ grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 grep -F '"docker_socket": "/run/guanlan-agent-docker.sock"' "${config_file}" >/dev/null
 grep -F '"allow_command_execution": false' "${config_file}" >/dev/null
 grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
-test -x "${temp_dir}/manager/update-agent.sh"
-grep -F 'CONTAINER_NAME=guanlan-agent' "${temp_dir}/manager/install.env" >/dev/null
+run_as_root test -x "${temp_dir}/manager/update-agent.sh"
+run_as_root grep -F 'CONTAINER_NAME=guanlan-agent' "${temp_dir}/manager/install.env" >/dev/null
 
 : > "${log_file}"
 manager_environment=(
