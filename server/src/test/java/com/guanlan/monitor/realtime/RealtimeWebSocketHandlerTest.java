@@ -42,7 +42,9 @@ class RealtimeWebSocketHandlerTest {
         ArgumentCaptor<TextMessage> message = ArgumentCaptor.forClass(TextMessage.class);
         verify(allowedSession).sendMessage(message.capture());
         verify(deniedSession, never()).sendMessage(any());
-        assertThat(message.getValue().getPayload())
-                .isEqualTo("{\"type\":\"metric.updated\",\"payload\":{\"deviceId\":\"server-a\"}}");
+        var event = new ObjectMapper().readTree(message.getValue().getPayload());
+        assertThat(event.path("type").asText()).isEqualTo("metric.updated");
+        assertThat(event.path("payload").path("deviceId").asText()).isEqualTo("server-a");
+        assertThat(event.path("payload").size()).isEqualTo(1);
     }
 }
