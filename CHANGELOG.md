@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.7.2
+
+- Agent 安装命令兼容旧版 curl，移除 `--retry-all-errors`，避免 CentOS 8 等系统下载参数不兼容。
+
 ## v1.7.1
 
 - Agent 安装命令优先使用 jsDelivr，失败时回退 GitHub Raw，并为下载增加重试与超时，适应受限网络环境。
