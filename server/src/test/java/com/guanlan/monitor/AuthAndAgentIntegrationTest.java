@@ -590,6 +590,22 @@ class AuthAndAgentIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.minimumSeverity").value("CRITICAL"));
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/api/mobile/installations/" + installationId + "/token")
+                        .header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"replacement-push-token-9876543210\",\"appVersion\":\"1.0.1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tokenSuffix").value("76543210"))
+                .andExpect(jsonPath("$.appVersion").value("1.0.1"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .put("/api/mobile/installations/" + installationId + "/preferences")
+                        .header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":false,\"minimumSeverity\":\"WARNING\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.minimumSeverity").value("WARNING"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .post("/api/mobile/installations/" + installationId + "/test")
                         .header("Authorization", authorization))
                 .andExpect(status().isServiceUnavailable());
@@ -665,10 +681,33 @@ class AuthAndAgentIntegrationTest {
                 .andExpect(status().isOk());
         mvc.perform(get("/api/devices/" + allowed.device().id() + "/metrics/latest").header("Authorization", authorization))
                 .andExpect(status().isOk());
+        mvc.perform(get("/api/v2/devices/" + allowed.device().id() + "/diagnostics")
+                        .header("Authorization", authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deviceId").value(allowed.device().id()))
+                .andExpect(jsonPath("$.online").value(true))
+                .andExpect(jsonPath("$.totals.cpuUsage").value(42.5))
+                .andExpect(jsonPath("$.disks[0].smart.status").value("UNKNOWN"))
+                .andExpect(jsonPath("$.health.smartFailure").value(false));
+        mvc.perform(get("/api/v2/devices/" + allowed.device().id() + "/metrics/history")
+                        .param("range", "6H").header("Authorization", authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.range").value("6H"))
+                .andExpect(jsonPath("$.sampleStepSeconds").value(300))
+                .andExpect(jsonPath("$.points.length()").value(1));
         mvc.perform(get("/api/devices/" + hidden.device().id()).header("Authorization", authorization))
                 .andExpect(status().isForbidden());
         mvc.perform(get("/api/devices/" + hidden.device().id() + "/metrics/latest").header("Authorization", authorization))
                 .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v2/devices/" + hidden.device().id() + "/diagnostics")
+                        .header("Authorization", authorization))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v2/devices/" + hidden.device().id() + "/metrics/history")
+                        .header("Authorization", authorization))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v2/devices/" + allowed.device().id() + "/metrics/history")
+                        .param("range", "2H").header("Authorization", authorization))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

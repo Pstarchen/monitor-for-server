@@ -127,7 +127,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/mobile/installations")) {
             return switch (method) {
                 case "GET" -> "nezha:push:read";
-                case "POST", "PATCH" -> "nezha:push:write";
+                case "POST", "PUT", "PATCH" -> "nezha:push:write";
                 case "DELETE" -> "nezha:push:delete";
                 default -> DENY_SCOPE;
             };

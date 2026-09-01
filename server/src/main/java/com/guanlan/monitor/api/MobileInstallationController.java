@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -42,9 +43,21 @@ public class MobileInstallationController {
         return installations.updateToken(authentication, id, request);
     }
 
+    @PutMapping("/{id}/token")
+    MobileInstallationDtos.View replaceToken(Authentication authentication, @PathVariable String id,
+                                             @Valid @RequestBody MobileInstallationDtos.TokenUpdateRequest request) {
+        return installations.updateToken(authentication, id, request);
+    }
+
     @PatchMapping("/{id}/preferences")
     MobileInstallationDtos.View updatePreferences(Authentication authentication, @PathVariable String id,
                                                   @Valid @RequestBody MobileInstallationDtos.PreferencesRequest request) {
+        return installations.updatePreferences(authentication, id, request);
+    }
+
+    @PutMapping("/{id}/preferences")
+    MobileInstallationDtos.View replacePreferences(Authentication authentication, @PathVariable String id,
+                                                   @Valid @RequestBody MobileInstallationDtos.PreferencesRequest request) {
         return installations.updatePreferences(authentication, id, request);
     }
 

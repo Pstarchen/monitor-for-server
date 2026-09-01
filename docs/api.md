@@ -68,6 +68,8 @@
 | DELETE | `/api/devices/{id}` | ADMIN | 删除设备及关联数据 |
 | GET | `/api/devices/{id}/metrics/latest` | 登录 | 最新指标 |
 | GET | `/api/devices/{id}/metrics/history` | 登录 | `from` 到 `to` 的历史指标，最大 31 天；每个快照包含当时的容器与进程列表，控制台可据此绘制单容器/单进程历史趋势 |
+| GET | `/api/v2/devices/{id}/diagnostics` | 登录 / PAT `nezha:server:read` | 移动端诊断摘要：资源总量、网卡、磁盘 SMART、CPU/内存占用前五进程及健康提示 |
+| GET | `/api/v2/devices/{id}/metrics/history?range=6H` | 登录 / PAT `nezha:server:read` | 移动端历史趋势；支持 `1H`、`6H`、`24H`、`7D`、`30D`，按范围降采样且最多返回 720 点 |
 | GET | `/api/devices/{id}/notes?limit=50` | 登录 | 设备工作记录，最多 200 条 |
 | POST | `/api/devices/{id}/notes` | ADMIN / OPERATOR | 新增交接、变更或巡检记录，正文最多 2000 字符 |
 | DELETE | `/api/devices/{id}/notes/{noteId}` | ADMIN / OPERATOR | 删除设备工作记录 |
@@ -106,6 +108,8 @@
 - `HEALTHY` / `HEALTHY`：连接和最新指标均在阈值内。
 
 接口只返回诊断元数据和可读原因，不返回 Agent 密钥、Webhook 或其他机密。
+
+`/api/v2` 移动诊断接口同时受账号设备权限和 PAT 服务器白名单约束。`diagnostics` 使用最新一条指标快照；设备尚无指标时返回 `404`。历史接口省略 `range` 时默认 `6H`，响应中的 `range`、`from`、`to` 和 `sampleStepSeconds` 可用于客户端绘制时间轴。
 
 ## 网络发现
 
@@ -425,8 +429,8 @@ curl -fsS -X POST -H 'X-Heartbeat-Token: hb_...' 'https://monitor.example.com/ap
 | --- | --- | --- | --- |
 | POST | `/api/mobile/installations` | PAT `nezha:push:write` | 按 `clientInstallationId` 幂等创建或刷新当前 PAT 的 HarmonyOS 设备登记 |
 | GET | `/api/mobile/installations` | PAT `nezha:push:read` | 列出当前 PAT 的登记；仅返回 token 尾号，不返回密文或明文 |
-| PATCH | `/api/mobile/installations/{id}/token` | PAT `nezha:push:write` | 轮换华为 Push Token，并可刷新 App 版本 |
-| PATCH | `/api/mobile/installations/{id}/preferences` | PAT `nezha:push:write` | 更新告警、设备状态和总启用开关 |
+| PATCH / PUT | `/api/mobile/installations/{id}/token` | PAT `nezha:push:write` | 轮换华为 Push Token，并可刷新 App 版本 |
+| PATCH / PUT | `/api/mobile/installations/{id}/preferences` | PAT `nezha:push:write` | 更新告警、设备状态和总启用开关 |
 | DELETE | `/api/mobile/installations/{id}` | PAT `nezha:push:delete` | 删除当前 PAT 拥有的登记及其投递历史 |
 | POST | `/api/mobile/installations/{id}/test` | PAT `nezha:push:write` | 提交华为 Push Kit 测试消息；Push Kit 关闭时返回 `503` |
 
