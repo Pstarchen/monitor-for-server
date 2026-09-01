@@ -536,6 +536,91 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    void apiTokenScopeErrorsIdentifyTheRequiredScope() throws Exception {
+        ApiTokenDtos.Created serverOnly = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "server-only", java.util.List.of("nezha:server:read"), java.util.List.of(), 7));
+
+        mvc.perform(get("/api/client/bootstrap").header("Authorization", "Bearer " + serverOnly.secret()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.requiredScope").value("nezha:inventory:read"));
+
+        ApiTokenDtos.Created inventoryOnly = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "inventory-only", java.util.List.of("nezha:inventory:read"), java.util.List.of(), 7));
+
+        mvc.perform(get("/api/services").header("Authorization", "Bearer " + inventoryOnly.secret()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.requiredScope").value("nezha:service:read"));
+    }
+
+    @Test
+    void huaweiPushKitInstallationRoutesUseDocumentedScopesAndMethods() throws Exception {
+        ApiTokenDtos.Created created = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "huawei-push-kit", java.util.List.of(
+                        "nezha:push:read", "nezha:push:write", "nezha:push:delete"),
+                java.util.List.of(), 7));
+        String authorization = "Bearer " + created.secret();
+
+        var response = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/mobile/installations")
+                        .header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"clientInstallationId":"harmony-test-device","platform":"HARMONYOS","token":"harmony-push-token-0123456789","appVersion":"1.0.0","deviceModel":"test-phone"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.clientInstallationId").value("harmony-test-device"))
+                .andExpect(jsonPath("$.tokenSuffix").value("23456789"))
+                .andReturn();
+        String installationId = mapper.readTree(response.getResponse().getContentAsString()).path("id").asText();
+
+        mvc.perform(get("/api/mobile/installations").header("Authorization", authorization))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(installationId));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/mobile/installations/" + installationId + "/preferences")
+                        .header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"minimumSeverity\":\"CRITICAL\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.minimumSeverity").value("CRITICAL"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/mobile/installations/" + installationId + "/test")
+                        .header("Authorization", authorization))
+                .andExpect(status().isServiceUnavailable());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/mobile/installations/" + installationId)
+                        .header("Authorization", authorization))
+                .andExpect(status().isNoContent());
+
+        ApiTokenDtos.Created readOnly = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "huawei-push-read", java.util.List.of("nezha:push:read"), java.util.List.of(), 7));
+        mvc.perform(get("/api/mobile/installations")
+                        .header("Authorization", "Bearer " + readOnly.secret()))
+                .andExpect(status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/mobile/installations")
+                        .header("Authorization", "Bearer " + readOnly.secret())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientInstallationId\":\"read-only-device\",\"platform\":\"HARMONYOS\"}"))
+                .andExpect(status().isForbidden());
+
+        ApiTokenDtos.Created noDelete = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
+                "huawei-push-write", java.util.List.of("nezha:push:write"), java.util.List.of(), 7));
+        var noDeleteResponse = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/mobile/installations")
+                        .header("Authorization", "Bearer " + noDelete.secret())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientInstallationId\":\"write-only-device\",\"platform\":\"HARMONYOS\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+        String noDeleteId = mapper.readTree(noDeleteResponse.getResponse().getContentAsString()).path("id").asText();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/mobile/installations/" + noDeleteId)
+                        .header("Authorization", "Bearer " + noDelete.secret()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void apiTokenServerWhitelistFiltersInventoryAndDashboard() throws Exception {
         DeviceDtos.Credential allowed = devices.create(new DeviceDtos.CreateRequest("allowed-node", "lab", "tests", "127.0.0.20"));
         DeviceDtos.Credential hidden = devices.create(new DeviceDtos.CreateRequest("hidden-node-for-token", "lab", "tests", "127.0.0.21"));

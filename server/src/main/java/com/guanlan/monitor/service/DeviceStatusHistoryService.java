@@ -6,6 +6,7 @@ import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.domain.DeviceStatusEvent;
 import com.guanlan.monitor.repository.DeviceRepository;
 import com.guanlan.monitor.repository.DeviceStatusEventRepository;
+import com.guanlan.monitor.realtime.RealtimeOutboxService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -15,12 +16,15 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class DeviceStatusHistoryService {
     private final DeviceStatusEventRepository events;
     private final DeviceRepository devices;
+    private final RealtimeOutboxService realtimeOutbox;
 
     @Transactional
     public void record(Device device, Device.Status previous, Device.Status status, String reason) {
@@ -31,6 +35,13 @@ public class DeviceStatusHistoryService {
         event.setStatus(status);
         event.setReason(reason == null || reason.isBlank() ? "设备状态发生变化" : reason.trim());
         events.save(event);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("deviceId", device.getId());
+        payload.put("statusEventId", event.getId());
+        payload.put("previousStatus", previous == null ? null : previous.name());
+        payload.put("status", status.name());
+        payload.put("reason", event.getReason());
+        realtimeOutbox.append("device.status", "device-status", String.valueOf(event.getId()), device.getId(), payload);
     }
 
     @Transactional(readOnly = true)

@@ -66,6 +66,18 @@ export const apiTokenScopeGroups: readonly ApiTokenScopeGroup[] = [
     ],
   },
   {
+    key: 'realtime', label: '可靠实时', description: '接收鸿蒙 App 的可靠实时事件与断线补偿。',
+    options: [['nezha:realtime:read', '可靠实时事件读取']],
+  },
+  {
+    key: 'push', label: '华为 Push Kit', description: '管理当前 PAT 绑定的 HarmonyOS Push Token。',
+    options: [
+      ['nezha:push:read', 'Push Kit 登记读取'],
+      ['nezha:push:write', 'Push Kit 登记写入'],
+      ['nezha:push:delete', 'Push Kit 登记删除'],
+    ],
+  },
+  {
     key: 'admin', label: '管理员', description: '完整管理权限，仅管理员可签发。',
     options: [[ADMIN_SCOPE, '管理员权限']],
   },
@@ -73,7 +85,16 @@ export const apiTokenScopeGroups: readonly ApiTokenScopeGroup[] = [
 
 export const apiTokenScopeOptions: readonly ApiTokenScopeOption[] = apiTokenScopeGroups.flatMap((group) => group.options)
 
-export const defaultApiTokenScopes = ['nezha:inventory:read', 'nezha:server:read', 'nezha:alert:read'] as const
+export const defaultApiTokenScopes = [
+  'nezha:inventory:read',
+  'nezha:server:read',
+  'nezha:service:read',
+  'nezha:alert:read',
+  'nezha:realtime:read',
+  'nezha:push:read',
+  'nezha:push:write',
+  'nezha:push:delete',
+] as const
 
 export function visibleApiTokenScopes(isAdmin: boolean): readonly ApiTokenScopeOption[] {
   return isAdmin ? apiTokenScopeOptions : apiTokenScopeOptions.filter(([value]) => value !== ADMIN_SCOPE)

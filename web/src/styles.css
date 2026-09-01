@@ -619,9 +619,14 @@ p, h1, h2, h3 { margin: 0; }
 .mobile-binding-qr img { width: 152px; height: 152px; display: block; image-rendering: pixelated; }
 .mobile-binding-qr-caption { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 600; }
 .mobile-binding-qr-caption > svg { color: var(--accent); }
+.mobile-binding-retry { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; color: var(--foreground); background: var(--surface); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.mobile-binding-retry:hover { border-color: color-mix(in srgb, var(--accent) 36%, var(--border)); color: var(--accent); background: var(--accent-soft); }
 .mobile-binding-fallback { display: grid; justify-items: center; gap: 8px; padding: 16px; color: var(--warning); text-align: center; }
 .mobile-binding-fallback strong { color: var(--foreground); font-size: 12px; }
 .mobile-binding-fallback p { max-width: 140px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.mobile-binding-loading { display: grid; justify-items: center; gap: 8px; padding: 16px; color: var(--muted); text-align: center; }
+.mobile-binding-loading strong { color: var(--foreground); font-size: 12px; }
+.mobile-binding-loading p { max-width: 140px; font-size: 10px; line-height: 1.55; }
 .mobile-binding-details { min-width: 0; display: grid; align-content: center; gap: 18px; padding: 22px 24px; }
 .mobile-binding-scope { display: flex; align-items: center; gap: 10px; }
 .mobile-binding-scope > span { width: 34px; height: 34px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 7px; color: var(--info); background: var(--info-bg); }

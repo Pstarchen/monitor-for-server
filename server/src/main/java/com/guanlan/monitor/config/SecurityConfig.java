@@ -51,6 +51,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/heartbeat/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/heartbeat/**").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/ws/realtime").permitAll()
                         .requestMatchers("/ws/**").authenticated()
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session.sessionFixation(fixation -> fixation.migrateSession()))

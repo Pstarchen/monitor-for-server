@@ -219,6 +219,8 @@ Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Se
 docker compose up -d --force-recreate server
 ```
 
+HarmonyOS App 的设备通知使用华为 Push Kit V3 服务账号和独立的 `PUSH_KIT_*` 环境变量，不属于上述通用通知通道。配置步骤、版本边界和 App Token 生命周期见 [华为 HarmonyOS Push Kit V3 接入](huawei-push-kit.md)。
+
 ## 备份与升级
 
 备份前创建一致性 PostgreSQL 逻辑备份，并将部署使用的 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，保存在独立秘密管理系统。Redis 仅用于在线状态加速，不是主要备份目标。

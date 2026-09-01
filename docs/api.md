@@ -233,7 +233,7 @@ Agent 端配置：
 
 ### API Token
 
-登录会话可在 `/api/api-tokens` 创建和吊销个人 API Token。明文只在创建响应中返回一次，服务端只保存 SHA-256 哈希；PAT 使用 `Authorization: Bearer nzp_...` 调用接口，并且同时受用户角色、用户设备权限、scope 和服务器 ID 白名单约束。设备实际范围是用户设备权限与 Token 白名单的交集；空白名单表示不额外缩小用户已有的设备范围。
+登录会话可在 `/api/api-tokens` 创建和吊销个人 API Token。明文只在创建响应中返回一次，服务端只保存 SHA-256 哈希；这表示明文无法再次找回，不表示 PAT 是一次性凭据。PAT 可重复使用，直至到期或被吊销。PAT 使用 `Authorization: Bearer nzp_...` 调用接口，并且同时受用户角色、用户设备权限、scope 和服务器 ID 白名单约束。设备实际范围是用户设备权限与 Token 白名单的交集；空白名单表示不额外缩小用户已有的设备范围。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -245,29 +245,43 @@ Agent 端配置：
 
 ```json
 {
-  "name": "mobile-readonly",
-  "scopes": ["nezha:inventory:read", "nezha:server:read"],
+  "name": "harmony-mobile",
+  "scopes": ["nezha:inventory:read", "nezha:server:read", "nezha:service:read", "nezha:alert:read", "nezha:realtime:read", "nezha:push:read", "nezha:push:write", "nezha:push:delete"],
   "serverIds": [],
   "expiresInDays": 90
 }
 ```
 
-常用 scope 为 `nezha:inventory:read`（设备清单）、`nezha:server:read`（设备指标）、`nezha:service:read`（服务监控）、`nezha:alert:read`（告警读取）和对应的 `write` / `delete` / `exec` 权限。`nezha:admin:*` 与 `nezha:*` 仅管理员可以签发。
+常用 scope 为 `nezha:inventory:read`（设备清单）、`nezha:server:read`（设备指标）、`nezha:service:read`（服务监控）、`nezha:alert:read`（告警读取）、`nezha:realtime:read`（实时事件）和 `nezha:push:read` / `write` / `delete`（当前 PAT 的华为 Push Kit 登记），以及对应资源的 `write` / `delete` / `exec` 权限。`nezha:admin:*` 与 `nezha:*` 仅管理员可以签发。
 
 #### 鸿蒙扫码绑定
 
-创建 Token 后，控制台可生成鸿蒙 App 扫码绑定二维码。二维码内容是 UTF-8 JSON，不会写入服务端；其中的 `token` 与创建响应中仅展示一次的明文相同：
+创建 Token 后，控制台先通过当前登录会话调用 `GET /api/client/bootstrap`，再用响应中的控制器身份、API 版本和能力列表生成 schema v2 鸿蒙 App 绑定二维码。二维码内容是 UTF-8 JSON，不会写入服务端；其中的 `token` 与创建响应中仅展示一次的明文相同：
 
 ```json
 {
   "type": "xingchenyunxun-bind",
+  "schemaVersion": 2,
   "baseUrl": "https://monitor.example.com",
   "token": "nzp_...",
-  "scopes": ["nezha:inventory:read", "nezha:server:read", "nezha:alert:read"]
+  "scopes": ["nezha:inventory:read", "nezha:server:read", "nezha:service:read", "nezha:alert:read", "nezha:realtime:read", "nezha:push:read", "nezha:push:write", "nezha:push:delete"],
+  "controllerId": "7c9ae80b-5a56-49ef-8448-695888502191",
+  "controllerName": "华东监控中心",
+  "apiVersion": 2,
+  "capabilities": ["client-bootstrap-v1", "mobile-diagnostics-v1", "alert-cursor-v2", "realtime-v2"],
+  "tokenExpiresAt": "2026-12-01T08:00:00Z"
 }
 ```
 
-鸿蒙 App 应只接受 `type` 为 `xingchenyunxun-bind` 的数据，保存前确认 `baseUrl`，并将 Token 存入系统安全存储。二维码和 Token 明文具有相同权限，不应转发、截图或长期保留；建议移动端 Token 保持最小只读 scope 并设置有效期。
+`tokenExpiresAt` 使用 ISO-8601 时间；永不过期的 PAT 使用空字符串。旧版 `type/baseUrl/token/scopes` schema v1 仍由兼容 helper 和旧客户端支持，但 Web 控制台只在成功取得 bootstrap 后生成 v2 二维码，不会伪造控制器元数据。
+
+客户端 bootstrap 可由登录会话或具有 `nezha:inventory:read` 的 PAT 调用。响应中的 `controller` 包含持久化 `id`、显示 `name`、`canonicalEntry` 和 `timezone`；`server` 包含版本、构建时间、`apiVersion`、`minimumClientApiVersion` 和服务器时间；`capabilities` 只声明服务端实际启用的能力；`principal` 描述认证类型、账号和角色，PAT 认证时还包含 Token ID、前缀、scope、服务器范围和到期时间，但永不返回 PAT 明文。App 应只接受精确的 `type`，校验 schema 上限和 scope 格式，以 bootstrap 响应为权威；QR 与 bootstrap 的 `controllerId` 不一致时拒绝保存。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/client/bootstrap` | 登录 / PAT `nezha:inventory:read` | 返回控制器、服务端、能力和当前认证主体元数据，不返回 PAT 明文 |
+
+二维码内的 PAT 是可重复使用的 Bearer 凭据，并非扫码后失效的一次性凭据。二维码和 Token 明文具有相同权限，不应转发、截图或长期保留；默认移动端 scope 允许读取设备、指标、服务监控、告警和实时事件，并只管理该 PAT 自己的华为 Push Kit 登记。建议设置有效期，发生泄露时立即在控制台吊销。若服务端返回 403，响应中的 `requiredScope` 会标明请求所需的 Token scope。
 
 ### MCP HTTP
 
@@ -394,6 +408,31 @@ curl -fsS -X POST -H 'X-Heartbeat-Token: hb_...' 'https://monitor.example.com/ap
 ## WebSocket
 
 已登录浏览器连接 `/ws/metrics`。网关必须转发 Upgrade 与 Connection 请求头。
+
+### 可恢复实时通道
+
+`/ws/realtime` 是与旧 `/ws/metrics` 并行的可靠实时通道。客户端先以登录会话或具有 `nezha:realtime:read` 的 PAT 调用 `POST /api/realtime/ticket?afterEventId=` 获取 30 秒内有效、仅可使用一次的 ticket，再连接 `/ws/realtime?ticket=`。ticket 不包含会话 Cookie 或 PAT 明文。
+
+每个事件包含 `schemaVersion`、稳定 UUID `eventId`、`type`、`occurredAt`、`controllerId` 和最小化 `payload`，设备 ID 位于需要设备过滤的事件 payload 中。服务端按当前用户设备权限过滤事件。客户端应持久化最后成功处理的 `eventId`，断线后用它签发新 ticket；也可通过 `GET /api/realtime/events?afterEventId=&limit=` 分页补偿。补偿响应包含 `events`、`nextEventId`、`oldestEventId`、`latestEventId`、`hasMore` 和 `resyncRequired`。游标已超出保留窗口或积压超过单批上限时，服务端设置 `resyncRequired=true`；WebSocket 会发送 `resync.required` 后正常关闭，客户端应重载 REST 快照再从最新事件继续。
+
+事务 outbox 当前覆盖实时指标、设备状态变化以及告警打开、更新、确认和恢复。Redis 启用时，发布器将已提交事件发送到配置频道供多个服务实例订阅；Redis 不可用不会回滚业务事务，事件保留在 outbox 并退避重试。`REALTIME_RETENTION_HOURS` 控制已发布、已完成推送扇出的事件保留时间。
+
+### 华为 Push Kit 移动推送登记
+
+这里的推送专指 HarmonyOS NEXT/5.x+ 的华为 Push Kit V3，不是 Web Push、FCM、APNs、通用 Webhook，也不是旧版华为 OAuth Push API。服务端接入与环境变量见 [华为 Push Kit V3 接入](huawei-push-kit.md)。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/mobile/installations` | PAT `nezha:push:write` | 按 `clientInstallationId` 幂等创建或刷新当前 PAT 的 HarmonyOS 设备登记 |
+| GET | `/api/mobile/installations` | PAT `nezha:push:read` | 列出当前 PAT 的登记；仅返回 token 尾号，不返回密文或明文 |
+| PATCH | `/api/mobile/installations/{id}/token` | PAT `nezha:push:write` | 轮换华为 Push Token，并可刷新 App 版本 |
+| PATCH | `/api/mobile/installations/{id}/preferences` | PAT `nezha:push:write` | 更新告警、设备状态和总启用开关 |
+| DELETE | `/api/mobile/installations/{id}` | PAT `nezha:push:delete` | 删除当前 PAT 拥有的登记及其投递历史 |
+| POST | `/api/mobile/installations/{id}/test` | PAT `nezha:push:write` | 提交华为 Push Kit 测试消息；Push Kit 关闭时返回 `503` |
+
+推送 token 使用与系统设置相同的 `SecretValueCodec` 和 `SETTINGS_ENCRYPTION_KEY` 加密保存，并用不可逆 SHA-256 指纹防止重复登记。投递按 outbox `eventId` 和 installation 去重，只向有设备查看权限且偏好已开启的用户扇出。失败投递采用有上限的指数退避；供应商确认 token 失效时会停用对应登记。
+
+华为 Push Kit 默认关闭。只有完整配置 V3 服务账号的 `project_id`、`key_id`、`sub_account` 与 PKCS#8 私钥后才能设置 `PUSH_KIT_ENABLED=true`。服务端使用 PS256 生成一小时有效的 JWT，并固定请求 `https://push-api.cloud.huawei.com/v3/{projectId}/messages:send`；不再接受旧 OAuth 客户端凭据或自定义推送端点。`PUSH_KIT_BATCH_SIZE` 和 `PUSH_KIT_MAX_ATTEMPTS` 控制工作批次及最大尝试次数。
 
 ```json
 {

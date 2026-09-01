@@ -9,6 +9,7 @@ import com.guanlan.monitor.domain.AlertRule;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.domain.MetricSnapshot;
 import com.guanlan.monitor.realtime.RealtimeWebSocketHandler;
+import com.guanlan.monitor.realtime.RealtimeOutboxService;
 import com.guanlan.monitor.repository.AlertEventRepository;
 import com.guanlan.monitor.repository.AlertRuleRepository;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class AlertService {
     private final AuditService audit;
     private final ObjectMapper mapper;
     private MaintenanceWindowService maintenanceWindows;
+    private RealtimeOutboxService realtimeOutbox;
 
     /** Keeps isolated service tests source-compatible while Spring uses the full constructor. */
     public AlertService(AlertRuleRepository rules, AlertEventRepository events, DeviceService devices,
@@ -45,6 +47,11 @@ public class AlertService {
     @Autowired
     void setMaintenanceWindows(MaintenanceWindowService maintenanceWindows) {
         this.maintenanceWindows = maintenanceWindows;
+    }
+
+    @Autowired
+    void setRealtimeOutbox(RealtimeOutboxService realtimeOutbox) {
+        this.realtimeOutbox = realtimeOutbox;
     }
 
     @Transactional(readOnly = true)
@@ -110,6 +117,7 @@ public class AlertService {
             event.setAcknowledgedAt(Instant.now());
             event.setAcknowledgedBy(actor);
             audit.record("ALERT_ACK", "alert:" + id, "确认告警 " + event.getRule().getName());
+            appendRealtime("alert.acknowledged", event);
         }
         return eventView(event);
     }
@@ -184,6 +192,7 @@ public class AlertService {
             event.setMessage(message(rule, device, value));
             event.setNotificationSuppressed(muted);
             events.save(event);
+            appendRealtime("alert.opened", event);
             if (!muted) {
                 notifications.send(event);
                 event.setNotifiedAt(Instant.now());
@@ -194,11 +203,13 @@ public class AlertService {
             event.setNotificationSuppressed(false);
             event.setNotifiedAt(Instant.now());
             notifications.send(event);
+            appendRealtime("alert.updated", event);
             realtime.broadcast("alert.updated", device.getId());
         } else if (!breached && active.isPresent()) {
             AlertEvent event = active.get();
             event.setStatus(AlertEvent.Status.RESOLVED);
             event.setResolvedAt(Instant.now());
+            appendRealtime("alert.resolved", event);
             realtime.broadcast("alert.resolved", device.getId());
         }
     }
@@ -361,6 +372,17 @@ public class AlertService {
     }
 
     private boolean blank(String value) { return value == null || value.isBlank(); }
+
+    private void appendRealtime(String type, AlertEvent event) {
+        if (realtimeOutbox == null) return;
+        realtimeOutbox.append(type, "alert", String.valueOf(event.getId()), event.getDevice().getId(), Map.of(
+                "deviceId", event.getDevice().getId(),
+                "alertId", event.getId(),
+                "ruleId", event.getRule().getId(),
+                "status", event.getStatus().name(),
+                "severity", event.getRule().getSeverity().name(),
+                "message", event.getMessage()));
+    }
 
     private AlertRule requireRule(Long id) {
         return rules.findById(id).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "告警规则不存在"));

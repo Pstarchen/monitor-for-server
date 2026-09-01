@@ -18,7 +18,7 @@ import { dateTime } from '@/lib/format'
 import { brandAssetUrl, loadBranding } from '@/lib/branding'
 import { apiTokenScopeLabel, visibleApiTokenScopeGroups } from '@/lib/api-token-scopes'
 import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
-import { createMobileBindingQrCode, resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
+import { resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
 import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controller-update'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, NotificationDelivery, Settings, WebhookSettings } from '@/types'
@@ -93,8 +93,6 @@ const tokenDialog = ref(false)
 const tokenSaving = ref(false)
 const createdToken = ref<CreatedApiToken | null>(null)
 const tokenCopied = ref(false)
-const tokenQrCode = ref('')
-const tokenQrCodeError = ref('')
 const tokenForm = reactive(createDefaultApiTokenForm())
 const deliveryLogs = ref<NotificationDelivery[]>([])
 const deliveryLoading = ref(false)
@@ -167,16 +165,12 @@ async function loadApiTokens() {
 
 function openTokenDialog() {
   Object.assign(tokenForm, createDefaultApiTokenForm())
-  tokenQrCode.value = ''
-  tokenQrCodeError.value = ''
   tokenDialog.value = true
 }
 
 function closeCreatedToken() {
   createdToken.value = null
   tokenCopied.value = false
-  tokenQrCode.value = ''
-  tokenQrCodeError.value = ''
 }
 
 async function createApiToken() {
@@ -203,13 +197,6 @@ async function createApiToken() {
     tokenSaving.value = false
   }
 
-  try {
-    tokenQrCode.value = await createMobileBindingQrCode(mobileBindingBaseUrl.value, createdToken.value.secret, createdToken.value.token.scopes)
-    tokenQrCodeError.value = ''
-  } catch {
-    tokenQrCode.value = ''
-    tokenQrCodeError.value = '二维码生成失败，请复制下方 Token 后在 App 中手动绑定。'
-  }
   ElMessage.success('API Token 已创建，请立即完成绑定或复制明文')
 }
 
@@ -798,7 +785,7 @@ onBeforeUnmount(() => {
       </el-dialog>
 
       <el-dialog :model-value="Boolean(createdToken)" title="立即保存 API Token" width="min(620px, calc(100vw - 28px))" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
-        <div v-if="createdToken" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>请立即完成鸿蒙 App 绑定，或复制并保存到安全的密钥管理器。二维码与 Token 拥有相同权限，关闭窗口后无法恢复。</span></p></div><MobileBindingPanel :base-url="mobileBindingBaseUrl" :qr-code="tokenQrCode" :scopes="createdToken.token.scopes" :error="tokenQrCodeError" /><div class="credential-secret"><span>Token 明文</span><code>{{ createdToken.secret }}</code></div><dl><div><dt>Token 名称</dt><dd>{{ createdToken.token.name }}</dd></div><div><dt>权限范围</dt><dd><span v-for="scope in createdToken.token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></dd></div><div><dt>服务器范围</dt><dd>{{ createdToken.token.serverIds.length ? `${createdToken.token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</dd></div></dl></div>
+        <div v-if="createdToken" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>请立即完成鸿蒙 App 绑定，或复制并保存到安全的密钥管理器。PAT 可重复用于请求，直至到期或被吊销；关闭窗口后仅无法再次查看明文。</span></p></div><MobileBindingPanel :base-url="mobileBindingBaseUrl" :token="createdToken.secret" :scopes="createdToken.token.scopes" :token-expires-at="createdToken.token.expiresAt" /><div class="credential-secret"><span>Token 明文</span><code>{{ createdToken.secret }}</code></div><dl><div><dt>Token 名称</dt><dd>{{ createdToken.token.name }}</dd></div><div><dt>权限范围</dt><dd><span v-for="scope in createdToken.token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></dd></div><div><dt>服务器范围</dt><dd>{{ createdToken.token.serverIds.length ? `${createdToken.token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</dd></div></dl></div>
         <template #footer><el-button @click="closeCreatedToken">我已保存</el-button><el-button type="primary" @click="copyApiToken"><CheckCircle2 v-if="tokenCopied" :size="16" /><Copy v-else :size="16" />{{ tokenCopied ? '已复制 Token' : '复制 Token' }}</el-button></template>
       </el-dialog>
     </template>

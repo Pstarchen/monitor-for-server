@@ -9,6 +9,7 @@ import com.guanlan.monitor.api.dto.MetricView;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.domain.MetricSnapshot;
 import com.guanlan.monitor.realtime.RealtimeWebSocketHandler;
+import com.guanlan.monitor.realtime.RealtimeOutboxService;
 import com.guanlan.monitor.repository.MetricSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,7 @@ public class MetricService {
     private final SettingService settings;
     private final RealtimeWebSocketHandler realtime;
     private final DeviceStatusHistoryService statusHistory;
+    private final RealtimeOutboxService realtimeOutbox;
 
     @Transactional
     public IngestResult ingest(String deviceId, String agentKey, AgentReportRequest report) {
@@ -126,6 +128,8 @@ public class MetricService {
 
         MetricView view = MetricView.from(metric, mapper);
         if (live) {
+            realtimeOutbox.append("metric.updated", "metric", String.valueOf(metric.getId()), deviceId,
+                    Map.of("deviceId", deviceId, "metricId", metric.getId(), "collectedAt", metric.getCollectedAt()));
             alerts.evaluateMetric(device, metric);
             presence.markLatest(deviceId, view);
             realtime.broadcast("metric.updated", deviceId);

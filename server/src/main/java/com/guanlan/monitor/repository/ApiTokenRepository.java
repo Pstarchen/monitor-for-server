@@ -8,6 +8,8 @@ import java.util.Optional;
 
 public interface ApiTokenRepository extends JpaRepository<ApiToken, Long> {
     Optional<ApiToken> findByTokenHashAndRevokedAtIsNull(String tokenHash);
+    Optional<ApiToken> findByIdAndRevokedAtIsNull(Long id);
+    Optional<ApiToken> findByIdAndUserIdAndRevokedAtIsNull(Long id, Long userId);
     List<ApiToken> findAllByUserIdOrderByCreatedAtDesc(Long userId);
     Optional<ApiToken> findByIdAndUserId(Long id, Long userId);
     boolean existsByTokenHash(String tokenHash);

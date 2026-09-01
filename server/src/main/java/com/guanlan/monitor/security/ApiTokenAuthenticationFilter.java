@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Component
@@ -42,7 +43,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
         }
         String requiredScope = requiredScope(request);
         if (DENY_SCOPE.equals(requiredScope) || !principal.allowsScope(requiredScope)) {
-            error(response, HttpStatus.FORBIDDEN, "API Token 缺少所需权限");
+            error(response, HttpStatus.FORBIDDEN, "API Token 缺少所需权限", requiredScope);
             return;
         }
         if (!serverAllowed(principal, request)) {
@@ -65,7 +66,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
     private String requiredScope(HttpServletRequest request) {
         String path = request.getRequestURI();
         String method = request.getMethod();
-        if (path.equals("/mcp")) return null;
+        if (path.equals("/mcp")) return method.equals("POST") ? null : DENY_SCOPE;
         // API tokens cannot inspect or mutate the browser session/account
         // endpoints. ApiTokenController also enforces this at the handler
         // boundary; deny it here so a token never reaches those handlers.
@@ -78,28 +79,59 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
                 || path.equals("/actuator/health")
                 || path.equals("/actuator/info"))) return null;
         if (path.startsWith("/api/admin/")) return "nezha:admin:*";
-        if (path.equals("/api/dashboard")) return "nezha:inventory:read";
-        if (path.equals("/api/topology")) return "nezha:inventory:read";
-        if (path.equals("/api/device-access/me")) return "nezha:inventory:read";
-        if (path.equals("/api/device-notes/recent")) return "nezha:inventory:read";
-        if (path.equals("/api/devices")) return method.equals("GET") ? "nezha:inventory:read" : method.equals("POST") ? "nezha:server:write" : null;
+        if (path.equals("/api/client/bootstrap")) return method.equals("GET") ? "nezha:inventory:read" : DENY_SCOPE;
+        if (path.equals("/api/dashboard")) return method.equals("GET") ? "nezha:inventory:read" : DENY_SCOPE;
+        if (path.equals("/api/topology")) return method.equals("GET") ? "nezha:inventory:read" : DENY_SCOPE;
+        if (path.equals("/api/device-access/me")) return method.equals("GET") ? "nezha:inventory:read" : DENY_SCOPE;
+        if (path.equals("/api/device-notes/recent")) return method.equals("GET") ? "nezha:inventory:read" : DENY_SCOPE;
+        if (path.equals("/api/devices")) return switch (method) {
+            case "GET" -> "nezha:inventory:read";
+            case "POST" -> "nezha:server:write";
+            default -> DENY_SCOPE;
+        };
+        if (path.startsWith("/api/v2/devices/")) return method.equals("GET") ? "nezha:server:read" : DENY_SCOPE;
         if (path.startsWith("/api/devices/")) {
-            if (path.endsWith("/rotate-key")) return "nezha:server:write";
-            if (path.contains("/metrics/")) return "nezha:server:read";
-            if (path.contains("/notes")) return method.equals("GET") ? "nezha:server:read" : method.equals("POST") ? "nezha:server:write" : method.equals("DELETE") ? "nezha:inventory:delete" : null;
+            if (path.endsWith("/rotate-key")) return method.equals("POST") ? "nezha:server:write" : DENY_SCOPE;
+            if (path.contains("/metrics/")) return method.equals("GET") ? "nezha:server:read" : DENY_SCOPE;
+            if (path.contains("/notes")) return switch (method) {
+                case "GET" -> "nezha:server:read";
+                case "POST" -> "nezha:server:write";
+                case "DELETE" -> "nezha:inventory:delete";
+                default -> DENY_SCOPE;
+            };
             return switch (method) {
                 case "GET" -> "nezha:server:read";
                 case "PUT" -> "nezha:server:write";
                 case "DELETE" -> "nezha:inventory:delete";
-                default -> null;
+                default -> DENY_SCOPE;
             };
         }
         if (path.startsWith("/api/services")) return resourceScope("service", method);
         if (path.startsWith("/api/ddns")) return method.equals("GET") ? "nezha:ddns:read" : resourceScope("ddns", method);
-        if (path.startsWith("/api/tasks")) return method.equals("GET") ? "nezha:server:read" : "nezha:server:exec";
+        if (path.startsWith("/api/tasks")) return switch (method) {
+            case "GET" -> "nezha:server:read";
+            case "POST" -> "nezha:server:exec";
+            default -> DENY_SCOPE;
+        };
         if (path.startsWith("/api/alert-rules")) return resourceScope("alertrule", method);
-        if (path.startsWith("/api/alerts")) return method.equals("GET") ? "nezha:alert:read" : "nezha:alert:write";
+        if (path.startsWith("/api/v2/alerts") || path.startsWith("/api/alerts")) return switch (method) {
+            case "GET" -> "nezha:alert:read";
+            case "POST" -> "nezha:alert:write";
+            default -> DENY_SCOPE;
+        };
         if (path.startsWith("/api/maintenance-windows")) return resourceScope("maintenance", method);
+        if (path.startsWith("/api/realtime")) return switch (method) {
+            case "GET", "POST" -> "nezha:realtime:read";
+            default -> DENY_SCOPE;
+        };
+        if (path.startsWith("/api/mobile/installations")) {
+            return switch (method) {
+                case "GET" -> "nezha:push:read";
+                case "POST", "PATCH" -> "nezha:push:write";
+                case "DELETE" -> "nezha:push:delete";
+                default -> DENY_SCOPE;
+            };
+        }
         if (path.startsWith("/api/settings")) return "nezha:admin:*";
         return DENY_SCOPE;
     }
@@ -109,7 +141,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
             case "GET" -> "nezha:" + resource + ":read";
             case "POST", "PUT" -> "nezha:" + resource + ":write";
             case "DELETE" -> "nezha:" + resource + ":delete";
-            default -> null;
+            default -> DENY_SCOPE;
         };
     }
 
@@ -124,8 +156,15 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private void error(HttpServletResponse response, HttpStatus status, String message) throws IOException {
+        error(response, status, message, null);
+    }
+
+    private void error(HttpServletResponse response, HttpStatus status, String message, String requiredScope) throws IOException {
         response.setStatus(status.value());
         response.setContentType("application/json;charset=UTF-8");
-        mapper.writeValue(response.getOutputStream(), Map.of("message", message));
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("message", message);
+        if (requiredScope != null && !requiredScope.equals(DENY_SCOPE)) body.put("requiredScope", requiredScope);
+        mapper.writeValue(response.getOutputStream(), body);
     }
 }

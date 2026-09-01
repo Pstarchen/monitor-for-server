@@ -12,7 +12,7 @@ import { copyText } from '@/lib/clipboard'
 import { dateTime } from '@/lib/format'
 import { apiTokenScopeLabel, visibleApiTokenScopeGroups } from '@/lib/api-token-scopes'
 import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
-import { createMobileBindingQrCode, resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
+import { resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiToken, CreatedApiToken } from '@/types'
 
@@ -22,8 +22,6 @@ const loading = ref(true)
 const saving = ref(false)
 const dialog = ref(false)
 const created = ref<CreatedApiToken | null>(null)
-const qrCode = ref('')
-const qrCodeError = ref('')
 const form = reactive(createDefaultApiTokenForm())
 const copied = ref(false)
 const canAdmin = computed(() => auth.user?.role === 'ADMIN')
@@ -44,16 +42,12 @@ async function load() {
 
 function openCreate() {
   Object.assign(form, createDefaultApiTokenForm())
-  qrCode.value = ''
-  qrCodeError.value = ''
   dialog.value = true
 }
 
 function closeCreated() {
   created.value = null
   copied.value = false
-  qrCode.value = ''
-  qrCodeError.value = ''
 }
 
 async function createToken() {
@@ -80,13 +74,6 @@ async function createToken() {
     saving.value = false
   }
 
-  try {
-    qrCode.value = await createMobileBindingQrCode(mobileBindingBaseUrl.value, created.value.secret, created.value.token.scopes)
-    qrCodeError.value = ''
-  } catch {
-    qrCode.value = ''
-    qrCodeError.value = '二维码生成失败，请复制下方 Token 后在 App 中手动绑定。'
-  }
   ElMessage.success('API Token 已创建，请立即完成绑定或复制明文')
 }
 
@@ -161,7 +148,7 @@ onMounted(load)
     </el-dialog>
 
     <el-dialog :model-value="Boolean(created)" title="立即保存 API Token" width="min(620px, calc(100vw - 28px))" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
-      <div v-if="created" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>请立即完成鸿蒙 App 绑定，或复制并保存到安全的密钥管理器。二维码与 Token 拥有相同权限，关闭窗口后无法恢复。</span></p></div><MobileBindingPanel :base-url="mobileBindingBaseUrl" :qr-code="qrCode" :scopes="created.token.scopes" :error="qrCodeError" /><div class="credential-secret"><span>Token 明文</span><code>{{ created.secret }}</code></div><dl><div><dt>Token 名称</dt><dd>{{ created.token.name }}</dd></div><div><dt>权限范围</dt><dd><span v-for="scope in created.token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></dd></div><div><dt>服务器范围</dt><dd>{{ created.token.serverIds.length ? `${created.token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</dd></div></dl></div>
+      <div v-if="created" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>明文只显示这一次</strong><span>请立即完成鸿蒙 App 绑定，或复制并保存到安全的密钥管理器。PAT 可重复用于请求，直至到期或被吊销；关闭窗口后仅无法再次查看明文。</span></p></div><MobileBindingPanel :base-url="mobileBindingBaseUrl" :token="created.secret" :scopes="created.token.scopes" :token-expires-at="created.token.expiresAt" /><div class="credential-secret"><span>Token 明文</span><code>{{ created.secret }}</code></div><dl><div><dt>Token 名称</dt><dd>{{ created.token.name }}</dd></div><div><dt>权限范围</dt><dd><span v-for="scope in created.token.scopes" :key="scope" class="token-scope-tag" :title="scope">{{ apiTokenScopeLabel(scope) }}</span></dd></div><div><dt>服务器范围</dt><dd>{{ created.token.serverIds.length ? `${created.token.serverIds.length} 台服务器白名单` : '未限制服务器白名单' }}</dd></div></dl></div>
       <template #footer><el-button @click="closeCreated">我已保存</el-button><el-button type="primary" @click="copyCreated"><CheckCircle2 v-if="copied" :size="16" /><Copy v-else :size="16" />{{ copied ? '已复制 Token' : '复制 Token' }}</el-button></template>
     </el-dialog>
   </section>

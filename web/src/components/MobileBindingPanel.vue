@@ -1,15 +1,71 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { QrCode, ShieldCheck, TriangleAlert } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { QrCode, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-vue-next'
+import { api, errorMessage } from '@/lib/api'
+import {
+  createMobileBindingQrCodeV2,
+  mobileBindingMetadataFromBootstrap,
+  resolveMobileBindingBaseUrl,
+} from '@/lib/mobile-binding'
+import type { ClientBootstrap } from '@/lib/mobile-binding'
 
 const props = defineProps<{
   baseUrl: string
-  qrCode: string
+  token: string
   scopes: readonly string[]
-  error?: string
+  tokenExpiresAt?: string | null
 }>()
 
 const scopeCount = computed(() => props.scopes.length)
+const qrCode = ref('')
+const error = ref('')
+const loading = ref(true)
+const controllerName = ref('')
+const apiVersion = ref<number | null>(null)
+const bindingBaseUrl = ref(props.baseUrl)
+let requestGeneration = 0
+
+async function loadBindingQrCode() {
+  const generation = ++requestGeneration
+  loading.value = true
+  qrCode.value = ''
+  error.value = ''
+  controllerName.value = ''
+  apiVersion.value = null
+  bindingBaseUrl.value = props.baseUrl
+  try {
+    const bootstrap = (await api.get<ClientBootstrap>('/client/bootstrap')).data
+    const metadata = mobileBindingMetadataFromBootstrap(bootstrap)
+    const baseUrl = resolveMobileBindingBaseUrl(bootstrap.controller.canonicalEntry, props.baseUrl)
+    const generatedQrCode = await createMobileBindingQrCodeV2(
+      baseUrl,
+      props.token,
+      props.scopes,
+      metadata,
+      props.tokenExpiresAt,
+    )
+    if (generation !== requestGeneration) return
+    qrCode.value = generatedQrCode
+    controllerName.value = metadata.controllerName
+    apiVersion.value = metadata.apiVersion
+    bindingBaseUrl.value = baseUrl
+  } catch (cause) {
+    if (generation !== requestGeneration) return
+    error.value = `无法读取控制器绑定信息：${errorMessage(cause)}`
+  } finally {
+    if (generation === requestGeneration) loading.value = false
+  }
+}
+
+watch(
+  () => [props.baseUrl, props.token, props.tokenExpiresAt ?? '', ...props.scopes],
+  loadBindingQrCode,
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  requestGeneration += 1
+})
 </script>
 
 <template>
@@ -20,20 +76,26 @@ const scopeCount = computed(() => props.scopes.length)
         <p>移动端同步</p>
         <h3 id="mobile-binding-title">扫码连接鸿蒙 App</h3>
       </div>
-      <span class="mobile-binding-badge"><ShieldCheck :size="14" />一次性凭据</span>
+      <span class="mobile-binding-badge"><ShieldCheck :size="14" />可撤销 PAT</span>
     </header>
 
     <div class="mobile-binding-stage">
       <div class="mobile-binding-qr-column">
-        <div class="mobile-binding-qr" :data-state="qrCode ? 'ready' : 'error'">
+        <div class="mobile-binding-qr" :data-state="loading ? 'loading' : qrCode ? 'ready' : 'error'">
           <img v-if="qrCode" :src="qrCode" alt="星辰监控鸿蒙 App 绑定二维码" />
+          <div v-else-if="loading" class="mobile-binding-loading" role="status">
+            <span class="spinner" />
+            <strong>正在读取控制器信息</strong>
+            <p>取得可信元数据后生成二维码。</p>
+          </div>
           <div v-else class="mobile-binding-fallback" role="alert">
             <TriangleAlert :size="24" />
             <strong>二维码暂不可用</strong>
             <p>{{ error || '请使用下方 Token 完成手动绑定。' }}</p>
           </div>
         </div>
-        <span class="mobile-binding-qr-caption"><QrCode :size="14" />鸿蒙 App</span>
+        <button v-if="error" class="mobile-binding-retry" type="button" @click="loadBindingQrCode"><RefreshCw :size="14" />重新读取控制器信息</button>
+        <span v-else class="mobile-binding-qr-caption"><QrCode :size="14" />鸿蒙 App</span>
       </div>
       <div class="mobile-binding-details">
         <div class="mobile-binding-scope">
@@ -41,12 +103,13 @@ const scopeCount = computed(() => props.scopes.length)
           <div><small>当前授权范围</small><strong>{{ scopeCount }} 项权限</strong></div>
         </div>
         <dl class="mobile-binding-meta">
-          <div><dt>服务入口</dt><dd class="mono-value">{{ baseUrl }}</dd></div>
-          <div><dt>凭据状态</dt><dd>仅本次显示</dd></div>
+          <div v-if="controllerName"><dt>控制器</dt><dd>{{ controllerName }} · API v{{ apiVersion }}</dd></div>
+          <div><dt>服务入口</dt><dd class="mono-value">{{ bindingBaseUrl }}</dd></div>
+          <div><dt>凭据状态</dt><dd>可重复使用，直至到期或吊销</dd></div>
         </dl>
       </div>
     </div>
 
-    <footer class="mobile-binding-security"><ShieldCheck :size="16" /><span>二维码与下方 Token 拥有相同权限，请勿转发或截图保存。</span></footer>
+    <footer class="mobile-binding-security"><ShieldCheck :size="16" /><span>PAT 明文只在创建时显示一次，但凭据并非一次性使用。二维码与下方 Token 拥有相同权限，请勿转发或截图保存，完成绑定后可在此吊销。</span></footer>
   </section>
 </template>

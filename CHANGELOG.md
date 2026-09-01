@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.20.0
+
+- 新增面向移动端的可靠实时事件通道、客户端启动配置和断线续传能力，并按账号设备权限与 API Token scope 过滤可见事件。
+- 新增 HarmonyOS NEXT/5.x+ 华为 Push Kit V3 移动推送登记、Token 轮换、偏好设置、测试投递与失败重试；使用服务账号 PS256 JWT，明确与 Web Push、FCM、APNs、通用 Webhook 及旧版华为 OAuth Push API 区分。
+- 扩展移动端 API Token 权限和 Web 绑定入口，补充华为 Push Kit 配置、接口及部署文档；Push Kit 默认关闭，只有完整配置服务账号后才允许启用。
+
 ## v1.19.2
 
 - 修复 Agent 自动更新在目标镜像已被其他任务提前拉取时误判为无需更新的问题；更新器现在比较运行中容器与目标镜像，确保旧 Agent 容器会被实际替换。

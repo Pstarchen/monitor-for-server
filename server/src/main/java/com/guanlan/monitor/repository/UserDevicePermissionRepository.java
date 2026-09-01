@@ -9,5 +9,6 @@ import java.util.Optional;
 public interface UserDevicePermissionRepository extends JpaRepository<UserDevicePermission, Long> {
     List<UserDevicePermission> findByUserId(Long userId);
     Optional<UserDevicePermission> findByUserUsernameIgnoreCaseAndDeviceId(String username, String deviceId);
+    boolean existsByUserIdAndDeviceIdAndCanViewTrue(Long userId, String deviceId);
     void deleteByUserId(Long userId);
 }

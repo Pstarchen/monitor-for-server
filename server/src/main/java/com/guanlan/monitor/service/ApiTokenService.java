@@ -88,7 +88,9 @@ public class ApiTokenService {
         if (!user.isEnabled()) return Optional.empty();
         token.setLastUsedAt(Instant.now());
         token.setLastUsedIp(ip == null ? "" : ip.substring(0, Math.min(64, ip.length())));
-        return Optional.of(new ApiTokenPrincipal(token.getId(), user.getUsername(), user.getRole().name(), Set.copyOf(parse(token.getScopesJson())), Set.copyOf(parse(token.getServerIdsJson()))));
+        return Optional.of(new ApiTokenPrincipal(token.getId(), user.getUsername(), user.getRole().name(),
+                Set.copyOf(parse(token.getScopesJson())), Set.copyOf(parse(token.getServerIdsJson())),
+                token.getTokenPrefix(), token.getExpiresAt()));
     }
 
     private UserAccount user(String username) {

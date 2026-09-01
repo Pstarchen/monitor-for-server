@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.security.core.Authentication;
 import com.guanlan.monitor.service.DeviceAccessService;
+import com.guanlan.monitor.security.ApiTokenPrincipal;
 
 import java.util.Comparator;
 import java.util.List;
@@ -28,6 +29,8 @@ public class DashboardController {
 
     @GetMapping
     DashboardView get(Authentication authentication) {
+        boolean includeAlerts = !(authentication.getPrincipal() instanceof ApiTokenPrincipal token)
+                || token.allowsScope("nezha:alert:read");
         List<DeviceDtos.View> allDevices = deviceService.list();
         var visible = access.visibleDeviceIds(authentication);
         List<DeviceDtos.View> devices = visible == null ? allDevices
@@ -42,14 +45,14 @@ public class DashboardController {
                 devices.stream().filter(device -> device.status() == Device.Status.ONLINE).count(),
                 devices.stream().filter(device -> device.status() == Device.Status.OFFLINE).count(),
                 devices.stream().filter(device -> device.status() == Device.Status.PENDING).count(),
-                activeAlerts(authentication, devices),
+                includeAlerts ? activeAlerts(authentication, devices) : 0,
                 average(measured, "cpu"), average(measured, "memory"), average(measured, "disk"),
                 measured.stream().mapToDouble(device -> device.latest().networkSentBps()).sum(),
                 measured.stream().mapToDouble(device -> device.latest().networkRecvBps()).sum(),
                 measured.stream().mapToInt(device -> device.latest().smartFailed()).sum(),
                 measured.stream().mapToInt(device -> device.latest().integrityChanges()).sum(),
                 measured.stream().mapToInt(device -> device.latest().firewallInactive() == null ? 0 : device.latest().firewallInactive()).sum(),
-                devices, top, recentAlerts(authentication)
+                devices, top, includeAlerts ? recentAlerts(authentication) : List.of()
         );
     }
 

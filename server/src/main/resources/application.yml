@@ -76,6 +76,23 @@ app:
   redis-enabled: ${REDIS_ENABLED:false}
   enable-mcp: ${ENABLE_MCP:false}
   allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
+  realtime:
+    enabled: ${REALTIME_V2_ENABLED:true}
+    redis-channel: ${REALTIME_REDIS_CHANNEL:monitor:realtime:v1}
+    outbox-batch-size: ${REALTIME_OUTBOX_BATCH_SIZE:100}
+    replay-batch-size: ${REALTIME_REPLAY_BATCH_SIZE:200}
+    retention-hours: ${REALTIME_RETENTION_HOURS:24}
+    ticket-ttl-seconds: ${REALTIME_TICKET_TTL_SECONDS:30}
+  push-kit:
+    enabled: ${PUSH_KIT_ENABLED:false}
+    project-id: ${PUSH_KIT_PROJECT_ID:}
+    key-id: ${PUSH_KIT_KEY_ID:}
+    sub-account: ${PUSH_KIT_SUB_ACCOUNT:}
+    private-key: ${PUSH_KIT_PRIVATE_KEY:}
+    category: ${PUSH_KIT_CATEGORY:MARKETING}
+    ttl-seconds: ${PUSH_KIT_TTL_SECONDS:86400}
+    batch-size: ${PUSH_KIT_BATCH_SIZE:50}
+    max-attempts: ${PUSH_KIT_MAX_ATTEMPTS:5}
   controller-agent:
     enabled: ${CONTROLLER_AGENT_ENABLED:false}
     device-id: ${CONTROLLER_AGENT_DEVICE_ID:}
