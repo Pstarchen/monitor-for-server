@@ -547,6 +547,12 @@ class AuthAndAgentIntegrationTest {
         ApiTokenDtos.Created inventoryOnly = apiTokens.create("test-admin", new ApiTokenDtos.CreateRequest(
                 "inventory-only", java.util.List.of("nezha:inventory:read"), java.util.List.of(), 7));
 
+        mvc.perform(get("/api/client/bootstrap").header("Authorization", "Bearer " + inventoryOnly.secret()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.server.apiVersion").value(2))
+                .andExpect(jsonPath("$.server.minimumClientApiVersion").value(1))
+                .andExpect(jsonPath("$.principal.authenticationType").value("bearer"));
+
         mvc.perform(get("/api/services").header("Authorization", "Bearer " + inventoryOnly.secret()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.requiredScope").value("nezha:service:read"));

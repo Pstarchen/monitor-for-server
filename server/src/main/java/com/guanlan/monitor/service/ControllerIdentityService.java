@@ -8,6 +8,7 @@ import com.guanlan.monitor.config.RealtimeProperties;
 import com.guanlan.monitor.domain.SystemSetting;
 import com.guanlan.monitor.repository.SystemSettingRepository;
 import com.guanlan.monitor.security.ApiTokenPrincipal;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.info.BuildProperties;
@@ -31,9 +32,24 @@ public class ControllerIdentityService {
     private final RealtimeProperties realtimeProperties;
     private final PushKitProperties pushKitProperties;
     private final ObjectProvider<BuildProperties> buildProperties;
+    private volatile String cachedControllerId;
+
+    @PostConstruct
+    void initializeControllerId() {
+        cachedControllerId = loadControllerId();
+    }
 
     @Transactional
     public String controllerId() {
+        String current = cachedControllerId;
+        if (current != null) return current;
+        synchronized (this) {
+            if (cachedControllerId == null) cachedControllerId = loadControllerId();
+            return cachedControllerId;
+        }
+    }
+
+    private String loadControllerId() {
         SystemSetting setting = settings.findById(CONTROLLER_ID_KEY)
                 .orElseGet(() -> settings.save(new SystemSetting(CONTROLLER_ID_KEY, UUID.randomUUID().toString())));
         try {
@@ -63,7 +79,7 @@ public class ControllerIdentityService {
         return new ClientBootstrapDtos.Bootstrap(
                 new ClientBootstrapDtos.Controller(controllerId(), appProperties.getSiteName(),
                         normalize(appProperties.getPublicBaseUrl()), appProperties.getTimezone()),
-                new ClientBootstrapDtos.Server(version, buildTime, 2, 23, Instant.now()),
+                new ClientBootstrapDtos.Server(version, buildTime, 2, 1, Instant.now()),
                 List.copyOf(capabilities),
                 new ClientBootstrapDtos.Principal(authenticationType, authentication.getName(),
                         role(authentication), token == null ? null : token.tokenId(),
