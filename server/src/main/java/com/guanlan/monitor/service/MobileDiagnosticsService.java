@@ -74,12 +74,14 @@ public class MobileDiagnosticsService {
             long bucket = secondsFromStart / sampleStepSeconds;
             if (activeMetric != null && bucket != activeBucket) {
                 points.add(historyPoint(activeMetric));
-                if (points.size() == MAX_HISTORY_POINTS) return List.copyOf(points);
             }
             activeBucket = bucket;
             activeMetric = metric;
         }
-        if (activeMetric != null && points.size() < MAX_HISTORY_POINTS) points.add(historyPoint(activeMetric));
+        if (activeMetric != null) points.add(historyPoint(activeMetric));
+        if (points.size() > MAX_HISTORY_POINTS) {
+            return List.copyOf(points.subList(points.size() - MAX_HISTORY_POINTS, points.size()));
+        }
         return List.copyOf(points);
     }
 

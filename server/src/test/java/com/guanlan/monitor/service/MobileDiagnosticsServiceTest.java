@@ -94,6 +94,7 @@ class MobileDiagnosticsServiceTest {
         assertThat(result.sampleStepSeconds()).isEqualTo(3_600);
         assertThat(result.points()).hasSize(720);
         assertThat(result.points()).extracting("collectedAt").isSorted();
+        assertThat(result.points().getLast().collectedAt()).isEqualTo(result.to());
     }
 
     @Test
