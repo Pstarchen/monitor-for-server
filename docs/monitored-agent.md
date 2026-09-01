@@ -55,7 +55,7 @@ GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-
 
 内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定 OCI 镜像。镜像代理和 GHCR 都不可用时，Docker 安装/更新会依次从 Gitee、GitHub 源码构建镜像；Gitee Git 仓库本身不作为 OCI 镜像仓库。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；未提供二进制时同样按 Gitee、GitHub 顺序拉取源码。可重复传入 `--source-url` 配置私有源码源，并用 `--source-ref` 固定分支或标签。
 
-Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR，全部失败后从 Gitee、GitHub 源码构建 Docker 镜像；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，或用 `--no-auto-update` 关闭。检查和手动执行更新：
+Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR，国内代理默认 45 秒后快速切换，全部失败后从 Gitee、GitHub 源码构建 Docker 镜像；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，通过 `GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS` 调整代理超时，或用 `--no-auto-update` 关闭。检查和手动执行更新：
 
 ```bash
 systemctl status guanlan-agent-update.timer

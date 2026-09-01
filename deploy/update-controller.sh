@@ -38,11 +38,20 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
 cd "${project_root}"
 
+read_env_value() {
+  local key="$1"
+  awk -v key="${key}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true
+}
+
 # Registry downloads can legitimately take several minutes on a constrained link.
 # Keep the timeout finite, configurable, and aligned with the Windows updater.
-pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-180}"
-compose_timeout_seconds="${GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-900}"
-if [[ ! "${pull_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${compose_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
+pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS)}"
+pull_timeout_seconds="${pull_timeout_seconds:-180}"
+mirror_timeout_seconds="${GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS)}"
+mirror_timeout_seconds="${mirror_timeout_seconds:-45}"
+compose_timeout_seconds="${GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS)}"
+compose_timeout_seconds="${compose_timeout_seconds:-900}"
+if [[ ! "${pull_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${mirror_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${compose_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
   echo "更新超时必须是正整数秒数。" >&2
   exit 2
 fi
@@ -77,11 +86,6 @@ if command -v flock >/dev/null 2>&1; then
     exit 75
   fi
 fi
-
-read_env_value() {
-  local key="$1"
-  awk -v key="${key}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true
-}
 
 source_ref="${GUANLAN_SOURCE_REF:-$(read_env_value GUANLAN_SOURCE_REF)}"
 source_ref="${source_ref:-main}"
@@ -154,7 +158,7 @@ pull_one() {
       [[ -z "${prefix}" ]] && continue
       candidate="${prefix}/${suffix}"
       echo "尝试国内镜像源：${candidate}"
-      if run_with_timeout "${pull_timeout_seconds}" docker pull "${candidate}" >/dev/null && run_with_timeout "${pull_timeout_seconds}" docker tag "${candidate}" "${image}"; then
+      if run_with_timeout "${mirror_timeout_seconds}" docker pull "${candidate}" >/dev/null && run_with_timeout "${mirror_timeout_seconds}" docker tag "${candidate}" "${image}"; then
         return 0
       fi
     done

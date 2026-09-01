@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 installer="${script_dir}/install-agent.sh"
 grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn' "${installer}" >/dev/null
+grep -F 'GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45' "${installer}" >/dev/null
 grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
 grep -F 'https://monitor.example.com/api/setup/agent-installer?platform=linux' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F 'https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
@@ -92,6 +93,13 @@ while [[ $# -gt 0 ]]; do
 done
 SCRIPT
 
+cat > "${fake_bin}/timeout" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'timeout %s\n' "$*" >> "${TEST_LOG}"
+shift
+"$@"
+SCRIPT
+
 for command in systemctl useradd sleep; do
   cat > "${fake_bin}/${command}" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -161,6 +169,7 @@ run_installer_stdin() {
 server_url=https://monitor.example.com
 run_installer 1
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
 grep -F 'docker run -d --name guanlan-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
@@ -168,6 +177,8 @@ grep -F '"docker_socket": "/run/guanlan-agent-docker.sock"' "${config_file}" >/d
 grep -F '"allow_command_execution": false' "${config_file}" >/dev/null
 grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 run_as_root test -x "${temp_dir}/manager/update-agent.sh"
+run_as_root grep -F "mirror_timeout='45'" "${temp_dir}/manager/update-agent.sh" >/dev/null
+run_as_root grep -F "pull_timeout='120'" "${temp_dir}/manager/update-agent.sh" >/dev/null
 run_as_root grep -F 'CONTAINER_NAME=guanlan-agent' "${temp_dir}/manager/install.env" >/dev/null
 
 : > "${log_file}"

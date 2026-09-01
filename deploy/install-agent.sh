@@ -35,6 +35,8 @@ fi
 source_url_overridden=false
 source_ref="${GUANLAN_SOURCE_REF:-main}"
 source_build_timeout="${GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
+mirror_pull_timeout="${GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45}"
+agent_pull_timeout="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
 agent_image="${GUANLAN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${GUANLAN_AGENT_VERSION:-latest}}"
 container_name="${GUANLAN_AGENT_CONTAINER:-guanlan-agent}"
 binary_path=""
@@ -108,7 +110,7 @@ done
 script_source="${BASH_SOURCE[0]-}"
 if [[ "${EUID}" -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1 && [[ -n "${script_source}" && -f "${script_source}" ]]; then
-    exec sudo --preserve-env=GUANLAN_AGENT_KEY,GUANLAN_AGENT_IMAGE,GUANLAN_AGENT_IMAGE_MIRRORS,GUANLAN_REPOSITORY_URL,GUANLAN_REPOSITORY_URLS,GUANLAN_SOURCE_REF,GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
+    exec sudo --preserve-env=GUANLAN_AGENT_KEY,GUANLAN_AGENT_IMAGE,GUANLAN_AGENT_IMAGE_MIRRORS,GUANLAN_REPOSITORY_URL,GUANLAN_REPOSITORY_URLS,GUANLAN_SOURCE_REF,GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS,GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS,GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
   fi
   echo "请以 root 身份运行，或安装 sudo 后重试。" >&2
   exit 1
@@ -526,7 +528,10 @@ install_docker_agent() {
 
 pull_agent_image() {
   local candidate mirror_prefix image_suffix
-  local pull_timeout=120
+  if [[ ! "${mirror_pull_timeout}" =~ ^[1-9][0-9]*$ || ! "${agent_pull_timeout}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Agent 镜像拉取超时必须是正整数秒数。" >&2
+    return 2
+  fi
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
     IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}"
@@ -535,13 +540,13 @@ pull_agent_image() {
       [[ -z "${mirror_prefix}" ]] && continue
       candidate="${mirror_prefix}/${image_suffix}"
       echo "正在尝试 Agent 镜像源 ${candidate}..."
-      if run_with_timeout "${pull_timeout}" docker pull "${candidate}" >/dev/null && docker tag "${candidate}" "${agent_image}"; then
+      if run_with_timeout "${mirror_pull_timeout}" docker pull "${candidate}" >/dev/null && run_with_timeout "${mirror_pull_timeout}" docker tag "${candidate}" "${agent_image}"; then
         return 0
       fi
     done
   fi
   echo "正在尝试 Agent 官方镜像源 ${agent_image}..."
-  if run_with_timeout "${pull_timeout}" docker pull "${agent_image}"; then
+  if run_with_timeout "${agent_pull_timeout}" docker pull "${agent_image}"; then
     return 0
   fi
   build_agent_image_from_source
@@ -583,6 +588,8 @@ install_agent_updater() {
     printf 'config_path=%s\n' "$(shell_quote "${agent_config_path}")"
     printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
     printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}")"
+    printf 'mirror_timeout=%s\n' "$(shell_quote "${mirror_pull_timeout}")"
+    printf 'pull_timeout=%s\n' "$(shell_quote "${agent_pull_timeout}")"
     printf 'source_ref=%s\n' "$(shell_quote "${source_ref}")"
     printf 'source_build_timeout=%s\n' "$(shell_quote "${source_build_timeout}")"
     printf 'repositories=('
@@ -606,10 +613,10 @@ install_agent_updater() {
       '    for prefix in "${prefixes[@]}"; do' \
       '      prefix="${prefix%/}"; [[ -z "${prefix}" ]] && continue' \
       '      candidate="${prefix}/${suffix}"' \
-      '      if run_with_timeout 120 docker pull "${candidate}" >/dev/null && run_with_timeout 30 docker tag "${candidate}" "${image}"; then return 0; fi' \
+      '      if run_with_timeout "${mirror_timeout}" docker pull "${candidate}" >/dev/null && run_with_timeout "${mirror_timeout}" docker tag "${candidate}" "${image}"; then return 0; fi' \
       '    done' \
       '  fi' \
-      '  if run_with_timeout 120 docker pull "${image}"; then return 0; fi' \
+      '  if run_with_timeout "${pull_timeout}" docker pull "${image}"; then return 0; fi' \
       '  [[ "${image}" == *@* ]] && return 1' \
       '  for repository in "${repositories[@]}"; do' \
       '    echo "镜像源不可用，尝试从源码构建 Agent：${repository} (${source_ref})"' \

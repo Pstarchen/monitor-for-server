@@ -17,13 +17,6 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安�
 if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
 
 if (-not $Check -and -not $Apply) { $Check = $true }
-# Registry downloads can legitimately take several minutes on a constrained link.
-# Keep the timeout finite, configurable, and aligned with the Linux updater.
-$pullTimeoutSeconds = if ($env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS } else { 180 }
-$composeTimeoutSeconds = if ($env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS) { [int]$env:GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS } else { 900 }
-if ($pullTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
-$env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
-$env:COMPOSE_HTTP_TIMEOUT = [string]$composeTimeoutSeconds
 Push-Location $projectRoot
 $lockPath = Join-Path $projectRoot '.controller-update.lock'
 $lockStream = $null
@@ -46,6 +39,14 @@ try {
         if ($value) { return $value }
         return $DefaultValue
     }
+    # Registry mirrors should fail over quickly, while the official registry
+    # keeps a longer window for constrained international links.
+    $pullTimeoutSeconds = [int](Read-UpdateSetting 'GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS' '180')
+    $mirrorTimeoutSeconds = [int](Read-UpdateSetting 'GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS' '45')
+    $composeTimeoutSeconds = [int](Read-UpdateSetting 'GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS' '900')
+    if ($pullTimeoutSeconds -lt 1 -or $mirrorTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
+    $env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
+    $env:COMPOSE_HTTP_TIMEOUT = [string]$composeTimeoutSeconds
     if ($Auto) {
         if (-not (Test-Path -LiteralPath $envFile)) { throw '总控 .env 不存在，请先完成安装。' }
         $lines = [System.Collections.Generic.List[string]]::new()
@@ -93,6 +94,17 @@ try {
         $resolvedImages += (Read-UpdateSetting $pair[0] $pair[1])
     }
 
+    function Invoke-DockerPull([string] $Image, [int] $TimeoutSeconds) {
+        $process = Start-Process -FilePath 'docker' -ArgumentList @('pull', $Image) -NoNewWindow -PassThru
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill() } catch { }
+            try { $process.WaitForExit() } catch { }
+            Write-Warning "Docker 拉取超过 $TimeoutSeconds 秒，已切换下一个镜像源：$Image"
+            return $false
+        }
+        return $process.ExitCode -eq 0
+    }
+
     function Pull-Image([string] $Image) {
         if (-not $NoMirror -and $Image.StartsWith('ghcr.io/')) {
             $suffix = $Image.Substring(7)
@@ -101,16 +113,14 @@ try {
             foreach ($mirror in $mirrors) {
                 $candidate = $mirror.TrimEnd('/') + '/' + $suffix
                 Write-Host "尝试国内镜像源：$candidate"
-                & docker pull $candidate | Out-Null
-                if ($LASTEXITCODE -eq 0) {
+                if (Invoke-DockerPull $candidate $mirrorTimeoutSeconds) {
                     & docker tag $candidate $Image
                     if ($LASTEXITCODE -eq 0) { return }
                 }
             }
         }
         Write-Host "尝试官方镜像源：$Image"
-        & docker pull $Image
-        if ($LASTEXITCODE -ne 0) { throw "镜像拉取失败：$Image" }
+        if (-not (Invoke-DockerPull $Image $pullTimeoutSeconds)) { throw "镜像拉取失败：$Image" }
     }
 
     function Remove-SourceBuildImages([string[]] $Images) {

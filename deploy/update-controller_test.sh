@@ -25,6 +25,14 @@ exit 0
 SCRIPT
 chmod +x "${fake_bin}/docker"
 
+cat > "${fake_bin}/timeout" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'timeout %s\n' "$*" >> "${TEST_LOG}"
+shift
+"$@"
+SCRIPT
+chmod +x "${fake_bin}/timeout"
+
 cat > "${fake_bin}/uname" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'Linux\n'
@@ -40,6 +48,9 @@ run_update --check
 grep -F 'docker pull ghcr.nju.edu.cn/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
 grep -F 'docker pull ghcr.1ms.run/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.1ms.run/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.nju.edu.cn/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
 if grep -q 'ghcr.m.daocloud.io' "${log_file}"; then
   echo 'Default mirror list still uses the unavailable DaoCloud public mirror.' >&2
   exit 1
@@ -48,6 +59,18 @@ if grep -q ' compose .* up ' "${log_file}"; then
   echo 'Check mode unexpectedly restarted controller services.' >&2
   exit 1
 fi
+
+timeout_root="${temp_dir}/timeout-project"
+mkdir -p "${timeout_root}/deploy"
+cp "${updater}" "${timeout_root}/deploy/update-controller.sh"
+printf '%s\n' \
+  'POSTGRES_PASSWORD="test-only"' \
+  'GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS="7"' \
+  'GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS="11"' > "${timeout_root}/.env"
+: > "${log_file}"
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" bash "${timeout_root}/deploy/update-controller.sh" --check
+grep -F 'timeout 7s docker pull ghcr.1ms.run/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
 
 : > "${log_file}"
 TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check

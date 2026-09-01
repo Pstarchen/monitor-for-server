@@ -82,7 +82,7 @@ sudo bash ./deploy/update-controller.sh --apply
 sudo bash ./deploy/update-controller.sh --auto
 ```
 
-更新器默认允许单个镜像最多拉取 180 秒、单个源码镜像最多构建 1200 秒、Compose 操作最多执行 900 秒。可通过 `GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS`、`GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；外层任务上限覆盖完整回退链，不会在单个来源仍正常工作时提前标记中断。更新失败不会删除数据库卷。
+更新器默认给予单个国内镜像代理 45 秒快速失败时间，官方 GHCR 单个镜像最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS`、`GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；外层任务上限覆盖完整回退链，不会在单个来源仍正常工作时提前标记中断。更新失败不会删除数据库卷。
 
 更新器默认依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR；这些 OCI 镜像源全部失败后，再依次使用 Gitee、GitHub Git 仓库作为 Docker 远程构建上下文。Gitee Git 仓库本身不是 OCI 镜像仓库。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 配置镜像前缀，通过 `GUANLAN_SOURCE_REPOSITORIES` 配置逗号分隔的源码仓库，通过 `GUANLAN_SOURCE_REF` 固定分支或标签。`--source-build` 会直接走双源码构建，`--no-source-fallback` 会在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
 
