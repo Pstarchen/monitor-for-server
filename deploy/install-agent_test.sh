@@ -50,9 +50,15 @@ elif [[ "${1:-}" == "build" && "${TEST_FAIL_GITEE_BUILD:-0}" == "1" && "$*" == *
 elif [[ "${1:-}" == "info" ]]; then
   [[ "${TEST_DOCKER_AVAILABLE:-0}" == "1" ]]
 elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
-  exit 1
+  [[ "${TEST_CONTAINER_EXISTS:-0}" == "1" ]]
+elif [[ "${1:-}" == "image" && "${2:-}" == "inspect" && "${3:-}" == "--format" ]]; then
+  printf 'new-agent-image\n'
 elif [[ "${1:-}" == "inspect" && "${2:-}" == "--format" ]]; then
-  printf 'true\n'
+  if [[ "${3:-}" == "{{.Image}}" ]]; then
+    printf 'old-agent-image\n'
+  else
+    printf 'true\n'
+  fi
 fi
 SCRIPT
 
@@ -179,6 +185,11 @@ grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 run_as_root test -x "${temp_dir}/manager/update-agent.sh"
 run_as_root grep -F "mirror_timeout='45'" "${temp_dir}/manager/update-agent.sh" >/dev/null
 run_as_root grep -F "pull_timeout='120'" "${temp_dir}/manager/update-agent.sh" >/dev/null
+run_as_root grep -F 'current="$(docker inspect --format "{{.Image}}" "${container_name}"' "${temp_dir}/manager/update-agent.sh" >/dev/null
+if run_as_root grep -F 'before="$(docker image inspect' "${temp_dir}/manager/update-agent.sh" >/dev/null; then
+  echo 'Agent updater still compares the local image before and after pulling.' >&2
+  exit 1
+fi
 run_as_root grep -F 'CONTAINER_NAME=guanlan-agent' "${temp_dir}/manager/install.env" >/dev/null
 
 : > "${log_file}"
@@ -186,6 +197,7 @@ manager_environment=(
   "PATH=${fake_bin}:/usr/bin:/bin"
   "TEST_LOG=${log_file}"
   "TEST_DOCKER_AVAILABLE=1"
+  "TEST_CONTAINER_EXISTS=1"
   "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
   "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
   "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
@@ -196,6 +208,9 @@ else
   sudo env "${manager_environment[@]}" bash "${installer}" update
 fi
 grep -F 'docker image inspect --format {{.Id}} ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
+grep -F 'docker inspect --format {{.Image}} guanlan-agent' "${log_file}" >/dev/null
+grep -F 'docker rename guanlan-agent guanlan-agent.previous' "${log_file}" >/dev/null
+grep -F 'docker rename guanlan-agent.update guanlan-agent' "${log_file}" >/dev/null
 
 : > "${log_file}"
 server_url=https://monitor.example.com

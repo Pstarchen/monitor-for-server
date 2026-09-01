@@ -624,10 +624,10 @@ install_agent_updater() {
       '  done' \
       '  return 1' \
       '}' \
-      'before="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
+      'current="$(docker inspect --format "{{.Image}}" "${container_name}" 2>/dev/null || true)"' \
       'pull_image' \
       'after="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
-      '[[ -n "${before}" && "${before}" == "${after}" ]] && exit 0' \
+      '[[ -n "${current}" && "${current}" == "${after}" ]] && exit 0' \
       'new_container="${container_name}.update"' \
       'old_container="${container_name}.previous"' \
       'docker rm -f "${new_container}" "${old_container}" >/dev/null 2>&1 || true' \
