@@ -51,4 +51,17 @@ public final class MobileInstallationDtos {
     ) {}
 
     public record TestResult(String status, Long deliveryId, String message) {}
+
+    public record AdminView(
+            String id,
+            MobileInstallation.Platform platform,
+            String tokenSuffix,
+            String appVersion,
+            String deviceModel,
+            boolean enabled,
+            Instant lastRegisteredAt,
+            Instant lastTestAt,
+            Instant createdAt,
+            Instant updatedAt
+    ) {}
 }

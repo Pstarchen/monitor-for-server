@@ -398,6 +398,40 @@ export interface Settings {
   dingtalk: WebhookSettings
   wecom: WebhookSettings
   generic: WebhookSettings
+  pushKit: PushKitSettings
+}
+
+export interface PushKitSettings {
+  enabled: boolean
+  configured: boolean
+  source: 'DATABASE' | 'ENVIRONMENT' | 'NONE'
+  projectId: string
+  keyId: string
+  subAccount: string
+  privateKeyConfigured: boolean
+  category: string
+  ttlSeconds: number
+  batchSize: number
+  maxAttempts: number
+}
+
+export interface PushKitInstallation {
+  id: string
+  platform: 'HARMONYOS'
+  tokenSuffix: string | null
+  appVersion: string | null
+  deviceModel: string | null
+  enabled: boolean
+  lastRegisteredAt: string | null
+  lastTestAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PushKitValidationResult {
+  status: 'VALID'
+  message: string
+  checkedAt: string
 }
 
 export interface TopologyNode {

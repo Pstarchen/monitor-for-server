@@ -2,8 +2,10 @@ package com.guanlan.monitor.push;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.guanlan.monitor.service.PushKitConfigurationService;
 import com.guanlan.monitor.config.PushKitProperties;
 import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -17,31 +19,38 @@ import java.util.Set;
 @Component
 public class PushKitClient {
     private static final Set<String> RETRYABLE_CODES = Set.of("80200005", "80300029", "81000001");
-    private final PushKitProperties properties;
+    private final PushKitConfigurationService configurations;
     private final PushKitServiceAccount serviceAccount;
     private final RestClient client;
     private final ObjectMapper mapper;
 
     public PushKitClient(PushKitProperties properties, PushKitServiceAccount serviceAccount,
                          RestClient.Builder builder, ObjectMapper mapper) {
-        this.properties = properties;
+        this(new PushKitConfigurationService(properties), serviceAccount, builder, mapper);
+    }
+
+    @Autowired
+    public PushKitClient(PushKitConfigurationService configurations, PushKitServiceAccount serviceAccount,
+                         RestClient.Builder builder, ObjectMapper mapper) {
+        this.configurations = configurations;
         this.serviceAccount = serviceAccount;
         this.client = builder.requestFactory(requestFactory()).build();
         this.mapper = mapper;
     }
 
     public boolean enabled() {
-        return properties.isEnabled();
+        return configurations.runtime().enabled();
     }
 
     public SendResult send(String token, String title, String body, String dataJson, boolean testMessage) {
-        requireConfigured();
+        PushKitConfigurationService.Runtime runtime = configurations.runtime();
+        requireConfigured(runtime);
         try {
-            PushResponse response = client.post().uri(serviceAccount.sendUri())
+            PushResponse response = client.post().uri(serviceAccount.sendUri(runtime))
                     .contentType(MediaType.APPLICATION_JSON)
-                    .header("Authorization", "Bearer " + serviceAccount.jwt())
+                    .header("Authorization", "Bearer " + serviceAccount.jwt(runtime))
                     .header("push-type", "0")
-                    .body(requestBody(token, title, body, dataJson, testMessage))
+                    .body(requestBody(runtime, token, title, body, dataJson, testMessage))
                     .retrieve().body(PushResponse.class);
             if (response == null || blank(response.code())) {
                 throw new PushKitException("Huawei Push Kit response was invalid", true, false, null);
@@ -65,12 +74,12 @@ public class PushKitClient {
         }
     }
 
-    Map<String, Object> requestBody(String token, String title, String body,
+    Map<String, Object> requestBody(PushKitConfigurationService.Runtime runtime, String token, String title, String body,
                                     String dataJson, boolean testMessage) throws Exception {
         JsonNode data = mapper.readTree(dataJson == null || dataJson.isBlank() ? "{}" : dataJson);
         if (!data.isObject()) throw new IllegalArgumentException("Push data must be a JSON object");
         Map<String, Object> notification = Map.of(
-                "category", properties.getCategory().trim(),
+                "category", runtime.category(),
                 "title", title,
                 "body", body,
                 "clickAction", Map.of("actionType", 0, "data", data),
@@ -80,7 +89,12 @@ public class PushKitClient {
                 "target", Map.of("token", List.of(token)),
                 "pushOptions", Map.of(
                         "testMessage", testMessage,
-                        "ttl", properties.getTtlSeconds()));
+                        "ttl", runtime.ttlSeconds()));
+    }
+
+    Map<String, Object> requestBody(String token, String title, String body,
+                                    String dataJson, boolean testMessage) throws Exception {
+        return requestBody(configurations.runtime(), token, title, body, dataJson, testMessage);
     }
 
     private boolean invalidToken(PushResponse response) {
@@ -89,12 +103,12 @@ public class PushKitClient {
         return message.contains("tokenFormatError") || message.contains("tokenPlatformNotSupport");
     }
 
-    private void requireConfigured() {
-        if (!properties.isEnabled()) {
+    private void requireConfigured(PushKitConfigurationService.Runtime runtime) {
+        if (!runtime.enabled()) {
             throw new PushKitException("Huawei Push Kit is disabled", false, false, null);
         }
         try {
-            serviceAccount.validate();
+            serviceAccount.validate(runtime);
         } catch (IllegalStateException exception) {
             throw new PushKitException("Huawei Push Kit is enabled but not fully configured", false, false, exception);
         }

@@ -8,6 +8,7 @@ import java.util.Optional;
 
 public interface MobileInstallationRepository extends JpaRepository<MobileInstallation, String> {
     List<MobileInstallation> findByApiTokenIdOrderByUpdatedAtDesc(Long apiTokenId);
+    List<MobileInstallation> findAllByOrderByUpdatedAtDesc();
     List<MobileInstallation> findByEnabledTrue();
     Optional<MobileInstallation> findByApiTokenIdAndClientInstallationId(Long apiTokenId, String clientInstallationId);
     Optional<MobileInstallation> findByIdAndApiTokenId(String id, Long apiTokenId);

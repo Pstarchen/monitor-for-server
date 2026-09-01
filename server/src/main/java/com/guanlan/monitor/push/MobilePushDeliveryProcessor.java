@@ -1,11 +1,13 @@
 package com.guanlan.monitor.push;
 
-import com.guanlan.monitor.config.PushKitProperties;
 import com.guanlan.monitor.domain.MobileInstallation;
 import com.guanlan.monitor.domain.MobilePushDelivery;
 import com.guanlan.monitor.repository.MobilePushDeliveryRepository;
 import com.guanlan.monitor.service.SecretValueCodec;
+import com.guanlan.monitor.service.PushKitConfigurationService;
+import com.guanlan.monitor.config.PushKitProperties;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,12 +15,17 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @Autowired)
 public class MobilePushDeliveryProcessor {
     private final MobilePushDeliveryRepository deliveries;
     private final PushKitClient pushKit;
-    private final PushKitProperties properties;
+    private final PushKitConfigurationService configurations;
     private final SecretValueCodec secrets;
+
+    public MobilePushDeliveryProcessor(MobilePushDeliveryRepository deliveries, PushKitClient pushKit,
+                                       PushKitProperties properties, SecretValueCodec secrets) {
+        this(deliveries, pushKit, new PushKitConfigurationService(properties), secrets);
+    }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void process(Long id) {
@@ -54,7 +61,7 @@ public class MobilePushDeliveryProcessor {
 
     private void failure(MobilePushDelivery delivery, String error, boolean retryable) {
         delivery.setLastError(limit(safe(error), 500));
-        if (retryable && delivery.getAttempts() < Math.max(1, properties.getMaxAttempts())) {
+        if (retryable && delivery.getAttempts() < configurations.runtime().maxAttempts()) {
             long delay = Math.min(900, 5L << Math.min(delivery.getAttempts() - 1, 7));
             delivery.setStatus(MobilePushDelivery.Status.RETRY);
             delivery.setNextAttemptAt(Instant.now().plusSeconds(delay));

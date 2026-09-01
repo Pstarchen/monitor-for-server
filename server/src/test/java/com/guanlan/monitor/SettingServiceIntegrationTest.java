@@ -4,7 +4,9 @@ import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.domain.SystemSetting;
 import com.guanlan.monitor.repository.SystemSettingRepository;
 import com.guanlan.monitor.service.NotificationService;
+import com.guanlan.monitor.service.PushKitConfigurationService;
 import com.guanlan.monitor.service.SettingService;
+import com.guanlan.monitor.push.PushKitClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.security.KeyPairGenerator;
+import java.util.Base64;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -23,6 +28,8 @@ class SettingServiceIntegrationTest {
     @Autowired SettingService settings;
     @Autowired NotificationService notifications;
     @Autowired SystemSettingRepository repository;
+    @Autowired PushKitConfigurationService pushKitConfigurations;
+    @Autowired PushKitClient pushKitClient;
 
     @Test
     void notificationSecretsAreEncryptedAndNeverReturned() {
@@ -88,6 +95,35 @@ class SettingServiceIntegrationTest {
                 disabledEmail(), new SettingService.WebhookUpdate(false, null, false), new SettingService.WebhookUpdate(false, null, false));
         assertThat(settings.update(update).enableMcp()).isTrue();
         assertThat(settings.mcpEnabled()).isTrue();
+    }
+
+    @Test
+    void pushKitPrivateKeyIsEncryptedNotReturnedAndAppliedImmediately() throws Exception {
+        var generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        String encoded = Base64.getMimeEncoder(64, new byte[]{'\n'})
+                .encodeToString(generator.generateKeyPair().getPrivate().getEncoded());
+        String privateKey = "-----BEGIN PRIVATE KEY-----\n" + encoded + "\n-----END PRIVATE KEY-----";
+
+        PushKitConfigurationService.View view = pushKitConfigurations.update(
+                new PushKitConfigurationService.Update(true, "123456789", "key-id", "sub-account",
+                        privateKey, false, "MARKETING", 86400, 50, 5));
+
+        String stored = repository.findById("notification.push_kit.private_key")
+                .map(SystemSetting::getValue).orElseThrow();
+        assertThat(stored).startsWith("v1:").hasSizeGreaterThan(500).doesNotContain("BEGIN PRIVATE KEY");
+        assertThat(view.privateKeyConfigured()).isTrue();
+        assertThat(view.toString()).doesNotContain(privateKey).doesNotContain(encoded);
+        assertThat(pushKitClient.enabled()).isTrue();
+    }
+
+    @Test
+    void pushKitCannotBeEnabledWithoutACompleteServiceAccount() {
+        assertThatThrownBy(() -> pushKitConfigurations.update(
+                new PushKitConfigurationService.Update(true, "", "", "", null,
+                        false, "MARKETING", 86400, 50, 5)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("项目 ID");
     }
 
     private SettingService.Update update(SettingService.EmailUpdate email,

@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Activity, CheckCircle2, ChevronRight, Copy, Database, Globe2, KeyRound, LockKeyhole,
   Clock3, Download, GitCommit, ImageOff, Mail, MessageSquareText, RefreshCw, RotateCcw,
-  Plus, Save, Send, ServerCog, Settings2, ShieldCheck, Trash2, Upload,
+  Plus, Save, Send, ServerCog, Settings2, ShieldCheck, Smartphone, Trash2, Upload,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import LoadingState from '@/components/LoadingState.vue'
@@ -20,11 +20,12 @@ import { apiTokenScopeLabel, visibleApiTokenScopeGroups } from '@/lib/api-token-
 import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
 import { resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
 import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controller-update'
+import { canTestPushKit, canValidatePushKit, pushKitForm, pushKitState } from '@/lib/push-kit-settings'
 import { useAuthStore } from '@/stores/auth'
-import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, NotificationDelivery, Settings, WebhookSettings } from '@/types'
+import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, NotificationDelivery, PushKitInstallation, PushKitValidationResult, Settings, WebhookSettings } from '@/types'
 
 type ChannelKey = 'email' | 'dingtalk' | 'wecom' | 'generic'
-type SectionKey = 'general' | 'monitoring' | ChannelKey | 'security' | 'tokens' | 'updates'
+type SectionKey = 'general' | 'monitoring' | ChannelKey | 'pushkit' | 'security' | 'tokens' | 'updates'
 
 const sections = [
   {
@@ -41,6 +42,7 @@ const sections = [
       { key: 'dingtalk' as const, label: '钉钉机器人', description: '群机器人 Webhook', icon: MessageSquareText },
       { key: 'wecom' as const, label: '企业微信', description: '群机器人 Webhook', icon: MessageSquareText },
       { key: 'generic' as const, label: '通用 Webhook', description: 'Slack、Discord、飞书等', icon: Send },
+      { key: 'pushkit' as const, label: '华为 Push Kit', description: 'HarmonyOS NEXT 推送', icon: Smartphone },
     ],
   },
   {
@@ -72,6 +74,10 @@ const form = reactive({
   dingtalk: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false },
   wecom: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false },
   generic: { enabled: false, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false, payloadFormat: 'GENERIC_JSON' },
+  pushKit: {
+    enabled: false, projectId: '', keyId: '', subAccount: '', privateKey: '', clearPrivateKey: false,
+    category: 'MARKETING', ttlSeconds: 86400, batchSize: 50, maxAttempts: 5,
+  },
 })
 const loading = ref(true)
 const saving = ref(false)
@@ -97,6 +103,11 @@ const tokenForm = reactive(createDefaultApiTokenForm())
 const deliveryLogs = ref<NotificationDelivery[]>([])
 const deliveryLoading = ref(false)
 const retryingDelivery = ref<number | null>(null)
+const pushKitValidating = ref(false)
+const pushKitValidation = ref<PushKitValidationResult | null>(null)
+const pushKitInstallations = ref<PushKitInstallation[]>([])
+const pushKitInstallationsLoading = ref(false)
+const testingPushKitInstallation = ref('')
 const auth = useAuthStore()
 const canAdmin = computed(() => auth.user?.role === 'ADMIN')
 const mobileBindingBaseUrl = computed(() => resolveMobileBindingBaseUrl(settings.value?.publicBaseUrl, window.location.origin))
@@ -136,6 +147,8 @@ function apply(value: Settings) {
   Object.assign(form.dingtalk, { enabled: value.dingtalk.enabled, webhookUrl: '', clearWebhook: false, keyword: value.dingtalk.keyword ?? '', signSecret: '', clearSignSecret: false })
   Object.assign(form.wecom, { enabled: value.wecom.enabled, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false })
   Object.assign(form.generic, { enabled: value.generic.enabled, webhookUrl: '', clearWebhook: false, keyword: '', signSecret: '', clearSignSecret: false, payloadFormat: value.generic.payloadFormat ?? 'GENERIC_JSON' })
+  Object.assign(form.pushKit, pushKitForm(value.pushKit))
+  pushKitValidation.value = null
   baseline.value = snapshot()
 }
 
@@ -336,6 +349,46 @@ async function retryDelivery(item: NotificationDelivery) {
   }
 }
 
+async function validatePushKitConfiguration() {
+  if (!settings.value || !canValidatePushKit(settings.value.pushKit, hasChanges.value)) return
+  pushKitValidating.value = true
+  try {
+    pushKitValidation.value = (await api.post<PushKitValidationResult>('/settings/push-kit/validate')).data
+    ElMessage.success(pushKitValidation.value.message)
+  } catch (cause) {
+    pushKitValidation.value = null
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    pushKitValidating.value = false
+  }
+}
+
+async function loadPushKitInstallations() {
+  if (!canAdmin.value) return
+  pushKitInstallationsLoading.value = true
+  try {
+    pushKitInstallations.value = (await api.get<PushKitInstallation[]>('/settings/push-kit/installations')).data
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    pushKitInstallationsLoading.value = false
+  }
+}
+
+async function testPushKitInstallation(installation: PushKitInstallation) {
+  if (!settings.value || !canTestPushKit(settings.value.pushKit, installation, hasChanges.value)) return
+  testingPushKitInstallation.value = installation.id
+  try {
+    const result = (await api.post<{ message: string }>(`/settings/push-kit/installations/${installation.id}/test`)).data
+    ElMessage.success(result.message)
+    await loadPushKitInstallations()
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    testingPushKitInstallation.value = ''
+  }
+}
+
 function deliveryChannel(channel: string) {
   return ({ email: '邮件', dingtalk: '钉钉', wecom: '企业微信', generic: '通用 Webhook' } as Record<string, string>)[channel] ?? channel
 }
@@ -359,6 +412,11 @@ function navState(key: SectionKey) {
   if (key === 'updates') {
     if (!controllerUpdate.value) return ''
     return controllerUpdate.value.state === 'ERROR' || controllerUpdate.value.updateAvailable ? 'attention' : 'ready'
+  }
+  if (key === 'pushkit') {
+    if (!settings.value) return ''
+    if (!settings.value.pushKit.enabled) return 'disabled'
+    return settings.value.pushKit.configured ? 'ready' : 'attention'
   }
   if (!settings.value || !['email', 'dingtalk', 'wecom', 'generic'].includes(key)) return ''
   const channel = settings.value[key as ChannelKey]
@@ -477,6 +535,7 @@ watch(activeSection, (section) => {
   if (section === 'updates' && !controllerUpdate.value && !updateLoading.value) loadControllerUpdate()
   if (section === 'tokens' && !apiTokens.value.length && !tokenLoading.value) loadApiTokens()
   if ((section === 'dingtalk' || section === 'wecom' || section === 'generic' || section === 'email') && !deliveryLogs.value.length && !deliveryLoading.value) loadDeliveries()
+  if (section === 'pushkit' && !pushKitInstallations.value.length && !pushKitInstallationsLoading.value) loadPushKitInstallations()
 })
 
 onMounted(() => {
@@ -660,6 +719,52 @@ onBeforeUnmount(() => {
             </section>
           </template>
 
+          <template v-else-if="activeSection === 'pushkit'">
+            <header class="settings-editor-head channel-editor-head">
+              <span><Smartphone :size="18" /></span>
+              <div><h2>华为 Push Kit</h2><p>{{ sourceText(settings.pushKit.source) }} · V3 接口，仅用于 HarmonyOS NEXT / 5.x 及以上</p></div>
+              <StatusBadge :status="pushKitState(settings.pushKit)" />
+              <el-switch v-model="form.pushKit.enabled" aria-label="启用华为 Push Kit" />
+            </header>
+            <el-form class="settings-editor-body" @submit.prevent="save">
+              <div class="push-kit-scope-note" role="note">
+                <Smartphone :size="17" />
+                <div><strong>HarmonyOS NEXT 通知通道</strong><p>使用华为 Push Kit V3 服务账号和设备 Push Token；不适用于 Web Push、FCM、APNs、Webhook 或 HarmonyOS 3.x/4.x 的 V2 接口。</p></div>
+              </div>
+              <div class="setting-list">
+                <div class="setting-row"><div class="setting-copy"><label for="push-kit-project-id">项目 ID</label><p>在 AppGallery Connect 的项目设置中获取，用于组成 V3 发送地址。</p></div><div class="setting-control"><el-input id="push-kit-project-id" v-model="form.pushKit.projectId" maxlength="128" autocomplete="off" placeholder="AppGallery Connect Project ID" /></div></div>
+                <div class="setting-row"><div class="setting-copy"><label for="push-kit-key-id">Key ID</label><p>华为 Push Kit 服务账号密钥的标识。</p></div><div class="setting-control"><el-input id="push-kit-key-id" v-model="form.pushKit.keyId" maxlength="256" autocomplete="off" /></div></div>
+                <div class="setting-row"><div class="setting-copy"><label for="push-kit-sub-account">子账号</label><p>用于 JWT 的 iss 字段，应与服务账号信息完全一致。</p></div><div class="setting-control"><el-input id="push-kit-sub-account" v-model="form.pushKit.subAccount" maxlength="256" autocomplete="off" /></div></div>
+                <div class="setting-row push-kit-private-key-row">
+                  <div class="setting-copy"><label for="push-kit-private-key">PKCS#8 RSA 私钥</label><p>{{ settings.pushKit.privateKeyConfigured ? '私钥已配置，留空不会覆盖；设置接口不会返回私钥明文。' : '粘贴 BEGIN PRIVATE KEY 格式的服务账号私钥。' }}</p></div>
+                  <div class="setting-control secret-control"><el-input id="push-kit-private-key" v-model="form.pushKit.privateKey" type="textarea" :rows="5" resize="vertical" autocomplete="new-password" :disabled="!settings.secretStorageReady" :placeholder="settings.pushKit.privateKeyConfigured ? '粘贴新私钥以替换' : '-----BEGIN PRIVATE KEY-----'" /><el-checkbox v-if="settings.pushKit.source === 'DATABASE'" v-model="form.pushKit.clearPrivateKey">清除控制台保存的私钥</el-checkbox></div>
+                </div>
+                <div class="setting-row"><div class="setting-copy"><label for="push-kit-category">通知分类</label><p>未申请自分类权益时使用 MARKETING；其他值应与已获批权益一致。</p></div><div class="setting-control"><el-select id="push-kit-category" v-model="form.pushKit.category" filterable allow-create default-first-option style="width: min(100%, 320px)"><el-option label="MARKETING（资讯营销）" value="MARKETING" /></el-select></div></div>
+                <div class="setting-row"><div class="setting-copy"><label for="push-kit-ttl">离线缓存时间</label><p>设备离线时由 Push Kit 缓存，官方上限为 15 天。</p></div><div class="setting-control compact"><el-input-number id="push-kit-ttl" v-model="form.pushKit.ttlSeconds" :min="1" :max="1296000" /><span>秒</span></div></div>
+                <div class="setting-row"><div class="setting-copy"><label>投递队列</label><p>控制每轮处理数量和临时失败后的最大尝试次数。</p></div><div class="setting-control push-kit-number-grid"><label><span>每批数量</span><el-input-number v-model="form.pushKit.batchSize" :min="1" :max="200" /></label><label><span>最大尝试</span><el-input-number v-model="form.pushKit.maxAttempts" :min="1" :max="10" /></label></div></div>
+              </div>
+              <div class="settings-section-actions push-kit-actions">
+                <p v-if="pushKitValidation">最近校验：{{ dateTime(pushKitValidation.checkedAt) }} · {{ pushKitValidation.message }}</p>
+                <p v-else>{{ hasChanges ? '保存当前修改后可校验服务账号和发送测试推送。' : '校验只检查已保存字段、PKCS#8 私钥和 JWT 签名能力。' }}</p>
+                <el-button :disabled="!canValidatePushKit(settings.pushKit, hasChanges)" :loading="pushKitValidating" @click="validatePushKitConfiguration"><ShieldCheck :size="15" />校验服务账号</el-button>
+              </div>
+            </el-form>
+            <section class="push-kit-installations" aria-labelledby="push-kit-installations-title">
+              <div class="notification-delivery-head"><div><h3 id="push-kit-installations-title">已登记的 HarmonyOS 设备</h3><p>这里只显示 Token 尾号和设备信息；测试推送使用服务器加密保存的完整 Token。</p></div><el-button text :loading="pushKitInstallationsLoading" @click="loadPushKitInstallations"><RefreshCw :size="14" />刷新设备</el-button></div>
+              <LoadingState v-if="pushKitInstallationsLoading && !pushKitInstallations.length" />
+              <div v-else-if="pushKitInstallations.length" class="push-kit-installation-list">
+                <article v-for="installation in pushKitInstallations" :key="installation.id" class="push-kit-installation-row">
+                  <span class="push-kit-device-icon"><Smartphone :size="17" /></span>
+                  <div class="push-kit-device-copy"><strong>{{ installation.deviceModel || 'HarmonyOS 设备' }}</strong><span>{{ installation.appVersion ? `App ${installation.appVersion}` : 'App 版本未知' }} · Token …{{ installation.tokenSuffix || '未登记' }}</span></div>
+                  <div class="push-kit-device-time"><span>{{ installation.lastRegisteredAt ? `登记 ${dateTime(installation.lastRegisteredAt)}` : '尚未登记 Token' }}</span><small>{{ installation.lastTestAt ? `最近测试 ${dateTime(installation.lastTestAt)}` : '尚未测试' }}</small></div>
+                  <StatusBadge :status="installation.enabled && installation.tokenSuffix ? 'ONLINE' : 'OFFLINE'" />
+                  <el-button size="small" :disabled="!canTestPushKit(settings.pushKit, installation, hasChanges)" :loading="testingPushKitInstallation === installation.id" @click="testPushKitInstallation(installation)"><Send :size="14" />测试推送</el-button>
+                </article>
+              </div>
+              <EmptyState v-else title="暂无已登记设备" description="HarmonyOS App 获取 Push Token 并登记到服务器后，设备会显示在这里。" />
+            </section>
+          </template>
+
           <template v-else-if="activeSection === 'tokens'">
             <header class="settings-editor-head token-editor-head"><span><KeyRound :size="18" /></span><div><h2>API Token</h2><p>按最小权限签发访问凭据，并把访问范围限制到指定服务器。</p></div><el-button type="primary" class="button-press" @click="openTokenDialog"><Plus :size="15" />创建 Token</el-button></header>
             <div class="settings-editor-body token-settings">
@@ -693,6 +798,7 @@ onBeforeUnmount(() => {
                 <div><dt><MessageSquareText :size="15" />钉钉 Webhook</dt><dd><strong>{{ sourceText(settings.dingtalk.source) }}</strong><span>{{ settings.dingtalk.webhookConfigured ? '地址已配置' : '未配置地址' }}{{ settings.dingtalk.keywordConfigured ? ' · 关键词已配置' : '' }}{{ settings.dingtalk.signSecretConfigured ? ' · 加签已配置' : '' }}</span></dd></div>
                 <div><dt><MessageSquareText :size="15" />企业微信 Webhook</dt><dd><strong>{{ sourceText(settings.wecom.source) }}</strong><span>{{ settings.wecom.webhookConfigured ? '地址已配置' : '未配置地址' }}</span></dd></div>
                 <div><dt><Send :size="15" />通用 Webhook</dt><dd><strong>{{ sourceText(settings.generic.source) }}</strong><span>{{ settings.generic.webhookConfigured ? `地址已配置 · ${settings.generic.payloadFormat ?? 'GENERIC_JSON'}` : '未配置地址' }}</span></dd></div>
+                <div><dt><Smartphone :size="15" />华为 Push Kit</dt><dd><strong>{{ sourceText(settings.pushKit.source) }}</strong><span>{{ settings.pushKit.privateKeyConfigured ? `V3 服务账号已配置 · ${settings.pushKit.category}` : '未配置服务账号私钥' }}</span></dd></div>
               </dl>
               <div class="security-footnote"><ShieldCheck :size="16" /><p>设置接口只返回配置状态。保存和测试操作均写入审计日志。</p></div>
             </div>

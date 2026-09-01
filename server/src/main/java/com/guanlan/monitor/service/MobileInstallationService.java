@@ -74,6 +74,11 @@ public class MobileInstallationService {
                 .map(this::view).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<MobileInstallationDtos.AdminView> listAllForAdmin() {
+        return installations.findAllByOrderByUpdatedAtDesc().stream().map(this::adminView).toList();
+    }
+
     @Transactional
     public MobileInstallationDtos.View updateToken(Authentication authentication, String id,
                                                     MobileInstallationDtos.TokenUpdateRequest request) {
@@ -109,7 +114,17 @@ public class MobileInstallationService {
 
     @Transactional
     public MobileInstallationDtos.TestResult test(Authentication authentication, String id) {
-        MobileInstallation installation = requireOwned(authentication, id);
+        return queueTest(requireOwned(authentication, id));
+    }
+
+    @Transactional
+    public MobileInstallationDtos.TestResult testAsAdmin(String id) {
+        MobileInstallation installation = installations.findById(id)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "移动设备登记不存在"));
+        return queueTest(installation);
+    }
+
+    private MobileInstallationDtos.TestResult queueTest(MobileInstallation installation) {
         if (!pushKit.enabled()) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "华为 Push Kit 尚未启用");
         if (!installation.isEnabled()) throw new ApiException(HttpStatus.CONFLICT, "该移动设备已停用推送");
         if (installation.getTokenCiphertext() == null || installation.getTokenCiphertext().isBlank()) {
@@ -236,5 +251,11 @@ public class MobileInstallationService {
                 value.getTokenSuffix(), value.getAppVersion(), value.getDeviceModel(), parseDeviceIds(value.getDeviceIdsJson()),
                 value.getMinimumSeverity(), value.isEnabled(), value.getLastRegisteredAt(),
                 value.getCreatedAt(), value.getUpdatedAt());
+    }
+
+    private MobileInstallationDtos.AdminView adminView(MobileInstallation value) {
+        return new MobileInstallationDtos.AdminView(value.getId(), value.getPlatform(), value.getTokenSuffix(),
+                value.getAppVersion(), value.getDeviceModel(), value.isEnabled(), value.getLastRegisteredAt(),
+                value.getLastTestAt(), value.getCreatedAt(), value.getUpdatedAt());
     }
 }

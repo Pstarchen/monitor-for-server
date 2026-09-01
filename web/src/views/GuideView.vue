@@ -4,6 +4,7 @@ import {
   Activity, Archive, ArrowRight, BarChart3, BellRing, BookOpen, CalendarClock, CircleGauge, ClipboardList,
   GitBranch, Globe2, KeyRound, Lightbulb, ListChecks, LockKeyhole, MousePointerClick, Radar,
   Rocket, Search, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, Users,
+  Smartphone,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -221,6 +222,18 @@ const topics: GuideTopic[] = [
     ],
     note: '通知凭据需要部署端加密密钥才能保存。敏感字段读取时不会回显原文，留空通常表示保留。',
     keywords: ['通知渠道', '监控策略', '系统更新', '站点图标', 'Webhook'],
+  },
+  {
+    id: 'push-kit', category: '系统管理', title: '华为 Push Kit（HarmonyOS NEXT）', icon: Smartphone, route: '/settings', entry: '系统设置 → 通知渠道 → 华为 Push Kit',
+    access: '仅管理员', roles: ['ADMIN'],
+    summary: '为 HarmonyOS NEXT / 5.x 及以上设备配置华为 Push Kit V3 服务账号，并从已登记设备发起测试推送。',
+    steps: [
+      '在华为 Push Kit 分区填写项目 ID、Key ID、子账号和 PKCS#8 RSA 私钥；私钥只会加密保存，不会在设置接口回显。',
+      '保存后先校验服务账号。启用前必须具备完整账号和有效私钥，通知分类默认使用 MARKETING。',
+      'HarmonyOS App 登记 Push Token 后，管理员可查看 Token 尾号、设备版本和登记时间，并按设备发送测试消息。',
+    ],
+    note: '这是华为 Push Kit V3 通道，只面向 HarmonyOS NEXT / 5.x+，与 Web Push、FCM、APNs、Webhook 及旧版华为 OAuth Push API 分开。',
+    keywords: ['Push Kit', '华为', 'HarmonyOS NEXT', 'Push Token', 'V3', '测试推送'],
   },
   {
     id: 'backups', category: '系统管理', title: '备份与恢复', icon: Archive, route: '/backups', entry: '左侧导航 → 备份与恢复',

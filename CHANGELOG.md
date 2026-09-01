@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.20.4
+
+- 新增独立的华为 Push Kit V3 管理功能，面向 HarmonyOS NEXT / 5.x+；服务账号配置持久化到数据库，PKCS#8 私钥使用 AES-256-GCM 加密保存且不会回显。
+- 设置页新增 Push Kit 服务账号校验、动态生效的 TTL/批处理/重试策略、已登记 HarmonyOS 设备列表和按设备测试推送入口，并与 Web Push、FCM、APNs、Webhook 及旧版华为 OAuth Push API 明确区分。
+- Push Kit 后台 worker、JWT 缓存和客户端请求统一读取动态配置，新增 `system_settings` TEXT 迁移以支持完整私钥内容。
+
 ## v1.20.3
 
 - 修复 30 天历史趋势达到采样上限时可能遗漏最新数据点的问题；超过 720 点时现在保留时间最新的 720 点。

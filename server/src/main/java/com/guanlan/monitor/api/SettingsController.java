@@ -1,6 +1,8 @@
 package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.service.NotificationService;
+import com.guanlan.monitor.service.MobileInstallationService;
+import com.guanlan.monitor.service.PushKitConfigurationService;
 import com.guanlan.monitor.service.SettingService;
 import com.guanlan.monitor.service.SiteIconStorageService;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,8 @@ public class SettingsController {
     private final SettingService settings;
     private final NotificationService notifications;
     private final SiteIconStorageService siteIcons;
+    private final PushKitConfigurationService pushKitConfigurations;
+    private final MobileInstallationService mobileInstallations;
 
     @GetMapping("/public")
     ResponseEntity<SettingService.PublicBrandView> publicBrand() {
@@ -73,4 +77,22 @@ public class SettingsController {
     @PostMapping("/notifications/deliveries/{id}/retry")
     @PreAuthorize("hasRole('ADMIN')")
     NotificationService.NotificationDeliveryView retry(@PathVariable long id) { return notifications.retry(id); }
+
+    @PostMapping("/push-kit/validate")
+    @PreAuthorize("hasRole('ADMIN')")
+    PushKitConfigurationService.ValidationResult validatePushKit() {
+        return pushKitConfigurations.validate();
+    }
+
+    @GetMapping("/push-kit/installations")
+    @PreAuthorize("hasRole('ADMIN')")
+    java.util.List<com.guanlan.monitor.api.dto.MobileInstallationDtos.AdminView> pushKitInstallations() {
+        return mobileInstallations.listAllForAdmin();
+    }
+
+    @PostMapping("/push-kit/installations/{id}/test")
+    @PreAuthorize("hasRole('ADMIN')")
+    com.guanlan.monitor.api.dto.MobileInstallationDtos.TestResult testPushKitInstallation(@PathVariable String id) {
+        return mobileInstallations.testAsAdmin(id);
+    }
 }

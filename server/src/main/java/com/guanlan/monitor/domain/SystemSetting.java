@@ -18,7 +18,7 @@ public class SystemSetting {
     @Column(name = "setting_key", length = 80)
     private String key;
 
-    @Column(name = "setting_value", nullable = false, length = 500)
+    @Column(name = "setting_value", nullable = false, columnDefinition = "TEXT")
     private String value;
 
     public SystemSetting(String key, String value) {
@@ -26,4 +26,3 @@ public class SystemSetting {
         this.value = value;
     }
 }
-

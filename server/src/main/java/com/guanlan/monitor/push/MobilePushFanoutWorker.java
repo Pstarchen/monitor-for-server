@@ -3,7 +3,6 @@ package com.guanlan.monitor.push;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.guanlan.monitor.config.PushKitProperties;
 import com.guanlan.monitor.domain.MobileInstallation;
 import com.guanlan.monitor.domain.MobilePushDelivery;
 import com.guanlan.monitor.domain.RealtimeOutboxEvent;
@@ -13,6 +12,7 @@ import com.guanlan.monitor.repository.MobilePushDeliveryRepository;
 import com.guanlan.monitor.repository.RealtimeOutboxRepository;
 import com.guanlan.monitor.security.ApiTokenPrincipal;
 import com.guanlan.monitor.service.DeviceAccessService;
+import com.guanlan.monitor.service.PushKitConfigurationService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,12 +37,12 @@ public class MobilePushFanoutWorker {
     private final MobilePushDeliveryRepository deliveries;
     private final DeviceAccessService access;
     private final ObjectMapper mapper;
-    private final PushKitProperties properties;
+    private final PushKitConfigurationService configurations;
 
     @Scheduled(fixedDelayString = "${app.push-kit.fanout-delay-ms:1000}", initialDelay = 5_000)
     @Transactional
     public void fanout() {
-        int batchSize = Math.min(Math.max(properties.getBatchSize(), 1), 200);
+        int batchSize = configurations.runtime().batchSize();
         for (RealtimeOutboxEvent event : outbox.lockPendingPushFanout(PageRequest.of(0, batchSize))) {
             try {
                 fanout(event);

@@ -54,6 +54,7 @@ public class SettingService {
     private final AuditService audit;
     private final SecretValueCodec secretCodec;
     private final SiteIconStorageService siteIconStorage;
+    private final PushKitConfigurationService pushKitConfigurations;
 
     @Transactional(readOnly = true)
     public View get() {
@@ -71,7 +72,8 @@ public class SettingService {
                 emailView(notification.email()),
                 webhookView(notification.dingtalk()),
                 webhookView(notification.wecom()),
-                webhookView(notification.generic())
+                webhookView(notification.generic()),
+                pushKitConfigurations.get()
         );
     }
 
@@ -93,6 +95,7 @@ public class SettingService {
         updateWebhook(WECOM_ENABLED, WECOM_WEBHOOK, WECOM_KEYWORD, WECOM_SIGN_SECRET, request.wecom());
         updateWebhook(GENERIC_ENABLED, GENERIC_WEBHOOK, null, null, request.generic());
         save(GENERIC_FORMAT, normalizeWebhookFormat(request.generic().payloadFormat()));
+        if (request.pushKit() != null) pushKitConfigurations.update(request.pushKit());
         audit.record("SETTINGS_UPDATE", "system", "更新系统策略与通知通道配置");
         return get();
     }
@@ -370,7 +373,8 @@ public class SettingService {
 
     public record View(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                        String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, boolean secretStorageReady,
-                       EmailView email, WebhookView dingtalk, WebhookView wecom, WebhookView generic) {}
+                       EmailView email, WebhookView dingtalk, WebhookView wecom, WebhookView generic,
+                       PushKitConfigurationService.View pushKit) {}
     public record EmailView(boolean enabled, boolean configured, String source, String host, int port,
                             String username, String from, String recipients, boolean auth, boolean startTls,
                             boolean passwordConfigured) {}
@@ -379,16 +383,17 @@ public class SettingService {
                               String payloadFormat) {}
     public record Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                          String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, EmailUpdate email,
-                         WebhookUpdate dingtalk, WebhookUpdate wecom, WebhookUpdate generic) {
+                         WebhookUpdate dingtalk, WebhookUpdate wecom, WebhookUpdate generic,
+                         PushKitConfigurationService.Update pushKit) {
         public Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                       String siteName, String siteIconUrl, String publicBaseUrl, String timezone, EmailUpdate email,
                       WebhookUpdate dingtalk, WebhookUpdate wecom) {
-            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, false, email, dingtalk, wecom, new WebhookUpdate(false, null, false));
+            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, false, email, dingtalk, wecom, new WebhookUpdate(false, null, false), null);
         }
         public Update(int metricRetentionDays, int deviceOfflineAfterSeconds, int defaultCollectionSeconds,
                       String siteName, String siteIconUrl, String publicBaseUrl, String timezone, boolean enableMcp, EmailUpdate email,
                       WebhookUpdate dingtalk, WebhookUpdate wecom) {
-            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, enableMcp, email, dingtalk, wecom, new WebhookUpdate(false, null, false));
+            this(metricRetentionDays, deviceOfflineAfterSeconds, defaultCollectionSeconds, siteName, siteIconUrl, publicBaseUrl, timezone, enableMcp, email, dingtalk, wecom, new WebhookUpdate(false, null, false), null);
         }
     }
     public record EmailUpdate(boolean enabled, String host, int port, String username, String password,
