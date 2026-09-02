@@ -42,6 +42,15 @@ try {
         if ($value) { return $value }
         return $DefaultValue
     }
+    if (Test-Path -LiteralPath $envFile -and -not (Select-String -LiteralPath $envFile -Pattern '^COMPOSE_PROJECT_NAME=' -Quiet)) {
+        $legacyDatabase = Read-UpdateSetting 'POSTGRES_DB'
+        $legacyVolume = (& docker volume inspect 'guanlan-monitor_postgres-data' 2>$null)
+        $projectName = if ($legacyDatabase -eq 'guanlan_monitor' -or $legacyVolume) { 'guanlan-monitor' } else { 'xingchen-monitor' }
+        $lines = [System.Collections.Generic.List[string]]::new()
+        [System.IO.File]::ReadAllLines($envFile) | ForEach-Object { [void]$lines.Add($_) }
+        [void]$lines.Add("COMPOSE_PROJECT_NAME=$projectName")
+        [System.IO.File]::WriteAllLines($envFile, $lines, [System.Text.UTF8Encoding]::new($false))
+    }
     # Registry mirrors should fail over quickly, while the official registry
     # keeps a longer window for constrained international links.
     $pullTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS' '180')
@@ -70,8 +79,10 @@ try {
         finally {
             if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
         }
-        if (Get-ScheduledTask -TaskName 'GuanlanControllerUpdate' -ErrorAction SilentlyContinue) {
-            Unregister-ScheduledTask -TaskName 'GuanlanControllerUpdate' -Confirm:$false
+        foreach ($taskName in @('XingchenControllerUpdate', 'GuanlanControllerUpdate')) {
+            if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+                Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+            }
         }
         & docker compose @composeArgs up -d --no-deps --wait --wait-timeout 300 setup
         if ($LASTEXITCODE -ne 0) { throw '自动更新设置已保存，但 setup 服务启动失败。' }

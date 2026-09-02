@@ -34,8 +34,8 @@ jobs:
 
       - name: Verify runtime image
         run: |
-          docker build --tag guanlan-agent-test ./agent
-          docker run --rm --entrypoint /bin/sh guanlan-agent-test -ec 'test -x /guanlan-agent && command -v chroot'
+          docker build --tag xingchen-agent-test ./agent
+          docker run --rm --entrypoint /bin/sh xingchen-agent-test -ec 'test -x /xingchen-agent && command -v chroot'
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -101,21 +101,21 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist/stage
           build() {
-            local os="$1" arch="$2" format="$3" binary="dist/stage/guanlan-agent"
-            local archive="dist/guanlan-agent_${version}_${os}_${arch}.${format}"
+            local os="$1" arch="$2" format="$3" binary="dist/stage/xingchen-agent"
+            local archive="dist/xingchen-agent_${version}_${os}_${arch}.${format}"
             rm -rf dist/stage/*
             (cd agent && CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "../${binary}" ./cmd/agent)
             if [[ "${format}" == tar.gz ]]; then
-              tar -C dist/stage -czf "${archive}" guanlan-agent
+              tar -C dist/stage -czf "${archive}" xingchen-agent
             else
-              mv "${binary}" dist/stage/guanlan-agent.exe
-              (cd dist/stage && zip -q "../../${archive}" guanlan-agent.exe)
+              mv "${binary}" dist/stage/xingchen-agent.exe
+              (cd dist/stage && zip -q "../../${archive}" xingchen-agent.exe)
             fi
           }
           build linux amd64 tar.gz
           build linux arm64 tar.gz
           build windows amd64 zip
-          (cd dist && sha256sum guanlan-agent_* > checksums.txt)
+          (cd dist && sha256sum xingchen-agent_* > checksums.txt)
 
       - name: Publish Agent Release assets
         env:
@@ -123,4 +123,4 @@ jobs:
         run: |
           set -euo pipefail
           gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes --title "星辰监控 ${GITHUB_REF_NAME}"
-          gh release upload "${GITHUB_REF_NAME}" dist/guanlan-agent_* dist/checksums.txt --repo "${GITHUB_REPOSITORY}" --clobber
+          gh release upload "${GITHUB_REF_NAME}" dist/xingchen-agent_* dist/checksums.txt --repo "${GITHUB_REPOSITORY}" --clobber

@@ -24,7 +24,7 @@ curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
 
 GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`，控制台选择后会自动生成完整命令。
 
-`XINGCHEN_SERVER` 可以填写域名、`域名:端口` 或完整 `http(s)://` 地址。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会回退到 HTTP 并在配置中启用明文连接。生产环境建议配置 HTTPS；HTTP 仅适合临时或内网部署。原生模式会把配置写到 `/etc/guanlan-agent/agent.json`，离线上报缓冲写入 `/var/lib/guanlan-agent/spool`，程序安装到 `/usr/local/bin/guanlan-agent`。
+`XINGCHEN_SERVER` 可以填写域名、`域名:端口` 或完整 `http(s)://` 地址。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会回退到 HTTP 并在配置中启用明文连接。生产环境建议配置 HTTPS；HTTP 仅适合临时或内网部署。原生模式会把配置写到 `/etc/xingchen-agent/agent.json`，离线上报缓冲写入 `/var/lib/xingchen-agent/spool`，程序安装到 `/usr/local/bin/xingchen-agent`。
 
 需要个性化指标时，可在 `custom_metrics` 中配置最多 32 个程序。程序通过参数数组直接执行，不经过 Shell；`kind` 支持 `number`、`text`、`exit_code`，每项最多运行 3 秒并截断 4096 字符输出。例如：
 
@@ -55,12 +55,12 @@ GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-
 
 默认卸载会保留配置和离线缓存；彻底删除时使用 `uninstall --purge`。管理脚本会记录安装模式和 Release 源，不会记录 Agent 密钥。
 
-内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `XINGCHEN_AGENT_IMAGE` 指定 OCI 镜像。镜像代理和 GHCR 都不可用时，Docker 安装/更新会依次从 Gitee、GitHub 源码构建镜像；Gitee Git 仓库本身不作为 OCI 镜像仓库。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；未提供二进制时同样按 Gitee、GitHub 顺序拉取源码。可重复传入 `--source-url` 配置私有源码源，并用 `--source-ref` 固定分支或标签。
+内网可用 `--image registry.example.com/xingchen-agent:版本` 或 `XINGCHEN_AGENT_IMAGE` 指定 OCI 镜像。镜像代理和 GHCR 都不可用时，Docker 安装/更新会依次从 Gitee、GitHub 源码构建镜像；Gitee Git 仓库本身不作为 OCI 镜像仓库。Docker 不可用时可传 `--binary /path/to/xingchen-agent` 使用本机 systemd 服务；未提供二进制时同样按 Gitee、GitHub 顺序拉取源码。可重复传入 `--source-url` 配置私有源码源，并用 `--source-ref` 固定分支或标签。
 
-Linux 原生模式安装后默认启用每日 Agent 自动更新。更新器使用 Release API 的最新稳定版本，下载对应架构压缩包并强制校验 SHA256；下载失败或校验失败时保留当前程序，不会替换成未验证文件。更新前会在 `/var/lib/guanlan-agent/backups` 保留最近 5 份带时间戳的备份，启动失败会自动恢复旧程序。可用 `--no-auto-update` 关闭定时更新。检查和手动执行更新：
+Linux 原生模式安装后默认启用每日 Agent 自动更新。更新器使用 Release API 的最新稳定版本，下载对应架构压缩包并强制校验 SHA256；下载失败或校验失败时保留当前程序，不会替换成未验证文件。更新前会在 `/var/lib/xingchen-agent/backups` 保留最近 5 份带时间戳的备份，启动失败会自动恢复旧程序。可用 `--no-auto-update` 关闭定时更新。检查和手动执行更新：
 
 ```bash
-systemctl status guanlan-agent-update.timer
+systemctl status xingchen-agent-update.timer
 /opt/xingchen/agent/agent.sh update
 /opt/xingchen/agent/agent.sh list-versions
 /opt/xingchen/agent/agent.sh rollback v1.20.4
@@ -71,15 +71,15 @@ systemctl status guanlan-agent-update.timer
 支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。本机回退模式安装后检查：
 
 ```bash
-systemctl status guanlan-agent
-journalctl -u guanlan-agent -n 100 --no-pager
+systemctl status xingchen-agent
+journalctl -u xingchen-agent -n 100 --no-pager
 ```
 
-配置位于 `/etc/guanlan-agent/agent.json`，权限为 `0600`；缓冲目录位于 `/var/lib/guanlan-agent/spool`，备份目录位于 `/var/lib/guanlan-agent/backups`。
+配置位于 `/etc/xingchen-agent/agent.json`，权限为 `0600`；缓冲目录位于 `/var/lib/xingchen-agent/spool`，备份目录位于 `/var/lib/xingchen-agent/backups`。从旧版升级的主机会保留原有路径和服务名，以避免中断上报。
 
 ## Windows
 
-请用管理员 PowerShell 运行。控制台会根据所选安装源下载脚本，临时注入 Agent 密钥，并在完成后删除脚本和环境变量。安装器会识别 Windows x64/ARM64，从 Release 下载并校验 `guanlan-agent_<版本>_windows_<架构>.zip`：
+请用管理员 PowerShell 运行。控制台会根据所选安装源下载脚本，临时注入 Agent 密钥，并在完成后删除脚本和环境变量。安装器会识别 Windows x64/ARM64，从 Release 下载并校验 `xingchen-agent_<版本>_windows_<架构>.zip`：
 
 ```powershell
 $env:XINGCHEN_AGENT_KEY = '<一次性密钥>'
@@ -93,11 +93,11 @@ $env:XINGCHEN_AGENT_KEY = '<一次性密钥>'
   -MonitoredService 'W3SVC','MSSQLSERVER'
 ```
 
-安装器会创建自动启动的 `GuanlanAgent` 服务，并将配置写入 `%ProgramData%\GuanlanMonitor\agent.json`，仅 SYSTEM 与 Administrators 可读。检查：
+安装器会创建自动启动的 `XingchenAgent` 服务，并将配置写入 `%ProgramData%\XingchenMonitor\agent.json`，仅 SYSTEM 与 Administrators 可读。检查：
 
 ```powershell
-Get-Service GuanlanAgent
-Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Select-Object server_url,device_id,interval
+Get-Service XingchenAgent
+Get-Content "$env:ProgramData\XingchenMonitor\agent.json" | ConvertFrom-Json | Select-Object server_url,device_id,interval
 ```
 
 Windows Agent 默认注册每日自动更新任务；需要关闭时在安装命令中添加 `-NoAutoUpdate`。

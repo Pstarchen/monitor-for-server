@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/model"
 )
 
 const maxContainerCount = 100

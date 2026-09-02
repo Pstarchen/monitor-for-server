@@ -1,12 +1,12 @@
-name: guanlan-monitor
+name: xingchen-monitor
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-guanlan_monitor}
-      POSTGRES_USER: ${POSTGRES_USER:-guanlan}
+      POSTGRES_DB: ${POSTGRES_DB:-xingchen_monitor}
+      POSTGRES_USER: ${POSTGRES_USER:-xingchen}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -24,12 +24,12 @@ services:
     restart: unless-stopped
     environment:
       SETUP_WORKSPACE: /workspace
-      POSTGRES_DB: ${POSTGRES_DB:-guanlan_monitor}
-      POSTGRES_USER: ${POSTGRES_USER:-guanlan}
+      POSTGRES_DB: ${POSTGRES_DB:-xingchen_monitor}
+      POSTGRES_USER: ${POSTGRES_USER:-xingchen}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       WEB_PORT: ${WEB_PORT:-18080}
       WEB_BIND_ADDRESS: ${WEB_BIND_ADDRESS:-0.0.0.0}
-      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-guanlan-monitor}
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-xingchen-monitor}
       CONTROLLER_AGENT_ENABLED: ${CONTROLLER_AGENT_ENABLED:-false}
       CONTROLLER_AGENT_DEVICE_ID: ${CONTROLLER_AGENT_DEVICE_ID:-}
       CONTROLLER_AGENT_KEY: ${CONTROLLER_AGENT_KEY:-}
@@ -72,8 +72,8 @@ services:
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-bootstrap}
-      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-guanlan_monitor}
-      DB_USERNAME: ${POSTGRES_USER:-guanlan}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-xingchen_monitor}
+      DB_USERNAME: ${POSTGRES_USER:-xingchen}
       DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -122,9 +122,9 @@ services:
       CONTROLLER_AGENT_GROUP: ${CONTROLLER_AGENT_GROUP:-控制平面}
       CONTROLLER_UPDATE_SERVICE_URL: http://setup:8090
       CONTROLLER_UPDATE_TOKEN: ${SETTINGS_ENCRYPTION_KEY-}
-      SITE_ICON_STORAGE_PATH: /var/lib/guanlan-monitor/site-icon
+      SITE_ICON_STORAGE_PATH: /var/lib/xingchen-monitor/site-icon
     volumes:
-      - site-icon-data:/var/lib/guanlan-monitor/site-icon
+      - site-icon-data:/var/lib/xingchen-monitor/site-icon
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,7 +155,7 @@ services:
     volumes:
       - /:/host:ro
       - /dev:/host/dev:ro
-      - controller-agent-spool:/var/lib/guanlan-agent/spool
+      - controller-agent-spool:/var/lib/xingchen-agent/spool
     tmpfs:
       - /run
     entrypoint:
@@ -164,9 +164,9 @@ services:
       - |
         umask 077
         cat > /run/agent.json <<EOF
-        {"server_url":"$${CONTROLLER_AGENT_SERVER_URL}","device_id":"$${CONTROLLER_AGENT_DEVICE_ID}","agent_key":"$${CONTROLLER_AGENT_KEY}","interval":"3s","request_timeout":"10s","spool_dir":"/var/lib/guanlan-agent/spool","max_buffered_reports":10000,"allow_insecure_http":false,"skip_process_collection":false,"skip_connection_count":false,"disk_mountpoints":[],"host_root":"/host"}
+        {"server_url":"$${CONTROLLER_AGENT_SERVER_URL}","device_id":"$${CONTROLLER_AGENT_DEVICE_ID}","agent_key":"$${CONTROLLER_AGENT_KEY}","interval":"3s","request_timeout":"10s","spool_dir":"/var/lib/xingchen-agent/spool","max_buffered_reports":10000,"allow_insecure_http":false,"skip_process_collection":false,"skip_connection_count":false,"disk_mountpoints":[],"host_root":"/host"}
         EOF
-        exec /guanlan-agent -config /run/agent.json
+        exec /xingchen-agent -config /run/agent.json
     healthcheck:
       test: ["CMD-SHELL", "test -s /run/agent.json && kill -0 1"]
       interval: 15s

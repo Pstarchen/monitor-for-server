@@ -187,6 +187,31 @@ func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
 	if values["CONTROLLER_AUTO_UPDATE"] != "true" {
 		t.Fatal("controller automatic update setting was not preserved")
 	}
+	if values["COMPOSE_PROJECT_NAME"] != "xingchen-monitor" {
+		t.Fatalf("default Compose project name = %q, want xingchen-monitor", values["COMPOSE_PROJECT_NAME"])
+	}
+}
+
+func TestWriteEnvironmentPreservesExistingComposeProjectName(t *testing.T) {
+	originalWorkspace, originalEnvPath := workspace, envPath
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	t.Cleanup(func() { workspace, envPath = originalWorkspace, originalEnvPath })
+	t.Setenv("POSTGRES_PASSWORD", "database-password")
+	if err := os.WriteFile(envPath, []byte("COMPOSE_PROJECT_NAME=legacy-monitor\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeEnvironment(validSetupRequest()); err != nil {
+		t.Fatal(err)
+	}
+	values, err := readEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["COMPOSE_PROJECT_NAME"] != "legacy-monitor" {
+		t.Fatalf("existing Compose project name was not preserved: %q", values["COMPOSE_PROJECT_NAME"])
+	}
 }
 
 func requestSetupStatus(t *testing.T, service *setupService) setupStatus {

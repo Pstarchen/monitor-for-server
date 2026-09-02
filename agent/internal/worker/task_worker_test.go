@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"guanlan-monitor/agent/internal/api"
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/api"
+	"xingchen-monitor/agent/internal/model"
 )
 
 func TestSendTaskResultRetriesTransientHTTPFailures(t *testing.T) {

@@ -8,7 +8,7 @@
         <version>3.4.8</version>
         <relativePath/>
     </parent>
-    <groupId>com.guanlan</groupId>
+    <groupId>com.xingchen</groupId>
     <artifactId>monitor-server</artifactId>
     <version>1.0.0</version>
     <name>Xingchen Monitor Server</name>

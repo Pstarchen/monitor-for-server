@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-const controllerUpdateRunnerName = "guanlan-controller-update-run"
+const controllerUpdateRunnerName = "xingchen-controller-update-run"
 const controllerUpdateRunnerProjectSuffix = "-update-runner"
 
 const (
@@ -653,7 +653,7 @@ func updateControllerCommand(ctx context.Context, mode string) *exec.Cmd {
 }
 
 func controllerUpdateRunnerArgs() []string {
-	projectName := environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor")
+	projectName := environmentValue("COMPOSE_PROJECT_NAME", "xingchen-monitor")
 	return []string{"--project-name", projectName + controllerUpdateRunnerProjectSuffix, "run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "-e", "COMPOSE_PROJECT_NAME=" + projectName, "--name", controllerUpdateRunnerName, "setup", "update-runner"}
 }
 
@@ -679,7 +679,7 @@ func composeBaseArgs() []string {
 
 func controllerUpdateEnvironment(targetVersion ...string) []string {
 	environment := append(os.Environ(),
-		"COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"),
+		"COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "xingchen-monitor"),
 		"XINGCHEN_HOST_PROJECT_ROOT="+hostWorkspace,
 	)
 	if len(targetVersion) > 0 {

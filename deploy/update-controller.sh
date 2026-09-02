@@ -288,6 +288,19 @@ set_env_value() {
   mv "${temporary}" "${project_root}/.env"
 }
 
+ensure_compose_project_name() {
+  [[ -f "${project_root}/.env" ]] || return
+  local configured database
+  configured="$(read_env_value COMPOSE_PROJECT_NAME)"
+  [[ -n "${configured}" ]] && return
+  database="$(read_env_value POSTGRES_DB)"
+  if [[ "${database}" == "guanlan_monitor" ]] || docker volume inspect guanlan-monitor_postgres-data >/dev/null 2>&1; then
+    set_env_value COMPOSE_PROJECT_NAME "guanlan-monitor"
+  else
+    set_env_value COMPOSE_PROJECT_NAME "xingchen-monitor"
+  fi
+}
+
 configure_auto_update() {
   if [[ ! -f "${project_root}/.env" ]]; then
     echo "Controller .env is missing; complete installation first." >&2
@@ -295,6 +308,7 @@ configure_auto_update() {
   fi
   set_env_value CONTROLLER_AUTO_UPDATE true
   if [[ "$(uname -s)" == "Linux" && "${EUID}" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now xingchen-controller-update.timer >/dev/null 2>&1 || true
     systemctl disable --now guanlan-controller-update.timer >/dev/null 2>&1 || true
   fi
   run_with_timeout "${compose_timeout_seconds}" docker compose "${compose_args[@]}" up -d --no-deps --wait --wait-timeout 300 setup
@@ -302,9 +316,12 @@ configure_auto_update() {
 }
 
 if [[ "${mode}" == auto ]]; then
+  ensure_compose_project_name
   configure_auto_update
   exit 0
 fi
+
+ensure_compose_project_name
 
 if [[ "${build}" == true && "${source_build}" == true ]]; then
   echo "--build 与 --source-build 不能同时使用。" >&2

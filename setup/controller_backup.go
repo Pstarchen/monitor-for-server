@@ -29,7 +29,7 @@ const (
 )
 
 var controllerBackupStatePath = "/workspace/.controller-backup-state.json"
-var controllerBackupNamePattern = regexp.MustCompile(`^guanlan-monitor-[0-9]{8}T[0-9]{6}Z\.sql$`)
+var controllerBackupNamePattern = regexp.MustCompile(`^(?:xingchen-monitor|guanlan-monitor)-[0-9]{8}T[0-9]{6}Z\.sql$`)
 
 type controllerBackupService struct {
 	mu      sync.Mutex
@@ -210,7 +210,7 @@ func (s *controllerBackupService) runCreate() {
 		s.fail("备份目录创建失败")
 		return
 	}
-	name := "guanlan-monitor-" + s.currentTime().UTC().Format("20060102T150405Z") + ".sql"
+	name := "xingchen-monitor-" + s.currentTime().UTC().Format("20060102T150405Z") + ".sql"
 	path := filepath.Join(controllerBackupDir(), name)
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
@@ -219,8 +219,8 @@ func (s *controllerBackupService) runCreate() {
 	}
 	defer file.Close()
 	values, _ := readEnv()
-	database := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_DB", "guanlan_monitor"))
-	user := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_USER", "guanlan"))
+	database := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_DB", "xingchen_monitor"))
+	user := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_USER", "xingchen"))
 	password := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_PASSWORD", ""))
 	if password == "" {
 		os.Remove(path)
@@ -264,8 +264,8 @@ func (s *controllerBackupService) runRestore(name string) {
 	defer s.finish()
 	path := filepath.Join(controllerBackupDir(), name)
 	values, _ := readEnv()
-	database := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_DB", "guanlan_monitor"))
-	user := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_USER", "guanlan"))
+	database := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_DB", "xingchen_monitor"))
+	user := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_USER", "xingchen"))
 	password := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_PASSWORD", ""))
 	if password == "" {
 		s.fail("PostgreSQL 凭据未配置，无法恢复备份")

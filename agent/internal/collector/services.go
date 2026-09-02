@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/model"
 )
 
 func collectServices(ctx context.Context, names []string, hostRoot string) []model.ServiceStatus {

@@ -34,10 +34,24 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$serviceName = 'GuanlanAgent'
-$installDir = Join-Path $env:ProgramFiles 'GuanlanMonitor'
-$dataDir = Join-Path $env:ProgramData 'GuanlanMonitor'
+$serviceName = 'XingchenAgent'
+$installDir = Join-Path $env:ProgramFiles 'XingchenMonitor'
+$dataDir = Join-Path $env:ProgramData 'XingchenMonitor'
 $configPath = Join-Path $dataDir 'agent.json'
+$binaryName = 'xingchen-agent.exe'
+$legacyServiceName = 'GuanlanAgent'
+$legacyInstallDir = Join-Path $env:ProgramFiles 'GuanlanMonitor'
+$legacyDataDir = Join-Path $env:ProgramData 'GuanlanMonitor'
+$legacyConfigPath = Join-Path $legacyDataDir 'agent.json'
+$usingLegacyInstallation = $false
+if ((Get-Service -Name $serviceName -ErrorAction SilentlyContinue) -eq $null -and ((Get-Service -Name $legacyServiceName -ErrorAction SilentlyContinue) -ne $null -or (Test-Path -LiteralPath $legacyConfigPath))) {
+    $usingLegacyInstallation = $true
+    $serviceName = $legacyServiceName
+    $installDir = $legacyInstallDir
+    $dataDir = $legacyDataDir
+    $configPath = $legacyConfigPath
+    $binaryName = 'guanlan-agent.exe'
+}
 $agentKey = $env:XINGCHEN_AGENT_KEY
 if ([string]::IsNullOrWhiteSpace($agentKey)) { $agentKey = $env:GUANLAN_AGENT_KEY }
 
@@ -121,7 +135,7 @@ function Normalize-ReleaseVersion([string] $Value) {
 
 function Get-ReleaseVersion([string] $Requested) {
     if (-not [string]::IsNullOrWhiteSpace($Requested)) { return Normalize-ReleaseVersion $Requested }
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'guanlan-agent-installer' } -TimeoutSec 30
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30
     return Normalize-ReleaseVersion ([string] $release.tag_name)
 }
 
@@ -132,25 +146,30 @@ function Get-ReleaseBinary([string] $Requested, [string] $Destination) {
         'Arm64' { 'arm64' }
         default { throw '当前 Windows CPU 架构不支持预编译 Agent。' }
     }
-    $asset = "guanlan-agent_$($version.TrimStart('v'))_windows_$arch.zip"
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     foreach ($base in $ReleaseBaseUrl) {
         if ($base -notmatch '^https://(github\.com|gitee\.com)/[^/]+/[^/]+/releases/download$') { continue }
-        $archive = Join-Path $Destination $asset
-        $checksums = Join-Path $Destination 'checksums.txt'
-        try {
-            Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/$asset" -OutFile $archive -TimeoutSec 300
-            Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/checksums.txt" -OutFile $checksums -TimeoutSec 60
-            $expected = (Get-Content -LiteralPath $checksums | ForEach-Object { $parts = $_ -split '\s+'; if ($parts.Count -ge 2 -and ($parts[1] -eq $asset -or $parts[1].TrimStart('*') -eq $asset)) { $parts[0]; break } })
-            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-            if ([string]::IsNullOrWhiteSpace($expected) -or $expected.ToLowerInvariant() -ne $actual) { throw 'Agent Release SHA256 校验失败。' }
-            Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
-            $binary = Join-Path $Destination 'guanlan-agent.exe'
-            if (-not (Test-Path -LiteralPath $binary)) { throw 'Agent 压缩包中未找到 guanlan-agent.exe。' }
-            return [pscustomobject]@{ Path = $binary; Version = $version }
-        }
-        catch {
-            Remove-Item -LiteralPath $archive, $checksums -Force -ErrorAction SilentlyContinue
+        foreach ($prefix in @('xingchen-agent', 'guanlan-agent')) {
+            $asset = "${prefix}_$($version.TrimStart('v'))_windows_$arch.zip"
+            $archive = Join-Path $Destination $asset
+            $checksums = Join-Path $Destination 'checksums.txt'
+            try {
+                Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/$asset" -OutFile $archive -TimeoutSec 300
+                Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/checksums.txt" -OutFile $checksums -TimeoutSec 60
+                $expected = (Get-Content -LiteralPath $checksums | ForEach-Object { $parts = $_ -split '\s+'; if ($parts.Count -ge 2 -and ($parts[1] -eq $asset -or $parts[1].TrimStart('*') -eq $asset)) { $parts[0]; break } })
+                $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+                if ([string]::IsNullOrWhiteSpace($expected) -or $expected.ToLowerInvariant() -ne $actual) { throw 'Agent Release SHA256 校验失败。' }
+                Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
+                $binary = Join-Path $Destination $binaryName
+                if (-not (Test-Path -LiteralPath $binary)) {
+                    $binary = Join-Path $Destination ($(if ($prefix -eq 'xingchen-agent') { 'xingchen-agent.exe' } else { 'guanlan-agent.exe' }))
+                }
+                if (-not (Test-Path -LiteralPath $binary)) { throw 'Agent 压缩包中未找到可执行文件。' }
+                return [pscustomobject]@{ Path = $binary; Version = $version }
+            }
+            catch {
+                Remove-Item -LiteralPath $archive, $checksums -Force -ErrorAction SilentlyContinue
+            }
         }
     }
     throw "Agent $version 下载或校验失败。"
@@ -159,37 +178,40 @@ function Get-ReleaseBinary([string] $Requested, [string] $Destination) {
 function Install-AgentUpdater {
     if ($NoAutoUpdate) { return }
     $updaterPath = Join-Path $dataDir 'update-agent.ps1'
-    $taskName = 'GuanlanAgentUpdate'
+    $taskName = if ($usingLegacyInstallation) { 'GuanlanAgentUpdate' } else { 'XingchenAgentUpdate' }
     $releaseBaseList = ($ReleaseBaseUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
     $script = @"
 `$ErrorActionPreference = 'Stop'
 `$releaseRepo = '$ReleaseRepo'
 `$releaseBases = @($releaseBaseList)
-`$temp = Join-Path ([IO.Path]::GetTempPath()) ('guanlan-agent-update-' + [Guid]::NewGuid().ToString('N'))
+`$temp = Join-Path ([IO.Path]::GetTempPath()) ('xingchen-agent-update-' + [Guid]::NewGuid().ToString('N'))
 try {
     `$requested = `$args[0]
-    if ([string]::IsNullOrWhiteSpace(`$requested)) { `$release = Invoke-RestMethod -Uri "https://api.github.com/repos/`$releaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'guanlan-agent-updater' } -TimeoutSec 30; `$requested = [string]`$release.tag_name }
+    if ([string]::IsNullOrWhiteSpace(`$requested)) { `$release = Invoke-RestMethod -Uri "https://api.github.com/repos/`$releaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-updater' } -TimeoutSec 30; `$requested = [string]`$release.tag_name }
     `$version = (`$requested.TrimStart('v'))
     if (`$version -notmatch '^\d+\.\d+\.\d+$') { throw '无效的 Agent Release 版本。' }
     `$version = "v`$version"
     `$arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq 'Arm64') { 'arm64' } else { 'amd64' }
-    `$asset = "guanlan-agent_`$(`$version.TrimStart('v'))_windows_`$arch.zip"
     New-Item -ItemType Directory -Force -Path `$temp | Out-Null
     `$downloaded = `$false
     foreach (`$base in `$releaseBases) {
-        try {
-            `$archive = Join-Path `$temp `$asset; `$checksums = Join-Path `$temp 'checksums.txt'
-            Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/`$asset" -OutFile `$archive -TimeoutSec 300
-            Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/checksums.txt" -OutFile `$checksums -TimeoutSec 60
-            `$expected = (Get-Content `$checksums | ForEach-Object { `$parts = `$_ -split '\s+'; if (`$parts.Count -ge 2 -and (`$parts[1] -eq `$asset -or `$parts[1].TrimStart('*') -eq `$asset)) { `$parts[0]; break } })
-            `$actual = (Get-FileHash -Algorithm SHA256 -LiteralPath `$archive).Hash.ToLowerInvariant()
-            if ([string]::IsNullOrWhiteSpace(`$expected) -or `$expected.ToLowerInvariant() -ne `$actual) { throw 'Agent Release SHA256 校验失败。' }
-            Expand-Archive -LiteralPath `$archive -DestinationPath `$temp -Force
-            `$downloaded = `$true; break
-        } catch { }
+        foreach (`$prefix in @('xingchen-agent', 'guanlan-agent')) {
+            try {
+                `$asset = "`${prefix}_`$(`$version.TrimStart('v'))_windows_`$arch.zip"
+                `$archive = Join-Path `$temp `$asset; `$checksums = Join-Path `$temp 'checksums.txt'
+                Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/`$asset" -OutFile `$archive -TimeoutSec 300
+                Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/checksums.txt" -OutFile `$checksums -TimeoutSec 60
+                `$expected = (Get-Content `$checksums | ForEach-Object { `$parts = `$_ -split '\s+'; if (`$parts.Count -ge 2 -and (`$parts[1] -eq `$asset -or `$parts[1].TrimStart('*') -eq `$asset)) { `$parts[0]; break } })
+                `$actual = (Get-FileHash -Algorithm SHA256 -LiteralPath `$archive).Hash.ToLowerInvariant()
+                if ([string]::IsNullOrWhiteSpace(`$expected) -or `$expected.ToLowerInvariant() -ne `$actual) { throw 'Agent Release SHA256 校验失败。' }
+                Expand-Archive -LiteralPath `$archive -DestinationPath `$temp -Force
+                `$downloaded = `$true; break
+            } catch { }
+        }
+        if (`$downloaded) { break }
     }
     if (-not `$downloaded) { throw 'Agent Release 下载或校验失败。' }
-    `$newBinary = Join-Path `$temp 'guanlan-agent.exe'
+    `$newBinary = if (Test-Path -LiteralPath (Join-Path `$temp 'xingchen-agent.exe')) { Join-Path `$temp 'xingchen-agent.exe' } else { Join-Path `$temp 'guanlan-agent.exe' }
     `$backup = '$targetBinary.backup'
     Stop-Service -Name '$serviceName' -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath '$targetBinary') { Copy-Item -LiteralPath '$targetBinary' -Destination `$backup -Force }
@@ -220,7 +242,7 @@ if ($Action -ne 'install') {
     switch ($Action) {
         'status' { Get-Service -Name $serviceName -ErrorAction SilentlyContinue | Format-Table -AutoSize; exit 0 }
         'list-versions' {
-            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'guanlan-agent-installer' } -TimeoutSec 30
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30
             $release | ForEach-Object { $_.tag_name }
             exit 0
         }
@@ -253,9 +275,9 @@ $temporarySource = $null
 $temporaryRelease = $null
 try {
     if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
-        $temporaryBinary = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-{0}.exe" -f [Guid]::NewGuid().ToString('N'))
+        $temporaryBinary = Join-Path ([IO.Path]::GetTempPath()) ("xingchen-agent-{0}.exe" -f [Guid]::NewGuid().ToString('N'))
         try {
-            $temporaryRelease = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-release-{0}" -f [Guid]::NewGuid().ToString('N'))
+            $temporaryRelease = Join-Path ([IO.Path]::GetTempPath()) ("xingchen-agent-release-{0}" -f [Guid]::NewGuid().ToString('N'))
             $release = Get-ReleaseBinary $Version $temporaryRelease
             Copy-Item -LiteralPath $release.Path -Destination $temporaryBinary -Force
             $Version = $release.Version
@@ -265,7 +287,7 @@ try {
             $sourceRoot = $projectRoot
             if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
                 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw '未找到 Agent 源码。请安装 git，或通过 -BinaryPath 提供预编译 Agent。' }
-                $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
+                $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("xingchen-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
                 if (-not (Get-AgentSource $temporarySource)) { throw 'GitHub 与 Gitee Agent 源码均不可用。' }
                 $sourceRoot = $temporarySource
             }
@@ -285,7 +307,7 @@ try {
 
     $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
     New-Item -ItemType Directory -Force -Path $installDir, $dataDir, (Join-Path $dataDir 'spool') | Out-Null
-    $targetBinary = Join-Path $installDir 'guanlan-agent.exe'
+    $targetBinary = Join-Path $installDir $binaryName
 
     $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
     if ($existing -and $existing.Status -ne 'Stopped') {
@@ -335,7 +357,7 @@ try {
     }
     Start-Service -Name $serviceName
     Install-AgentUpdater
-    Write-Host '星辰监控 Agent 已安装并启动。可运行 Get-Service GuanlanAgent 查看状态。'
+    Write-Host "星辰监控 Agent 已安装并启动。可运行 Get-Service $serviceName 查看状态。"
 }
 finally {
     Remove-Item Env:XINGCHEN_AGENT_KEY -ErrorAction SilentlyContinue

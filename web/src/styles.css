@@ -1356,8 +1356,12 @@ p, h1, h2, h3 { margin: 0; }
 .guide-topic-body li::marker { color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; font-weight: 700; }
 .guide-topic-tip { min-width: 0; display: flex; align-items: flex-start; gap: 9px; padding: 12px; border-left: 2px solid var(--border-strong); color: var(--muted); background: var(--surface-subtle); }
 .guide-topic-tip > svg { flex: 0 0 auto; color: var(--warning); }
+.guide-topic-tip > div { min-width: 0; }
+.guide-topic-tip section + section { margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--border); }
 .guide-topic-tip strong { display: block; color: var(--foreground); font-size: 11px; }
 .guide-topic-tip p { margin-top: 5px; font-size: 10px; line-height: 1.6; }
+.guide-topic-tip ul { display: grid; gap: 5px; margin: 6px 0 0; padding-left: 15px; }
+.guide-topic-tip li { font-size: 10px; line-height: 1.55; }
 .guide-topic footer { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 12px 7px 16px; border-top: 1px solid var(--border); background: var(--surface-subtle); }
 .guide-topic footer > span:first-child { min-width: 0; display: flex; align-items: center; gap: 7px; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }
 .guide-topic footer a { min-width: 112px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 0 0 auto; padding: 0 13px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--surface); font-size: 11px; font-weight: 600; text-decoration: none; }

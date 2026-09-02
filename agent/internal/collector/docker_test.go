@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/model"
 )
 
 func TestDockerCPUPercent(t *testing.T) {

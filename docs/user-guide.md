@@ -311,20 +311,20 @@ curl -fL 'https://monitor.example.com/api/setup/agent-installer?platform=linux' 
 
 1. 在目标 Windows 服务器上，以管理员身份打开 PowerShell。
 2. 粘贴控制台“Windows”页签生成的完整多行命令。
-3. 等待脚本下载安装程序、写入配置并创建 `GuanlanAgent` 服务。
+3. 等待脚本下载安装程序、写入配置并创建 `XingchenAgent` 服务。
 4. 检查服务：
 
 ```powershell
-Get-Service GuanlanAgent
+Get-Service XingchenAgent
 ```
 
 服务应为 `Running`。配置文件位于：
 
 ```text
-%ProgramData%\GuanlanMonitor\agent.json
+%ProgramData%\XingchenMonitor\agent.json
 ```
 
-Windows 没有预编译程序时，安装器需要 Git 和 Go 1.24+ 从源码构建；生产服务器更推荐通过 `-BinaryPath` 提供可信的预编译 `guanlan-agent.exe`。完整参数见[受监控服务器搭建材料](monitored-agent.md)。
+Windows 没有预编译程序时，安装器需要 Git 和 Go 1.24+ 从源码构建；生产服务器更推荐通过 `-BinaryPath` 提供可信的预编译 `xingchen-agent.exe`。完整参数见[受监控服务器搭建材料](monitored-agent.md)。旧版主机会继续显示旧服务名和路径，重新运行安装命令即可平滑升级。
 
 ### 7.5 确认接入成功
 
@@ -557,6 +557,32 @@ API Token 用于移动端、脚本或 MCP 客户端，不要用管理员 Cookie 
 
 稳定版本使用 `vX.Y.Z` GitHub Release。发布流程只有在 setup、server、web 和 Agent 的同版本镜像全部构建完成后，才推进 `latest` 并创建 Release。控制台缓存版本检查结果 20 分钟；GitHub 临时不可用时会显示上一次成功缓存。
 
+### 9.4.1 更新页面的逐项操作和判断标准
+
+不要把“立即更新”当成普通的保存按钮。它会启动总控更新任务，并按顺序重建和重启服务。建议在维护窗口内由一名管理员完成，另一名值班人员负责观察：
+
+1. **确认当前状态**：在“系统更新”页先看当前版本、最新稳定版本、最近检查时间和服务列表。若已经显示“正在检查”或“正在更新并重启”，不要再次点击任何更新按钮。
+2. **创建升级前备份**：进入“备份与恢复”，点击“立即备份”。只有当状态回到“就绪”，并且“可用备份”中出现刚刚生成的 SQL 文件时，才继续下一步。记录文件时间和文件名。
+3. **检查候选版本**：返回“系统更新”，点击“检查更新”。等待按钮结束加载，确认出现“发现可用更新”，核对目标版本、发布时间和 Release 说明。若目标版本低于当前版本，先停止并确认是否真的需要降级。
+4. **检查变更窗口**：确认没有人在执行数据库恢复、Agent 密钥轮换、批量任务或其他发布操作；通知值班人员控制台会短暂不可访问。
+5. **启动更新**：点击“立即更新”，在确认框中阅读“拉取镜像、依次重启服务、不会删除监控数据”的提示，确认无误后点击“开始更新”。一次点击即可，不要刷新后重复提交。
+6. **等待重启**：更新状态会变为“正在更新并重启”。这段时间出现登录失败、首页打不开或 WebSocket 断开属于预期现象。通常等待 2-5 分钟；不要手工启动旧容器，也不要同时执行恢复。
+7. **验证服务版本**：页面恢复后重新进入“系统设置 > 系统更新”，确认 setup、server、web 版本一致，健康状态均为“运行正常”。
+8. **验证业务链路**：依次打开运行总览、设备管理、告警事件和通知投递记录，确认至少一台设备重新在线、趋势产生新数据、告警列表可读、测试通知可以发送。
+9. **记录结果**：把升级前后的版本、开始/完成时间、备份文件名和异常信息写入交接记录。没有完成业务验证前，不要关闭维护窗口。
+
+出现问题时按下面顺序收集信息：
+
+```bash
+docker compose --profile host-monitoring ps
+docker compose logs --tail 100 setup
+docker compose logs --tail 100 server
+docker compose logs --tail 100 web
+curl -fsS https://<你的域名>/healthz
+```
+
+如果控制台仍可访问，优先查看“系统更新”页的错误提示和服务状态；如果控制台不可访问，先看 `setup` 日志和 `/healthz`，不要连续重试。更新任务失败不会删除数据卷，但失败时也不会自动切回旧镜像，因为新版本可能已经执行数据库迁移。需要降级时，先确认目标版本兼容性，再结合升级前 PostgreSQL 备份恢复。
+
 ### 9.5 命令行检查和更新
 
 Linux：
@@ -636,10 +662,10 @@ curl -fsS https://monitor.example.com/healthz
 ### 10.3 Windows Agent 管理
 
 ```powershell
-Get-Service GuanlanAgent
-Restart-Service GuanlanAgent
-sc.exe query GuanlanAgent
-sc.exe qc GuanlanAgent
+Get-Service XingchenAgent
+Restart-Service XingchenAgent
+sc.exe query XingchenAgent
+sc.exe qc XingchenAgent
 ```
 
 更新和回退：
@@ -650,7 +676,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install-agent.ps1 -Action list
 powershell -ExecutionPolicy Bypass -File .\deploy\install-agent.ps1 -Action rollback -Version v1.20.4
 ```
 
-重新运行控制台生成的安装命令可以更新配置和程序。Windows Agent 配置目录为 `%ProgramData%\GuanlanMonitor`，程序目录为 `%ProgramFiles%\GuanlanMonitor`；更新前会保留 `.backup`，新服务启动失败会自动恢复。
+重新运行控制台生成的安装命令可以更新配置和程序。Windows Agent 配置目录为 `%ProgramData%\XingchenMonitor`，程序目录为 `%ProgramFiles%\XingchenMonitor`；更新前会保留 `.backup`，新服务启动失败会自动恢复。
 
 ### 10.4 推荐检查频率
 

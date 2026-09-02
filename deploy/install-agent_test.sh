@@ -85,7 +85,7 @@ if [[ " ${*} " == *" -d "* ]]; then
     [[ "${argument}" == /* ]] && mkdir -p "${argument}"
   done
 fi
-if (( count >= 2 )) && [[ "${arguments[count-1]}" == "/etc/guanlan-agent/agent.json" ]]; then
+if (( count >= 2 )) && [[ "${arguments[count-1]}" == "/etc/xingchen-agent/agent.json" ]]; then
   cp "${arguments[count-2]}" "${TEST_CONFIG}"
 fi
 SCRIPT
@@ -179,10 +179,10 @@ server_url=https://monitor.example.com
 run_installer 1
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
 grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
-grep -F 'docker run -d --name guanlan-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
+grep -F 'docker run -d --name xingchen-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
-grep -F '"docker_socket": "/run/guanlan-agent-docker.sock"' "${config_file}" >/dev/null
+grep -F '"docker_socket": "/run/xingchen-agent-docker.sock"' "${config_file}" >/dev/null
 grep -F '"allow_command_execution": false' "${config_file}" >/dev/null
 grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 run_as_root test -x "${temp_dir}/manager/update-agent.sh"
@@ -193,7 +193,7 @@ if run_as_root grep -F 'before="$(docker image inspect' "${temp_dir}/manager/upd
   echo 'Agent updater still compares the local image before and after pulling.' >&2
   exit 1
 fi
-run_as_root grep -F 'CONTAINER_NAME=guanlan-agent' "${temp_dir}/manager/install.env" >/dev/null
+run_as_root grep -F 'CONTAINER_NAME=xingchen-agent' "${temp_dir}/manager/install.env" >/dev/null
 
 : > "${log_file}"
 manager_environment=(
@@ -211,9 +211,9 @@ else
   sudo env "${manager_environment[@]}" bash "${installer}" update
 fi
 grep -F 'docker image inspect --format {{.Id}} ghcr.io/pstarchen/monitor-for-server-agent:latest' "${log_file}" >/dev/null
-grep -F 'docker inspect --format {{.Image}} guanlan-agent' "${log_file}" >/dev/null
-grep -F 'docker rename guanlan-agent guanlan-agent.previous' "${log_file}" >/dev/null
-grep -F 'docker rename guanlan-agent.update guanlan-agent' "${log_file}" >/dev/null
+grep -F 'docker inspect --format {{.Image}} xingchen-agent' "${log_file}" >/dev/null
+grep -F 'docker rename xingchen-agent xingchen-agent.previous' "${log_file}" >/dev/null
+grep -F 'docker rename xingchen-agent.update xingchen-agent' "${log_file}" >/dev/null
 
 : > "${log_file}"
 server_url=https://monitor.example.com
@@ -255,7 +255,7 @@ grep -F '"collect_system_logs": true' "${config_file}" >/dev/null
 server_url=https://monitor.example.com
 run_installer 0
 grep -F 'go build -trimpath' "${log_file}" >/dev/null
-grep -F 'systemctl enable --now guanlan-agent.service' "${log_file}" >/dev/null
+grep -F 'systemctl enable --now xingchen-agent.service' "${log_file}" >/dev/null
 grep -F '"host_root": ""' "${config_file}" >/dev/null
 grep -F '"docker_socket": "' "${config_file}" >/dev/null
 if grep -q '^docker pull ' "${log_file}"; then
@@ -268,7 +268,7 @@ binary_path="${temp_dir}/prebuilt-agent"
 touch "${binary_path}"
 server_url=https://monitor.example.com
 run_installer 1 --no-docker --binary "${binary_path}"
-grep -F 'systemctl enable --now guanlan-agent.service' "${log_file}" >/dev/null
+grep -F 'systemctl enable --now xingchen-agent.service' "${log_file}" >/dev/null
 if grep -Eq '^(docker pull|go )' "${log_file}"; then
   echo 'Explicit binary path did not select the local Agent.' >&2
   exit 1
@@ -323,7 +323,7 @@ else
   sudo env "${auto_update_environment[@]}" bash "${installer}" \
     --server-url "${server_url}" --device-id test-device
 fi
-grep -F 'systemctl enable --now guanlan-agent-update.timer' "${log_file}" >/dev/null
+grep -F 'systemctl enable --now xingchen-agent-update.timer' "${log_file}" >/dev/null
 
 : > "${log_file}"
 server_url=https://monitor.example.com

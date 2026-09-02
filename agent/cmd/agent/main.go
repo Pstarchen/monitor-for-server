@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"guanlan-monitor/agent/internal/api"
-	"guanlan-monitor/agent/internal/collector"
-	"guanlan-monitor/agent/internal/config"
-	"guanlan-monitor/agent/internal/spool"
-	"guanlan-monitor/agent/internal/worker"
+	"xingchen-monitor/agent/internal/api"
+	"xingchen-monitor/agent/internal/collector"
+	"xingchen-monitor/agent/internal/config"
+	"xingchen-monitor/agent/internal/spool"
+	"xingchen-monitor/agent/internal/worker"
 )
 
 var version = "dev"

@@ -157,9 +157,9 @@ Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main
 
 `XINGCHEN_SERVER` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。默认安装 GitHub Release 的预编译程序（支持 `linux/amd64` 与 `linux/arm64`），下载后必须通过 `checksums.txt` 的 SHA256 校验；更新失败会保留并恢复旧程序。需要 Docker 模式时显式添加 `--docker`，再使用 `--image` 或 `XINGCHEN_AGENT_IMAGE` 指向内部 OCI 仓库；Release 或镜像失败时仍可使用 `--source-url` 和 `--source-ref` 源码回退。
 
-- 容器：`guanlan-agent`，重启策略为 `unless-stopped`
-- 配置：`/etc/guanlan-agent/agent.json`，只读挂载到容器
-- 缓冲：Docker 卷 `guanlan-agent-spool`
+- 容器：`xingchen-agent`，重启策略为 `unless-stopped`
+- 配置：`/etc/xingchen-agent/agent.json`，只读挂载到容器
+- 缓冲：Docker 卷 `xingchen-agent-spool`
 - 宿主机：只读挂载到 `/host`，并使用 host network/PID 采集主机指标
 
 安装器会保存统一管理脚本，不需要再记 Docker 与 systemd 的不同命令：
@@ -176,18 +176,18 @@ Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main
 
 直接运行 `/opt/xingchen/agent/agent.sh` 会打开交互菜单。默认卸载会保留配置和离线缓存，只有 `uninstall --purge` 才会一并删除。
 
-如果 Release 暂时不可用，安装器会依次尝试源码回退，因此需要 Go 1.24+、git 和 systemd；也可用 `--binary /path/to/guanlan-agent` 指定本地程序。使用 `--no-docker` 可明确保持原生模式。此模式安装结果：
+如果 Release 暂时不可用，安装器会依次尝试源码回退，因此需要 Go 1.24+、git 和 systemd；也可用 `--binary /path/to/xingchen-agent` 指定本地程序。使用 `--no-docker` 可明确保持原生模式。此模式安装结果：
 
-- 程序：`/usr/local/bin/guanlan-agent`
-- 配置：`/etc/guanlan-agent/agent.json`，权限 `0600`
-- 缓冲：`/var/lib/guanlan-agent/spool`
-- 服务：`guanlan-agent.service`
+- 程序：`/usr/local/bin/xingchen-agent`
+- 配置：`/etc/xingchen-agent/agent.json`，权限 `0600`
+- 缓冲：`/var/lib/xingchen-agent/spool`
+- 服务：`xingchen-agent.service`
 
 本机回退模式检查状态：
 
 ```bash
-systemctl status guanlan-agent
-journalctl -u guanlan-agent -n 100 --no-pager
+systemctl status xingchen-agent
+journalctl -u xingchen-agent -n 100 --no-pager
 ```
 
 ## Windows Agent
@@ -206,13 +206,13 @@ $env:XINGCHEN_AGENT_KEY = '<一次性密钥>'
 
 轻量采集可添加 `-SkipProcesses -SkipConnections`；需要完整进程清单时添加 `-CollectAllProcesses -ProcessCollectionLimit 128`（上限 256）。端口和容器也可分别通过 `-SkipPorts`、`-SkipContainers` 关闭，或用 `-PortCollectionLimit`、`-ContainerCollectionLimit` 调低明细上限。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `-AllowCommandExecution`、`-AllowFileOperations`，两项默认关闭。不传 `-DiskMountpoint` 时采集全部可用分区。
 
-使用预编译程序时添加 `-BinaryPath 'C:\staging\guanlan-agent.exe'`。脚本注册自动启动的 `GuanlanAgent` Windows 服务，并将配置写入 `%ProgramData%\GuanlanMonitor\agent.json`，ACL 仅允许 SYSTEM 与管理员访问。即使已安装 Docker Desktop，Windows 也保持原生服务模式，以免采集到 Docker 的 Linux 虚拟机而不是 Windows 宿主机。
+使用预编译程序时添加 `-BinaryPath 'C:\staging\xingchen-agent.exe'`。脚本注册自动启动的 `XingchenAgent` Windows 服务，并将配置写入 `%ProgramData%\XingchenMonitor\agent.json`，ACL 仅允许 SYSTEM 与管理员访问。即使已安装 Docker Desktop，Windows 也保持原生服务模式，以免采集到 Docker 的 Linux 虚拟机而不是 Windows 宿主机。
 
 检查状态：
 
 ```powershell
-Get-Service GuanlanAgent
-Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Select-Object server_url,device_id,interval
+Get-Service XingchenAgent
+Get-Content "$env:ProgramData\XingchenMonitor\agent.json" | ConvertFrom-Json | Select-Object server_url,device_id,interval
 ```
 
 不要输出或展示 `agent_key` 字段。
@@ -250,9 +250,9 @@ Flyway 会在服务端启动时执行数据库迁移。升级前先在测试环�
 - Web 显示 502：检查 `docker compose ps` 与 `docker compose logs server`，确认服务端健康检查通过。
 - 登录后写操作返回 403：确认浏览器允许同站 Cookie，入口域名与 `ALLOWED_ORIGINS` 完全一致。
 - WebSocket 反复断开：确认外层代理转发 Upgrade 请求头，且会话 Cookie 可发送到 `/ws/metrics`。
-- 设备一直待接入：打开设备详情查看“Agent 接入诊断”。`等待 Agent 接入` 表示尚未收到首次上报；`Agent 已离线` 表示已超过失联阈值。然后在目标机检查 `docker logs --tail 100 guanlan-agent` 或 `journalctl -u guanlan-agent -n 100 --no-pager`，核对设备 ID、服务端 HTTPS 地址和密钥；密钥轮换后旧值立即失效。
+- 设备一直待接入：打开设备详情查看“Agent 接入诊断”。`等待 Agent 接入` 表示尚未收到首次上报；`Agent 已离线` 表示已超过失联阈值。然后在目标机检查 `docker logs --tail 100 xingchen-agent` 或 `journalctl -u xingchen-agent -n 100 --no-pager`，核对设备 ID、服务端 HTTPS 地址和密钥；密钥轮换后旧值立即失效。
 - Agent 日志提示延迟上报：检查 DNS、证书链和防火墙。缓冲文件会保留在 spool 目录并在恢复后补传。
-- Linux 安装器仍提示 Go 1.24+：Docker 命令不存在、守护进程不可达，或显式使用了 `--no-docker`；先运行 `docker info` 检查。要强制使用本机程序，请同时指定 `--no-docker --binary /path/to/guanlan-agent`。
+- Linux 安装器仍提示 Go 1.24+：Docker 命令不存在、守护进程不可达，或显式使用了 `--no-docker`；先运行 `docker info` 检查。要强制使用本机程序，请同时指定 `--no-docker --binary /path/to/xingchen-agent`。
 - Agent 镜像无法拉取：确认 GHCR 包已设为 Public、目标机能访问 `ghcr.io`，或用 `--image` 指向可访问的镜像仓库。
 - 总控镜像无法拉取：确认 GHCR 的 `monitor-for-server-{setup,server,web}` 包已设为 Public；也可使用 `bash ./deploy/install-controller.sh --build` 从源码构建。
 - 设备离线但无告警：检查系统离线判定时间、离线规则阈值和规则是否启用。

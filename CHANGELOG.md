@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.20.9
+
+- 将 Agent、安装器、容器入口、systemd/Windows 服务和 Release 资产统一为 XINGCHEN 命名。
+- 新装默认使用 `xingchen-agent` 路径；已有安装会自动识别并沿用原路径，支持平滑升级和回退。
+- 完善小白用户更新指南，补充备份、检查、重启验证和故障收集步骤。
+
 ## v1.20.8
 
 - 修复 Agent Release 归档工作流的 Go 模块工作目录，确保 Linux amd64/arm64 与 Windows amd64 资产和 `checksums.txt` 正常发布。

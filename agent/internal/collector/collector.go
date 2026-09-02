@@ -19,7 +19,7 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 	"github.com/shirou/gopsutil/v4/sensors"
 
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/model"
 )
 
 type ioSample struct {

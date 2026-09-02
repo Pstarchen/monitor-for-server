@@ -1,3 +1,3 @@
-module guanlan-monitor/setup
+module xingchen-monitor/setup
 
 go 1.24

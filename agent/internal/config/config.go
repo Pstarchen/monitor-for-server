@@ -85,7 +85,7 @@ type CustomMetric struct {
 }
 
 func Load(args []string) (Config, error) {
-	flags := flag.NewFlagSet("guanlan-agent", flag.ContinueOnError)
+	flags := flag.NewFlagSet("xingchen-agent", flag.ContinueOnError)
 	configPath := flags.String("config", envCompat("XINGCHEN_AGENT_CONFIG", "GUANLAN_AGENT_CONFIG", "agent.json"), "path to JSON configuration")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err

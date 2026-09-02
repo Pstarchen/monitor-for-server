@@ -256,9 +256,13 @@ func writeEnvironment(request setupRequest) error {
 		return err
 	}
 	settingsKey := base64.StdEncoding.EncodeToString(key)
-	postgresDatabase := environmentValue("POSTGRES_DB", "guanlan_monitor")
-	postgresUser := environmentValue("POSTGRES_USER", "guanlan")
+	postgresDatabase := environmentValue("POSTGRES_DB", "xingchen_monitor")
+	postgresUser := environmentValue("POSTGRES_USER", "xingchen")
 	postgresPassword := strings.TrimSpace(os.Getenv("POSTGRES_PASSWORD"))
+	composeProjectName := configuredEnvironmentValue("COMPOSE_PROJECT_NAME")
+	if composeProjectName == "" {
+		composeProjectName = environmentValue("COMPOSE_PROJECT_NAME", "xingchen-monitor")
+	}
 	webPort := environmentValue("WEB_PORT", "18080")
 	webBindAddress := environmentValue("WEB_BIND_ADDRESS", "0.0.0.0")
 	controllerAgentEnabled := environmentValue("CONTROLLER_AGENT_ENABLED", "false")
@@ -287,6 +291,7 @@ func writeEnvironment(request setupRequest) error {
 		"POSTGRES_DB=" + dotenvValue(postgresDatabase),
 		"POSTGRES_USER=" + dotenvValue(postgresUser),
 		"POSTGRES_PASSWORD=" + dotenvValue(postgresPassword),
+		"COMPOSE_PROJECT_NAME=" + dotenvValue(composeProjectName),
 		"BOOTSTRAP_ADMIN_USERNAME=" + dotenvValue(request.AdminUsername),
 		"BOOTSTRAP_ADMIN_PASSWORD=" + dotenvValue(request.AdminPassword),
 		"SETTINGS_ENCRYPTION_KEY=" + dotenvValue(settingsKey),

@@ -3,7 +3,7 @@ import { computed, ref, type Component } from 'vue'
 import {
   Activity, Archive, ArrowRight, BarChart3, BellRing, BookOpen, CalendarClock, CircleGauge, ClipboardList,
   GitBranch, Globe2, KeyRound, Lightbulb, ListChecks, LockKeyhole, MousePointerClick, Radar,
-  Rocket, Search, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, Users,
+  RefreshCw, Rocket, Search, Server, Settings, ShieldCheck, SlidersHorizontal, Terminal, Users,
   Smartphone,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
@@ -25,6 +25,8 @@ interface GuideTopic {
   icon: Component
   steps: string[]
   note: string
+  checks?: string[]
+  troubleshooting?: string[]
   keywords?: string[]
 }
 
@@ -65,6 +67,14 @@ const topics: GuideTopic[] = [
       '点击值班记录或设备入口进入详情，继续查看主机、进程、容器和安全巡检。',
     ],
     note: '离线数量增加或指标长时间不更新时，优先检查 Agent 服务、网络和设备详情中的接入诊断。',
+    checks: [
+      '趋势卡片显示最近采集时间，且切换时间范围后曲线能够更新。',
+      '活动告警、在线设备数量与设备列表状态一致。',
+    ],
+    troubleshooting: [
+      '趋势为空：先确认设备已在线并等待至少两个采集周期。',
+      '页面数据停留在旧时间：检查浏览器网络、WebSocket 连接和 Agent 最近上报时间。',
+    ],
     keywords: ['首页', '趋势', '在线率', '值班记录'],
   },
   {
@@ -77,6 +87,14 @@ const topics: GuideTopic[] = [
       'Agent 完成首次上报后，设备会从等待接入变为在线，并开始累积资源历史。',
     ],
     note: '轮换密钥会让旧密钥立即失效。执行前先准备好更新目标服务器配置并重启 Agent。',
+    checks: [
+      '目标设备从“待接入”变为“在线”，并显示主机名与最新上报时间。',
+      '设备详情的趋势与主机页出现 CPU、内存和磁盘数据。',
+    ],
+    troubleshooting: [
+      '仍是“待接入”：在目标机执行 Agent status/logs，并测试访问总控 `/healthz`。',
+      '轮换密钥后离线：重新复制安装命令，确认设备 ID、总控地址和新密钥没有混用。',
+    ],
     keywords: ['添加设备', '安装命令', '密钥', '节点', '服务器'],
   },
   {
@@ -101,6 +119,10 @@ const topics: GuideTopic[] = [
       '对发现结果使用“使用地址添加设备”，系统会带着地址跳转到设备创建流程。',
     ],
     note: '扫描从总控服务器发起，只支持私网。结果为空时检查总控到目标网段的路由和防火墙。',
+    checks: [
+      '扫描任务状态变为完成，并显示已发现地址、开放端口和延迟。',
+      '确认主机归属后再使用地址创建设备，避免把陌生公网地址登记进系统。',
+    ],
     keywords: ['CIDR', '端口扫描', '发现主机', '私网'],
   },
   {
@@ -113,6 +135,14 @@ const topics: GuideTopic[] = [
       '保存后可立即探测、查看最近 31 天历史；外部心跳需立即复制一次性命令到 cron 或 CI。',
     ],
     note: '延迟阈值设为 0 表示不按延迟告警。先用较宽松阈值观察基线，再逐步收紧。',
+    checks: [
+      '保存后列表出现服务，并显示最近一次探测结果和可用率。',
+      '点击“立即探测”能得到成功或失败结果，失败时详情包含可定位的原因。',
+    ],
+    troubleshooting: [
+      'HTTP 失败：核对协议、路径、状态码和响应体关键字；证书错误需检查域名与系统时间。',
+      '心跳没有数据：把创建时生成的命令原样放入 cron/CI，并确认任务确实执行。',
+    ],
     keywords: ['HTTP', 'Ping', 'TCP', '数据库', '心跳', '证书'],
   },
   {
@@ -125,6 +155,14 @@ const topics: GuideTopic[] = [
       '保存后规则会在每次 Agent 上报时自动评估，命中时生成告警事件。',
     ],
     note: '先从少量高价值规则开始。阈值过紧会造成通知噪声，建议结合运行报告和趋势调整。',
+    checks: [
+      '规则列表显示“启用”，监控范围和指标/目标名称正确。',
+      '用一次可控的测试变化验证告警打开与恢复各产生一次事件。',
+    ],
+    troubleshooting: [
+      '规则不触发：确认 Agent 上报包含该指标；进程、服务和自定义项名称必须完全匹配。',
+      '重复告警：检查阈值是否过低，并确认已有活动事件尚未恢复。',
+    ],
     keywords: ['CPU', '内存', '离线', '阈值', '规则'],
   },
   {
@@ -137,6 +175,10 @@ const topics: GuideTopic[] = [
       '查看通知列判断是否已发送或被维护窗口静默；指标恢复后事件会自动标记为已恢复。',
     ],
     note: '“确认”表示有人接手，不等于故障已经恢复。最终恢复状态由后续采集或服务探测结果决定。',
+    checks: [
+      '确认后事件显示处理人和确认时间，未处理筛选数量相应减少。',
+      '故障恢复后状态变为“已恢复”，并能看到恢复通知或静默记录。',
+    ],
     keywords: ['确认告警', '批量确认', '已恢复', '通知'],
   },
   {
@@ -221,7 +263,41 @@ const topics: GuideTopic[] = [
       '在监控策略中设置留存、离线阈值和上报周期；版本升级前先检查备份与更新状态。',
     ],
     note: '通知凭据需要部署端加密密钥才能保存。敏感字段读取时不会回显原文，留空通常表示保留。',
+    checks: [
+      '修改后右上角显示“所有设置已保存”，刷新页面后值仍保持不变。',
+      '通知通道测试成功，并且“最近投递记录”出现成功记录。',
+    ],
+    troubleshooting: [
+      '保存按钮不可用：先确认当前账号是管理员，并检查页面是否存在未完成的必填项。',
+      '敏感字段显示为空不代表丢失；留空保存会保留已加密的旧值。',
+    ],
     keywords: ['通知渠道', '监控策略', '系统更新', '站点图标', 'Webhook'],
+  },
+  {
+    id: 'controller-update', category: '系统管理', title: '系统更新：检查、备份与验证', icon: RefreshCw, route: '/settings', entry: '系统设置 → 系统更新',
+    access: '仅管理员', roles: ['ADMIN'],
+    summary: '按可回退、可观察的顺序更新总控镜像，避免在没有恢复点时直接重启生产服务。',
+    steps: [
+      '先进入“备份与恢复”，点击“立即备份”，等待任务状态回到“就绪”，并确认列表出现最新 PostgreSQL SQL 文件。',
+      '回到“系统设置 → 系统更新”，确认“当前版本”和“最新稳定版本”不是同一个版本；没有更新时不要强行执行。',
+      '点击“检查更新”，等待状态从“检查中”回到“发现可用更新”，再展开 Release 说明核对版本和发布时间。',
+      '确认当前没有恢复任务、迁移任务或正在进行的人工发布，点击“立即更新”，在确认框中阅读服务重启提示后点击“开始更新”。',
+      '更新期间不要重复点击按钮、关闭浏览器或手工启动旧容器；页面暂时打不开属于服务重启窗口。',
+      '等待页面自动恢复，刷新“系统更新”并确认 setup、server、web 的版本一致且健康状态为“运行正常”。',
+      '最后打开运行总览、设备详情和通知投递记录，分别确认设备重新在线、指标继续上报、告警通知仍能发送。',
+    ],
+    note: '更新只替换应用容器，不删除 PostgreSQL 和 Redis 数据卷。更新失败时不要直接切回旧镜像；如果已经执行数据库迁移，应使用升级前备份和兼容版本一起恢复。',
+    checks: [
+      '三项总控服务版本一致，健康状态均为“运行正常”。',
+      '至少一台设备在一个采集周期内恢复在线，首页资源趋势出现新数据点。',
+      '使用“发送测试消息”验证一个已配置通知通道，并在投递记录中看到成功结果。',
+    ],
+    troubleshooting: [
+      '一直显示“正在更新并重启”：等待 2-5 分钟后刷新；仍无变化时在服务器查看 setup 和 compose 日志。',
+      '检查不到新版本：确认服务器可以访问镜像源或 Release 源；可改用命令行 `deploy/update-controller.sh --check`。',
+      '健康检查失败：先保留现场和备份，不要反复点击更新；查看 `docker compose ps` 及 `docker compose logs --tail 100 setup server web`。',
+    ],
+    keywords: ['立即更新', '检查更新', '备份', '重启', '版本', '健康检查', '回滚'],
   },
   {
     id: 'push-kit', category: '系统管理', title: '华为 Push Kit（HarmonyOS NEXT）', icon: Smartphone, route: '/settings', entry: '系统设置 → 通知渠道 → 华为 Push Kit',
@@ -233,6 +309,14 @@ const topics: GuideTopic[] = [
       'HarmonyOS App 登记 Push Token 后，管理员可查看 Token 尾号、设备版本和登记时间，并按设备发送测试消息。',
     ],
     note: '这是华为 Push Kit V3 通道，只面向 HarmonyOS NEXT / 5.x+，与 Web Push、FCM、APNs、Webhook 及旧版华为 OAuth Push API 分开。',
+    checks: [
+      '服务账号校验返回成功，Push Kit 分区显示已配置。',
+      'HarmonyOS App 完成 Token 登记后，设备列表出现 Token 尾号，再发送测试推送。',
+    ],
+    troubleshooting: [
+      '校验失败：检查项目 ID、Key ID、子账号和 PKCS#8 私钥是否来自同一华为项目，且私钥没有多余空格。',
+      '测试推送失败：确认 App 使用 Push Kit V3、Token 未过期，并查看通知投递记录中的服务端错误。',
+    ],
     keywords: ['Push Kit', '华为', 'HarmonyOS NEXT', 'Push Token', 'V3', '测试推送'],
   },
   {
@@ -245,6 +329,14 @@ const topics: GuideTopic[] = [
       '需要恢复时选择目标文件并确认；恢复是高风险操作，应先保留当前数据库副本。',
     ],
     note: '备份文件保存在总控项目目录。主机级故障防护还需要把备份目录同步到独立存储。',
+    checks: [
+      '手动备份完成后，可用备份列表出现新的 SQL 文件且时间正确。',
+      '自动备份启用后，策略显示保留数量和下次执行时间。',
+    ],
+    troubleshooting: [
+      '备份失败：检查磁盘剩余空间、备份目录权限和 PostgreSQL 容器日志。',
+      '恢复后页面打不开：等待 server/web 自动重启，再检查健康状态，不要重复恢复。',
+    ],
     keywords: ['数据库', '恢复点', '自动备份', '保留策略'],
   },
   {
@@ -355,7 +447,14 @@ function clearFilters() {
             </header>
             <div class="guide-topic-body">
               <section><h3>操作步骤</h3><ol><li v-for="step in topic.steps" :key="step">{{ step }}</li></ol></section>
-              <aside class="guide-topic-tip"><Lightbulb :size="17" /><div><strong>使用提醒</strong><p>{{ topic.note }}</p></div></aside>
+              <aside class="guide-topic-tip">
+                <Lightbulb :size="17" />
+                <div>
+                  <section><strong>使用提醒</strong><p>{{ topic.note }}</p></section>
+                  <section v-if="topic.checks?.length"><strong>完成检查</strong><ul><li v-for="check in topic.checks" :key="check">{{ check }}</li></ul></section>
+                  <section v-if="topic.troubleshooting?.length"><strong>异常时怎么查</strong><ul><li v-for="item in topic.troubleshooting" :key="item">{{ item }}</li></ul></section>
+                </div>
+              </aside>
             </div>
             <footer>
               <span><MousePointerClick :size="15" />{{ topic.entry }}</span>

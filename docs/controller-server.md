@@ -16,7 +16,7 @@
 
 安装器会在项目 `.env` 中生成随机 PostgreSQL 密码，并通过 Docker Compose 注入 `postgres`、`setup` 和 `server`。用户不需要安装数据库客户端、创建数据库、创建账号或执行 SQL。PostgreSQL 端口不发布到宿主机；数据库表由 Flyway 在生产服务首次启动时创建。
 
-数据库数据位于 `guanlan-monitor_postgres-data` 卷。升级时保留该卷即可；重装或迁移前请使用 `pg_dump` 做逻辑备份。不要把 `.env` 或数据库卷备份上传到公网。
+数据库数据位于 PostgreSQL 数据卷。新部署默认使用 `xingchen-monitor` Compose 项目、`xingchen_monitor` 数据库和 `xingchen` 用户。升级时保留该卷即可；安装器会识别旧版项目并继续使用原 `.env` 和数据卷，不会因为改名创建空数据库。重装或迁移前请使用 `pg_dump` 做逻辑备份。不要把 `.env` 或数据库卷备份上传到公网。
 
 ## 首次部署
 

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/model"
 )
 
 var cronSecretPattern = regexp.MustCompile(`(?i)(password|passwd|token|secret|api[_-]?key)=\S+`)

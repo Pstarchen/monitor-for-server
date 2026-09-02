@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/model"
 )
 
 // The command runner deliberately uses exec.CommandContext directly. Shell

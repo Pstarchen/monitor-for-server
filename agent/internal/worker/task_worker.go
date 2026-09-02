@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"guanlan-monitor/agent/internal/api"
-	"guanlan-monitor/agent/internal/executor"
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/api"
+	"xingchen-monitor/agent/internal/executor"
+	"xingchen-monitor/agent/internal/model"
 )
 
 func Run(ctx context.Context, logger *slog.Logger, client *api.Client, pollInterval time.Duration, maxOutputBytes int, allowCommandExecution bool, allowFileOperations bool, hostRoot string) {

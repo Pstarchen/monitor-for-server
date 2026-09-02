@@ -67,7 +67,7 @@ app:
   bootstrap-admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
   bootstrap-admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
   site-name: ${SITE_NAME:星辰监控}
-  site-icon-storage-path: ${SITE_ICON_STORAGE_PATH:/var/lib/guanlan-monitor/site-icon}
+  site-icon-storage-path: ${SITE_ICON_STORAGE_PATH:/var/lib/xingchen-monitor/site-icon}
   public-base-url: ${PUBLIC_BASE_URL:}
   allow-insecure-http: ${ALLOW_INSECURE_HTTP:false}
   settings-encryption-key: ${SETTINGS_ENCRYPTION_KEY:}

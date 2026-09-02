@@ -1,4 +1,4 @@
-module guanlan-monitor/agent
+module xingchen-monitor/agent
 
 go 1.23.0
 

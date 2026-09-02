@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"guanlan-monitor/agent/internal/model"
+	"xingchen-monitor/agent/internal/model"
 )
 
 type Result struct {
@@ -304,7 +304,7 @@ func writeFile(ctx context.Context, path string, payload filePayload) (fileRespo
 	if err := ctx.Err(); err != nil {
 		return fileResponse{}, err
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".guanlan-write-*")
+	file, err := os.CreateTemp(filepath.Dir(path), ".xingchen-write-*")
 	if err != nil {
 		return fileResponse{}, err
 	}

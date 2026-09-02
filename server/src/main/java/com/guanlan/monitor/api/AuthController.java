@@ -38,11 +38,11 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {
-    private static final String PENDING_USERNAME = "guanlan.2fa.pending.username";
-    private static final String PENDING_RETURN_TO = "guanlan.2fa.pending.returnTo";
-    private static final String PENDING_EXPIRES_AT = "guanlan.2fa.pending.expiresAt";
-    private static final String SETUP_SECRET = "guanlan.2fa.setup.secret";
-    private static final String SETUP_EXPIRES_AT = "guanlan.2fa.setup.expiresAt";
+    private static final String PENDING_USERNAME = "xingchen.2fa.pending.username";
+    private static final String PENDING_RETURN_TO = "xingchen.2fa.pending.returnTo";
+    private static final String PENDING_EXPIRES_AT = "xingchen.2fa.pending.expiresAt";
+    private static final String SETUP_SECRET = "xingchen.2fa.setup.secret";
+    private static final String SETUP_EXPIRES_AT = "xingchen.2fa.setup.expiresAt";
     private static final Duration PENDING_TTL = Duration.ofMinutes(5);
     private static final Duration SETUP_TTL = Duration.ofMinutes(10);
 
