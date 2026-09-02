@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.20.8
+
+- 修复 Agent Release 归档工作流的 Go 模块工作目录，确保 Linux amd64/arm64 与 Windows amd64 资产和 `checksums.txt` 正常发布。
+
 ## v1.20.7
 
 - 统一对外品牌为 XINGCHEN（星辰监控），包括 Agent 安装命令、前端主题事件、MCP 服务标识和报告文件名。
