@@ -33,6 +33,8 @@
 
 总终端只需要 Docker Engine 和 Compose v2。安装器默认先从国内镜像源拉取预构建的总控 `setup`、`server` 和 `web` 镜像，再回退官方 GHCR；镜像仓库均不可用时，会依次尝试 Gitee、GitHub 源码并在本机构建 Docker 镜像。运行方式始终保持 Docker，并自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis；数据库端口不会暴露到公网。
 
+第一次部署建议先阅读[新手使用指南](docs/user-guide.md)。它从 Docker 准备、首次 `/setup`、Agent 接入一直讲到告警、通知、备份、更新和常见问题排查。
+
 GitHub 安装：
 ```bash
 git clone https://github.com/Pstarchen/monitor-for-server.git
@@ -48,7 +50,7 @@ cd monitor-for-server
 bash ./deploy/install-controller.sh
 ```
 
-需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查镜像、`--apply` 手动更新；更新器按镜像代理、GHCR、Gitee 源码、GitHub 源码的顺序回退。网络环境可以访问官方源时可添加 `--no-mirror`，需要直接跳过镜像仓库时可添加 `--source-build`。
+需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；更新器按镜像代理、GHCR、Gitee 源码、GitHub 源码的顺序回退。网络环境可以访问官方源时可添加 `--no-mirror`，需要直接跳过镜像仓库时可添加 `--source-build`。
 
 使用本地源码构建总控镜像：
 
@@ -68,20 +70,18 @@ bash ./deploy/install-controller.sh --cleanup
 
 该选项不会删除 PostgreSQL/Redis 数据卷或其他 Compose 项目。
 
-需要先构建并启动总终端、再通过浏览器完成配置时，可使用对应平台安装器：
+Windows 可使用对应平台安装器，再通过浏览器完成配置：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
 ```
 
-Linux：
+安装完成后：
 
-```bash
-bash ./deploy/install-controller.sh
-```
-
-4. Linux 总终端会自动显示为“总控服务器”，并在生产服务就绪后开始上报主机指标。
-5. 其他服务器仍在“设备管理”中创建设备，再按 [Agent 安装说明](docs/deployment.md) 启动 Agent。
+1. 打开 `http://<服务器IP>:18080/setup`，设置公网入口、来源、时区和首个管理员。
+2. Linux 总终端会自动显示为“总控服务器”，并在生产服务就绪后开始上报主机指标。
+3. 其他服务器在“设备管理”中创建设备，复制页面生成的命令安装 Agent。
+4. 按[新手使用指南](docs/user-guide.md)完成通知测试、告警规则、备份和更新设置。
 
 ## 本地校验
 
@@ -96,6 +96,7 @@ docker compose build setup server web postgres
 
 ## 项目文档
 
+- [新手使用指南：从安装到日常使用](docs/user-guide.md)
 - [系统架构与安全边界](docs/architecture.md)
 - [HTTP 与 WebSocket API](docs/api.md)
 - [华为 HarmonyOS Push Kit V3 接入](docs/huawei-push-kit.md)

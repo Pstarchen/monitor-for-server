@@ -506,6 +506,7 @@ export type ControllerUpdatePhase = 'IDLE' | 'CHECKING' | 'UPDATING' | 'ERROR'
 export interface ControllerServiceStatus {
   name: 'setup' | 'server' | 'web' | string
   revision?: string
+  version?: string
   health: string
 }
 
@@ -513,8 +514,16 @@ export interface ControllerUpdateStatus {
   state: ControllerUpdatePhase
   currentRevision?: string
   latestRevision?: string
+  currentVersion?: string
+  latestVersion?: string
   updateAvailable: boolean
   message?: string
+  releaseName?: string
+  releaseNotes?: string
+  releaseUrl?: string
+  releasePublishedAt?: string
+  releaseCached?: boolean
+  releaseWarning?: string
   checkedAt?: string
   updatedAt?: string
   autoUpdate: boolean

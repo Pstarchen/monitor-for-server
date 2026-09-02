@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,6 +71,131 @@ func TestControllerUpdateRunnerPassesRunnerEnvironment(t *testing.T) {
 	if !strings.Contains(joined, "-e COMPOSE_PROJECT_NAME=custom-monitor") {
 		t.Fatalf("controllerUpdateRunnerArgs() = %q, inner updater target project was not preserved", joined)
 	}
+}
+
+func TestControllerUpdateEnvironmentPassesNormalizedTargetVersion(t *testing.T) {
+	environment := controllerUpdateEnvironment("1.20.5")
+	if !containsEnvironmentValue(environment, "GUANLAN_TARGET_VERSION=v1.20.5") {
+		t.Fatalf("controllerUpdateEnvironment() = %v, missing normalized target version", environment)
+	}
+	environment = controllerUpdateEnvironment("not-a-version")
+	if containsEnvironmentPrefix(environment, "GUANLAN_TARGET_VERSION=") {
+		t.Fatalf("controllerUpdateEnvironment() accepted an invalid target version: %v", environment)
+	}
+}
+
+func TestControllerVersionComparison(t *testing.T) {
+	for _, test := range []struct {
+		left  string
+		right string
+		want  bool
+	}{
+		{left: "v1.20.4", right: "v1.20.5", want: true},
+		{left: "1.20.5", right: "v1.20.5", want: false},
+		{left: "v2.0.0", right: "v1.99.99", want: false},
+		{left: "main", right: "v1.20.5", want: false},
+		{left: "v1.20.4-beta.1", right: "v1.20.5", want: false},
+	} {
+		if got := controllerVersionLess(test.left, test.right); got != test.want {
+			t.Fatalf("controllerVersionLess(%q, %q) = %t, want %t", test.left, test.right, got, test.want)
+		}
+	}
+}
+
+func TestLatestReleaseUsesFreshCache(t *testing.T) {
+	now := time.Date(2026, 9, 2, 8, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		t.Errorf("fresh release cache unexpectedly requested %s", request.URL.String())
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	service := &controllerUpdateService{now: func() time.Time { return now }, client: server.Client(), apiBase: server.URL}
+	state := controllerUpdateState{
+		LatestVersion:    "v1.20.5",
+		ReleaseName:      "星辰监控 v1.20.5",
+		ReleaseFetchedAt: now.Add(-5 * time.Minute).Format(time.RFC3339),
+	}
+	release, cached, warning, err := service.latestRelease(context.Background(), state, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached || warning != "" || release.TagName != "v1.20.5" {
+		t.Fatalf("cached release = %+v, cached=%t warning=%q", release, cached, warning)
+	}
+}
+
+func TestLatestReleaseFallsBackToStaleCache(t *testing.T) {
+	now := time.Date(2026, 9, 2, 8, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	service := &controllerUpdateService{now: func() time.Time { return now }, client: server.Client(), apiBase: server.URL}
+	state := controllerUpdateState{
+		LatestVersion:    "v1.20.5",
+		ReleaseName:      "星辰监控 v1.20.5",
+		ReleaseFetchedAt: now.Add(-time.Hour).Format(time.RFC3339),
+	}
+	release, cached, warning, err := service.latestRelease(context.Background(), state, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached || warning == "" || release.TagName != "v1.20.5" {
+		t.Fatalf("stale release fallback = %+v, cached=%t warning=%q", release, cached, warning)
+	}
+}
+
+func TestRefreshReleaseStateMapsTaggedRevisionWithoutDowngrade(t *testing.T) {
+	revision := "5796b4696d138823918e087d68d9096c930cdc5b"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/releases/latest":
+			_ = json.NewEncoder(w).Encode(controllerRelease{TagName: "v1.18.0", Name: "v1.18.0", HTMLURL: "https://github.com/Pstarchen/monitor-for-server/releases/tag/v1.18.0"})
+		case "/tags":
+			tag := controllerRepositoryTag{Name: "v1.20.4"}
+			tag.Commit.SHA = revision
+			_ = json.NewEncoder(w).Encode([]controllerRepositoryTag{tag})
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	controllerInspectionCache.Lock()
+	controllerInspectionCache.at = time.Now()
+	controllerInspectionCache.value = controllerInspection{current: revision, latest: revision, services: []controllerServiceStatus{}}
+	controllerInspectionCache.Unlock()
+	t.Cleanup(invalidateControllerInspectionCache)
+
+	service := &controllerUpdateService{now: time.Now, client: server.Client(), apiBase: server.URL}
+	state := controllerUpdateState{Services: []controllerServiceStatus{}}
+	if err := service.refreshReleaseState(context.Background(), &state, true); err != nil {
+		t.Fatal(err)
+	}
+	if state.CurrentVersion != "v1.20.4" || state.LatestVersion != "v1.18.0" {
+		t.Fatalf("release versions = current %q latest %q", state.CurrentVersion, state.LatestVersion)
+	}
+	if state.UpdateAvailable {
+		t.Fatal("an older GitHub Release was treated as an available update")
+	}
+}
+
+func containsEnvironmentValue(environment []string, expected string) bool {
+	for _, value := range environment {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEnvironmentPrefix(environment []string, prefix string) bool {
+	for _, value := range environment {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestUpdateEnvironmentSettingAddsAndReplacesValue(t *testing.T) {

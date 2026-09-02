@@ -917,6 +917,17 @@ p, h1, h2, h3 { margin: 0; }
 .update-version-list dd { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0; }
 .update-version-list code { overflow: hidden; color: var(--foreground); font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .update-version-list dd span { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.update-release { margin-top: 18px; padding: 13px 14px; border-left: 2px solid var(--border-strong); background: var(--surface-subtle); }
+.update-release header, .update-release header > div, .update-release a { display: flex; align-items: center; }
+.update-release header { justify-content: space-between; gap: 16px; }
+.update-release header > div { min-width: 0; gap: 8px; }
+.update-release header svg { flex: 0 0 auto; }
+.update-release strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.update-release header span { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.update-release a { min-height: 44px; flex: 0 0 auto; gap: 5px; color: var(--foreground); font-size: 10px; text-decoration: none; }
+.update-release a:hover { text-decoration: underline; }
+.update-release p { max-height: 132px; overflow: auto; overflow-wrap: anywhere; margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.65; white-space: pre-wrap; }
+.update-release small { display: block; margin-top: 8px; color: var(--warning); font-size: 9px; }
 .update-auto-row { min-height: 86px; }
 .update-switch { display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--muted); font-size: 10px; }
 .update-switch .el-switch { margin-left: 6px; }
@@ -1522,6 +1533,8 @@ p, h1, h2, h3 { margin: 0; }
   .update-state > i { grid-column: 2; width: fit-content; }
   .update-version-list { grid-template-columns: 1fr; }
   .update-version-list > div + div { border-top: 1px solid var(--border); border-left: 0; }
+  .update-release header { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .update-release header > div { align-items: flex-start; flex-wrap: wrap; }
   .update-time-list { grid-template-columns: 1fr; gap: 10px; }
   .update-time-list > div, .update-time-list > div:first-child { padding: 0; border-left: 0; }
   .update-service-list > div { grid-template-columns: minmax(0, 1fr) auto; padding: 10px 0; }

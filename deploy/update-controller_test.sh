@@ -21,6 +21,10 @@ fi
 if [[ "${1:-}" == "pull" && ( "${2:-}" == ghcr.nju.edu.cn/* || "${2:-}" == ghcr.1ms.run/* ) ]]; then
   exit 1
 fi
+if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
+  printf '%s\n' "${TEST_IMAGE_VERSION:-v1.20.5}"
+  exit 0
+fi
 exit 0
 SCRIPT
 chmod +x "${fake_bin}/docker"
@@ -108,6 +112,23 @@ if grep -q 'remove-orphans' "${log_file}"; then
   echo 'Update runner unexpectedly removed orphan containers.' >&2
   exit 1
 fi
+
+: > "${log_file}"
+GUANLAN_TARGET_VERSION=v1.20.5 TEST_IMAGE_VERSION=v1.20.5 run_update --apply --no-mirror
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.5' "${log_file}" >/dev/null
+grep -F 'docker image inspect --format {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/pstarchen/monitor-for-server-server:v1.20.5' "${log_file}" >/dev/null
+grep -F 'docker tag ghcr.io/pstarchen/monitor-for-server-server:v1.20.5 ghcr.io/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
+
+: > "${log_file}"
+if GUANLAN_TARGET_VERSION=v1.20.5 TEST_IMAGE_VERSION=v1.20.4 run_update --check --no-mirror --no-source-fallback; then
+  echo 'Update accepted an image from a different release.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+GUANLAN_TARGET_VERSION=v1.20.5 TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
+grep -E 'docker build --pull --tag xingchen-controller-source-[^ ]+-0:candidate https://gitee.com/starchen520/monitor-for-server.git#v1.20.5:setup' "${log_file}" >/dev/null
+grep -E 'docker build --pull --tag xingchen-controller-source-[^ ]+-0:candidate https://github.com/Pstarchen/monitor-for-server.git#v1.20.5:setup' "${log_file}" >/dev/null
 
 auto_root="${temp_dir}/auto-project"
 mkdir -p "${auto_root}/deploy"

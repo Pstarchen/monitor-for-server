@@ -1,11 +1,13 @@
 # 总终端服务器搭建材料
 
+第一次部署且不熟悉 Docker、域名或首次向导时，请先按[新手使用指南](user-guide.md)操作。本页用于查阅总控服务器的生产部署和运维边界。
+
 总终端服务器运行 Web 控制台、Spring Boot API、内置 PostgreSQL 和 Redis。被监控服务器只需要运行 Agent，不需要安装 Java、PostgreSQL 或 Node.js。
 
 ## 必备材料
 
 - Docker Engine 24+ 和 Docker Compose v2。
-- 安装器默认先从国内镜像源拉取 `ghcr.io/pstarchen/monitor-for-server-{setup,server,web}:latest`，失败后回退官方 GHCR；镜像仓库均不可用时，依次从 Gitee、GitHub 源码构建 Docker 镜像。需要强制双源构建时使用 `--source-build`，验证当前目录源码时使用 `--build`。
+- 安装器默认先从国内镜像源拉取 `ghcr.io/pstarchen/monitor-for-server-{setup,server,web}:latest`，该标签只在完整版本发布后更新；失败后回退官方 GHCR，镜像仓库均不可用时再依次从 Gitee、GitHub 源码构建。需要强制双源构建时使用 `--source-build`，验证当前目录源码时使用 `--build`。
 - Docker Compose 会自动拉取 PostgreSQL 16 镜像并创建私有数据卷；数据库、用户和密码由控制端安装器自动生成，端口只在 Compose 内网可见。
 - 一个生产域名及 TLS 证书。公网只暴露 Web 入口，PostgreSQL、Redis 和 Spring Boot 端口保持内网。若先用 IP 初始化，必须显式启用临时 HTTP，完成宝塔反向代理和 HTTPS 后立即关闭。
 - 安装服务需要短暂访问宿主机 Docker socket，以便向导完成后自动重建生产容器；不要把安装端口以外的 Docker API 暴露到公网。
@@ -33,7 +35,7 @@ bash ./deploy/install-controller.sh
 2. 设置公网入口、来源、站点名、时区和首个管理员密码。
 3. 提交后页面会自动进入登录页；生产服务就绪前登录按钮会暂时锁定，就绪后即可登录。
 
-管理员可在控制台“系统设置 > 系统更新”中查看当前构建版本、检查并应用更新，也可启用每日 04:00 自动更新。命令行仍可使用 `deploy/update-controller.sh --check` 检查、`--apply` 手动更新、`--auto` 启用同一自动更新设置。更新器先尝试 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 指定的镜像前缀与官方 GHCR，全部失败后从 `GUANLAN_SOURCE_REPOSITORIES` 指定的 Gitee/GitHub 仓库构建 Docker 镜像。
+管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、GitHub Release 发布说明并应用更新，也可启用每日 04:00 自动更新。Release 检查结果缓存 20 分钟，GitHub 临时不可用时会保留上次成功结果。命令行仍可使用 `deploy/update-controller.sh --check` 检查、`--apply` 手动更新、`--auto` 启用同一自动更新设置。更新器先尝试 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 指定的镜像前缀与官方 GHCR，并校验镜像版本标签；全部失败后从 `GUANLAN_SOURCE_REPOSITORIES` 指定的 Gitee/GitHub 仓库按目标版本标签构建。
 
 如果暂时没有域名，可以先用 `http://<服务器IP>:18080`；HTTPS 和宝塔反代配置完成后，再在系统设置中切换为正式域名。
 
@@ -76,6 +78,8 @@ TLS 在 Caddy、Nginx、Traefik、宝塔或云负载均衡器终止，并转发�
 2. 拉取新版本时执行 `bash ./deploy/update-controller.sh --apply`，会按镜像代理、GHCR、Gitee 源码、GitHub 源码顺序回退；可用 `--source-build` 强制双源构建，或用 `--build` 构建当前目录源码。
 3. 执行 `docker compose --profile host-monitoring up -d`，Flyway 会自动运行数据库迁移。
 4. 在“系统设置”修改站点名、入口 URL、采集周期、离线阈值和通知配置；敏感值会加密存储。
+
+更新失败不会删除数据卷，也不会自动启动旧版本镜像。原因是新版本 `server` 可能已经执行前向 Flyway 迁移，直接切回旧应用并不等于回滚数据库，反而可能扩大故障。需要降级时应先确认目标版本的数据库兼容性，并使用升级前备份恢复 PostgreSQL。
 
 ```powershell
 docker compose exec -T postgres pg_dump -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2)" "$(grep '^POSTGRES_DB=' .env | cut -d= -f2)" > monitor-backup.sql

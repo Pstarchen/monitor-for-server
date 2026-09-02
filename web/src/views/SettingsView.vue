@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Activity, CheckCircle2, ChevronRight, Copy, Database, Globe2, KeyRound, LockKeyhole,
-  Clock3, Download, GitCommit, ImageOff, Mail, MessageSquareText, RefreshCw, RotateCcw,
+  Activity, CheckCircle2, ChevronRight, Copy, Database, ExternalLink, Globe2, KeyRound, LockKeyhole,
+  Clock3, Download, GitCommit, ImageOff, Mail, MessageSquareText, RefreshCw, RotateCcw, Tag,
   Plus, Save, Send, ServerCog, Settings2, ShieldCheck, Smartphone, Trash2, Upload,
 } from 'lucide-vue-next'
 import PageHeader from '@/components/PageHeader.vue'
@@ -89,6 +89,16 @@ const siteIconInput = ref<HTMLInputElement | null>(null)
 const error = ref('')
 const testing = reactive<Record<ChannelKey, boolean>>({ email: false, dingtalk: false, wecom: false, generic: false })
 const controllerUpdate = ref<ControllerUpdateStatus | null>(null)
+const controllerReleaseUrl = computed(() => {
+  const value = controllerUpdate.value?.releaseUrl?.trim()
+  if (!value) return ''
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'github.com' ? url.toString() : ''
+  } catch {
+    return ''
+  }
+})
 const updateLoading = ref(false)
 const updateAction = ref<'check' | 'apply' | 'auto' | ''>('')
 const updateError = ref('')
@@ -823,14 +833,23 @@ onBeforeUnmount(() => {
 
                 <dl class="update-version-list">
                   <div>
-                    <dt><GitCommit :size="15" />当前构建版本</dt>
-                    <dd><code :title="controllerUpdate.currentRevision">{{ shortRevision(controllerUpdate.currentRevision) }}</code><span>正在运行</span></dd>
+                    <dt><GitCommit :size="15" />当前版本</dt>
+                    <dd><code :title="controllerUpdate.currentVersion || controllerUpdate.currentRevision">{{ controllerUpdate.currentVersion || shortRevision(controllerUpdate.currentRevision) }}</code><span>{{ controllerUpdate.currentVersion ? `提交 ${shortRevision(controllerUpdate.currentRevision)}` : '正在运行' }}</span></dd>
                   </div>
                   <div>
-                    <dt><Download :size="15" />最新构建版本</dt>
-                    <dd><code :title="controllerUpdate.latestRevision">{{ shortRevision(controllerUpdate.latestRevision) }}</code><span>{{ controllerUpdate.checkedAt ? '最近检查结果' : '检查后显示' }}</span></dd>
+                    <dt><Download :size="15" />最新稳定版本</dt>
+                    <dd><code :title="controllerUpdate.latestVersion || controllerUpdate.latestRevision">{{ controllerUpdate.latestVersion || shortRevision(controllerUpdate.latestRevision) }}</code><span>{{ controllerUpdate.releaseCached ? '缓存结果' : (controllerUpdate.checkedAt ? 'GitHub Release' : '检查后显示') }}</span></dd>
                   </div>
                 </dl>
+
+                <section v-if="controllerUpdate.releaseName || controllerUpdate.releaseNotes || controllerUpdate.releaseWarning" class="update-release" aria-labelledby="update-release-title">
+                  <header>
+                    <div><Tag :size="15" /><strong id="update-release-title">{{ controllerUpdate.releaseName || controllerUpdate.latestVersion }}</strong><span v-if="controllerUpdate.releasePublishedAt">{{ formatUpdateTime(controllerUpdate.releasePublishedAt) }}</span></div>
+                    <a v-if="controllerReleaseUrl" :href="controllerReleaseUrl" target="_blank" rel="noopener noreferrer">查看发布页<ExternalLink :size="13" /></a>
+                  </header>
+                  <p v-if="controllerUpdate.releaseNotes" tabindex="0">{{ controllerUpdate.releaseNotes }}</p>
+                  <small v-if="controllerUpdate.releaseWarning">{{ controllerUpdate.releaseWarning }}</small>
+                </section>
 
                 <div class="setting-list">
                   <div class="setting-row update-auto-row">
@@ -850,7 +869,7 @@ onBeforeUnmount(() => {
                   <div v-if="controllerUpdate.services.length" class="update-service-list">
                     <div v-for="service in controllerUpdate.services" :key="service.name">
                       <span><i :data-health="service.health" />{{ serviceName(service.name) }}</span>
-                      <code :title="service.revision">{{ shortRevision(service.revision) }}</code>
+                      <code :title="service.version || service.revision">{{ service.version || shortRevision(service.revision) }}</code>
                       <small>{{ healthText(service.health) }}</small>
                     </div>
                   </div>

@@ -82,7 +82,15 @@ try {
         'GUANLAN_WEB_IMAGE=ghcr.io/pstarchen/monitor-for-server-web:latest'
     )
     $sourceContexts = @('setup', 'server', 'web')
-    $sourceRef = Read-UpdateSetting 'GUANLAN_SOURCE_REF' 'main'
+    $targetVersion = Read-UpdateSetting 'GUANLAN_TARGET_VERSION'
+    if ($targetVersion) {
+        if ($targetVersion -notmatch '^v?(\d+)\.(\d+)\.(\d+)$') { throw 'GUANLAN_TARGET_VERSION 必须是稳定语义版本，例如 v1.20.5。' }
+        $targetVersion = "v$($Matches[1]).$($Matches[2]).$($Matches[3])"
+        $sourceRef = $targetVersion
+    }
+    else {
+        $sourceRef = Read-UpdateSetting 'GUANLAN_SOURCE_REF' 'main'
+    }
     if ($sourceRef -notmatch '^[a-zA-Z0-9._/-]+$' -or $sourceRef.StartsWith('-') -or $sourceRef.Contains('..')) {
         throw '总控源码 Git ref 无效。'
     }
@@ -105,22 +113,39 @@ try {
         return $process.ExitCode -eq 0
     }
 
+    function Test-ImageVersion([string] $Image) {
+        if (-not $targetVersion) { return $true }
+        $actual = ([string](& docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' $Image 2>$null | Select-Object -First 1)).Trim()
+        if ($LASTEXITCODE -eq 0 -and $actual.TrimStart('v') -eq $targetVersion.TrimStart('v')) { return $true }
+        Write-Warning "镜像版本不匹配：$Image 标记为 $(if ($actual) { $actual } else { 'unknown' })，期望 $targetVersion。"
+        return $false
+    }
+
     function Pull-Image([string] $Image) {
-        if (-not $NoMirror -and $Image.StartsWith('ghcr.io/')) {
-            $suffix = $Image.Substring(7)
+        $sourceImage = $Image
+        if ($targetVersion -and $Image -match '^ghcr\.io/pstarchen/monitor-for-server-(setup|server|web|agent):latest$') {
+            $sourceImage = $Image.Substring(0, $Image.Length - ':latest'.Length) + ":$targetVersion"
+        }
+        if (-not $NoMirror -and $sourceImage.StartsWith('ghcr.io/')) {
+            $suffix = $sourceImage.Substring(7)
             $mirrorValue = Read-UpdateSetting 'GUANLAN_CONTROLLER_IMAGE_MIRRORS'
             $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @('ghcr.1ms.run', 'ghcr.nju.edu.cn') }
             foreach ($mirror in $mirrors) {
                 $candidate = $mirror.TrimEnd('/') + '/' + $suffix
                 Write-Host "尝试国内镜像源：$candidate"
-                if (Invoke-DockerPull $candidate $mirrorTimeoutSeconds) {
+                if ((Invoke-DockerPull $candidate $mirrorTimeoutSeconds) -and (Test-ImageVersion $candidate)) {
                     & docker tag $candidate $Image
                     if ($LASTEXITCODE -eq 0) { return }
                 }
             }
         }
-        Write-Host "尝试官方镜像源：$Image"
-        if (-not (Invoke-DockerPull $Image $pullTimeoutSeconds)) { throw "镜像拉取失败：$Image" }
+        Write-Host "尝试官方镜像源：$sourceImage"
+        if (-not (Invoke-DockerPull $sourceImage $pullTimeoutSeconds)) { throw "镜像拉取失败：$sourceImage" }
+        if (-not (Test-ImageVersion $sourceImage)) { throw "镜像版本校验失败：$sourceImage" }
+        if ($sourceImage -ne $Image) {
+            & docker tag $sourceImage $Image
+            if ($LASTEXITCODE -ne 0) { throw "镜像标签写入失败：$Image" }
+        }
     }
 
     function Remove-SourceBuildImages([string[]] $Images) {

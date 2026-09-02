@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.20.5
+
+- 总控更新改为以 GitHub Release 的稳定语义版本为入口；只有 setup、server、web 和 Agent 同版本镜像全部就绪后才推进 `latest` 并创建 Release。
+- 控制台系统更新页显示当前/最新版本、Release 说明和缓存状态；更新器按不可变版本镜像校验 OCI 版本标签，并保留镜像代理、GHCR、Gitee/GitHub 源码回退。
+- 新增面向小白的完整使用指南，覆盖安装、首次 `/setup`、Agent 接入、告警、通知、备份、更新、排错和安全边界。
+
 ## v1.20.4
 
 - 新增独立的华为 Push Kit V3 管理功能，面向 HarmonyOS NEXT / 5.x+；服务账号配置持久化到数据库，PKCS#8 私钥使用 AES-256-GCM 加密保存且不会回显。

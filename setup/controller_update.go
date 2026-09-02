@@ -21,13 +21,13 @@ const controllerUpdateRunnerName = "guanlan-controller-update-run"
 const controllerUpdateRunnerProjectSuffix = "-update-runner"
 
 const (
-	controllerUpdateCheckTimeout       = 3 * time.Hour
+	controllerUpdateCheckTimeout       = controllerReleaseCheckTimeout
 	controllerUpdateApplyTimeout       = 4 * time.Hour
 	controllerUpdateRunnerStartTimeout = 30 * time.Second
 	controllerUpdateRunnerGracePeriod  = 2 * time.Minute
 	controllerUpdateInspectTimeout     = 2 * time.Second
 	controllerUpdateInspectionCache    = 2 * time.Second
-	controllerUpdateCheckStaleAfter    = 3*time.Hour + 15*time.Minute
+	controllerUpdateCheckStaleAfter    = controllerUpdateCheckTimeout + 2*time.Minute
 	controllerUpdateApplyStaleAfter    = 4*time.Hour + 15*time.Minute
 )
 
@@ -36,26 +36,39 @@ type controllerUpdateService struct {
 	running bool
 	token   string
 	now     func() time.Time
+	client  *http.Client
+	apiBase string
 }
 
 type controllerUpdateState struct {
-	State            string                    `json:"state"`
-	CurrentRevision  string                    `json:"currentRevision,omitempty"`
-	LatestRevision   string                    `json:"latestRevision,omitempty"`
-	UpdateAvailable  bool                      `json:"updateAvailable"`
-	Message          string                    `json:"message,omitempty"`
-	CheckedAt        string                    `json:"checkedAt,omitempty"`
-	UpdatedAt        string                    `json:"updatedAt,omitempty"`
-	StartedAt        string                    `json:"startedAt,omitempty"`
-	AutoUpdate       bool                      `json:"autoUpdate"`
-	NextAutoUpdateAt string                    `json:"nextAutoUpdateAt,omitempty"`
-	LastAutoRunDate  string                    `json:"lastAutoRunDate,omitempty"`
-	Services         []controllerServiceStatus `json:"services"`
+	State              string                    `json:"state"`
+	CurrentRevision    string                    `json:"currentRevision,omitempty"`
+	LatestRevision     string                    `json:"latestRevision,omitempty"`
+	CurrentVersion     string                    `json:"currentVersion,omitempty"`
+	VersionRevision    string                    `json:"versionRevision,omitempty"`
+	LatestVersion      string                    `json:"latestVersion,omitempty"`
+	UpdateAvailable    bool                      `json:"updateAvailable"`
+	Message            string                    `json:"message,omitempty"`
+	ReleaseName        string                    `json:"releaseName,omitempty"`
+	ReleaseNotes       string                    `json:"releaseNotes,omitempty"`
+	ReleaseURL         string                    `json:"releaseUrl,omitempty"`
+	ReleasePublishedAt string                    `json:"releasePublishedAt,omitempty"`
+	ReleaseFetchedAt   string                    `json:"releaseFetchedAt,omitempty"`
+	ReleaseCached      bool                      `json:"releaseCached,omitempty"`
+	ReleaseWarning     string                    `json:"releaseWarning,omitempty"`
+	CheckedAt          string                    `json:"checkedAt,omitempty"`
+	UpdatedAt          string                    `json:"updatedAt,omitempty"`
+	StartedAt          string                    `json:"startedAt,omitempty"`
+	AutoUpdate         bool                      `json:"autoUpdate"`
+	NextAutoUpdateAt   string                    `json:"nextAutoUpdateAt,omitempty"`
+	LastAutoRunDate    string                    `json:"lastAutoRunDate,omitempty"`
+	Services           []controllerServiceStatus `json:"services"`
 }
 
 type controllerInspection struct {
 	current  string
 	latest   string
+	version  string
 	services []controllerServiceStatus
 }
 
@@ -68,6 +81,7 @@ var controllerInspectionCache struct {
 type controllerServiceStatus struct {
 	Name     string `json:"name"`
 	Revision string `json:"revision,omitempty"`
+	Version  string `json:"version,omitempty"`
 	Health   string `json:"health"`
 }
 
@@ -89,8 +103,10 @@ var controllerImages = []controllerImage{
 
 func newControllerUpdateService() *controllerUpdateService {
 	return &controllerUpdateService{
-		token: strings.TrimSpace(os.Getenv("CONTROLLER_UPDATE_TOKEN")),
-		now:   time.Now,
+		token:   strings.TrimSpace(os.Getenv("CONTROLLER_UPDATE_TOKEN")),
+		now:     time.Now,
+		client:  &http.Client{Timeout: controllerReleaseCheckTimeout},
+		apiBase: controllerGitHubAPIBase,
 	}
 }
 
@@ -132,7 +148,7 @@ func (s *controllerUpdateService) check(w http.ResponseWriter, r *http.Request) 
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
-	if err := s.begin("CHECKING", "正在从镜像源检查总控更新"); err != nil {
+	if err := s.begin("CHECKING", "正在从发布源检查总控更新"); err != nil {
 		if errors.Is(err, errUpdateRunning) {
 			writeError(w, http.StatusConflict, err.Error())
 		} else {
@@ -215,23 +231,26 @@ func (s *controllerUpdateService) runCheck() {
 	defer s.finish()
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateCheckTimeout)
 	defer cancel()
-	command := updateControllerCommand(ctx, "--check")
-	command.Env = controllerUpdateEnvironment()
-	output, err := command.CombinedOutput()
 	state := s.readState()
-	state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
-	if err != nil {
-		log.Printf("controller update check failed: %v (%d bytes)", err, len(output))
+	if err := s.refreshReleaseState(ctx, &state, false); err != nil {
+		log.Printf("controller release check failed: %v", err)
 		state.State = "ERROR"
 		state.StartedAt = ""
-		state.Message = "检查更新失败，请检查镜像源与 Docker 状态"
+		state.Message = "检查更新失败，请检查 GitHub 连接状态"
 	} else {
 		state.State = "IDLE"
 		state.StartedAt = ""
-		invalidateControllerInspectionCache()
-		s.decorate(&state)
-		state.Message = map[bool]string{true: "发现可用的总控更新", false: "当前已经是最新版本"}[state.UpdateAvailable]
+		if state.CurrentVersion == "" {
+			state.Message = "已获取最新发布，但无法识别当前运行版本"
+		} else if state.ReleaseWarning != "" {
+			state.Message = "发布源暂时不可用，已使用上次检查结果"
+		} else if controllerVersionLess(state.LatestVersion, state.CurrentVersion) {
+			state.Message = "当前运行版本高于最新公开 Release"
+		} else {
+			state.Message = map[bool]string{true: "发现可用的总控更新", false: "当前已经是最新版本"}[state.UpdateAvailable]
+		}
 	}
+	state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
 	if err := writeControllerUpdateState(state); err != nil {
 		log.Printf("controller update state write failed: %v", err)
 	}
@@ -311,14 +330,39 @@ func (s *controllerUpdateService) waitForUpdateRunner() bool {
 func (s *controllerUpdateService) runUpdate() error {
 	state := s.readState()
 	state.State = "UPDATING"
-	state.Message = "正在拉取镜像并重启总控服务"
-	s.decorate(&state)
+	state.Message = "正在确认目标版本"
+	checkContext, cancelCheck := context.WithTimeout(context.Background(), controllerReleaseCheckTimeout)
+	if err := s.refreshReleaseState(checkContext, &state, false); err != nil {
+		cancelCheck()
+		state.State = "ERROR"
+		state.StartedAt = ""
+		state.Message = "无法确认最新稳定版本，更新未执行"
+		_ = writeControllerUpdateState(state)
+		return errors.New(state.Message)
+	}
+	cancelCheck()
+	if state.CurrentVersion == "" {
+		state.State = "ERROR"
+		state.StartedAt = ""
+		state.Message = "无法识别当前运行版本，更新未执行"
+		_ = writeControllerUpdateState(state)
+		return errors.New(state.Message)
+	}
+	if state.CurrentVersion != "" && state.LatestVersion != "" && !state.UpdateAvailable {
+		state.State = "IDLE"
+		state.StartedAt = ""
+		state.Message = "当前已经是最新版本"
+		state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
+		return writeControllerUpdateState(state)
+	}
+	targetVersion := state.LatestVersion
+	state.Message = "正在拉取 " + targetVersion + " 镜像并重启总控服务"
 	_ = writeControllerUpdateState(state)
 
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateApplyTimeout)
 	defer cancel()
 	command := updateControllerCommand(ctx, "--apply")
-	command.Env = controllerUpdateEnvironment()
+	command.Env = controllerUpdateEnvironment(targetVersion)
 	output, err := command.CombinedOutput()
 	state = s.readState()
 	if err != nil {
@@ -336,6 +380,10 @@ func (s *controllerUpdateService) runUpdate() error {
 	state.CheckedAt = state.UpdatedAt
 	invalidateControllerInspectionCache()
 	s.decorate(&state)
+	if state.CurrentVersion == "" {
+		state.CurrentVersion = targetVersion
+		state.VersionRevision = state.CurrentRevision
+	}
 	state.LatestRevision = state.CurrentRevision
 	state.UpdateAvailable = false
 	return writeControllerUpdateState(state)
@@ -429,11 +477,22 @@ func (s *controllerUpdateService) currentTime() time.Time {
 func (s *controllerUpdateService) decorate(state *controllerUpdateState) {
 	state.AutoUpdate = strings.EqualFold(configuredEnvironmentValue("CONTROLLER_AUTO_UPDATE"), "true")
 	state.NextAutoUpdateAt = s.nextAutoUpdate().UTC().Format(time.RFC3339)
-	current, latest, services := inspectControllerImages()
+	current, latest, currentVersion, services := inspectControllerImages()
 	state.CurrentRevision = current
 	state.LatestRevision = latest
+	if currentVersion != "" {
+		state.CurrentVersion = currentVersion
+		state.VersionRevision = current
+	} else if state.VersionRevision != "" && state.VersionRevision != current {
+		state.CurrentVersion = ""
+		state.VersionRevision = ""
+	}
 	state.Services = services
-	state.UpdateAvailable = current != "" && latest != "" && current != latest
+	if state.LatestVersion != "" {
+		state.UpdateAvailable = controllerVersionLess(state.CurrentVersion, state.LatestVersion)
+	} else {
+		state.UpdateAvailable = current != "" && latest != "" && current != latest
+	}
 }
 
 func (s *controllerUpdateService) readState() controllerUpdateState {
@@ -472,12 +531,12 @@ func writeControllerUpdateState(state controllerUpdateState) error {
 	return os.Rename(temporaryName, controllerUpdateStatePath)
 }
 
-func inspectControllerImages() (string, string, []controllerServiceStatus) {
+func inspectControllerImages() (string, string, string, []controllerServiceStatus) {
 	controllerInspectionCache.Lock()
 	if !controllerInspectionCache.at.IsZero() && time.Since(controllerInspectionCache.at) < controllerUpdateInspectionCache {
 		value := controllerInspectionCache.value
 		controllerInspectionCache.Unlock()
-		return value.current, value.latest, append([]controllerServiceStatus(nil), value.services...)
+		return value.current, value.latest, value.version, append([]controllerServiceStatus(nil), value.services...)
 	}
 	controllerInspectionCache.Unlock()
 
@@ -487,6 +546,7 @@ func inspectControllerImages() (string, string, []controllerServiceStatus) {
 		status  controllerServiceStatus
 		current string
 		latest  string
+		version string
 	}, len(controllerImages))
 	var wait sync.WaitGroup
 	for index, image := range controllerImages {
@@ -496,9 +556,10 @@ func inspectControllerImages() (string, string, []controllerServiceStatus) {
 			composeArgs := append(composeBaseArgs(), "ps", "-q", image.service)
 			containerID := commandOutput("docker", composeArgs...)
 			current := ""
+			version := ""
 			health := "not_found"
 			if containerID != "" {
-				current = inspectReference(containerID, false)
+				current, version = inspectReferenceMetadata(containerID, false)
 				health = commandOutput("docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", containerID)
 			}
 			imageReference := strings.TrimSpace(os.Getenv(image.environment))
@@ -512,12 +573,14 @@ func inspectControllerImages() (string, string, []controllerServiceStatus) {
 				status  controllerServiceStatus
 				current string
 				latest  string
-			}{controllerServiceStatus{Name: image.service, Revision: current, Health: health}, current, inspectReference(imageReference, true)}
+				version string
+			}{controllerServiceStatus{Name: image.service, Revision: current, Version: version, Health: health}, current, inspectReference(imageReference, true), version}
 		}(index, image)
 	}
 	wait.Wait()
 	currentRevision := ""
 	latestRevision := ""
+	currentVersion := ""
 	for _, result := range results {
 		statuses = append(statuses, result.status)
 		if result.status.Name == "server" || currentRevision == "" {
@@ -526,13 +589,16 @@ func inspectControllerImages() (string, string, []controllerServiceStatus) {
 		if result.status.Name == "server" || latestRevision == "" {
 			latestRevision = result.latest
 		}
+		if result.status.Name == "server" || currentVersion == "" {
+			currentVersion = normalizeControllerVersion(result.version)
+		}
 	}
-	value := controllerInspection{current: currentRevision, latest: latestRevision, services: append([]controllerServiceStatus(nil), statuses...)}
+	value := controllerInspection{current: currentRevision, latest: latestRevision, version: currentVersion, services: append([]controllerServiceStatus(nil), statuses...)}
 	controllerInspectionCache.Lock()
 	controllerInspectionCache.at = time.Now()
 	controllerInspectionCache.value = value
 	controllerInspectionCache.Unlock()
-	return currentRevision, latestRevision, statuses
+	return currentRevision, latestRevision, currentVersion, statuses
 }
 
 func invalidateControllerInspectionCache() {
@@ -542,24 +608,33 @@ func invalidateControllerInspectionCache() {
 }
 
 func inspectReference(reference string, image bool) string {
+	revision, _ := inspectReferenceMetadata(reference, image)
+	return revision
+}
+
+func inspectReferenceMetadata(reference string, image bool) (string, string) {
 	fallback := ".Image"
 	if image {
 		fallback = ".Id"
 	}
-	format := fmt.Sprintf(`{{index .Config.Labels "org.opencontainers.image.revision"}}|{{%s}}`, fallback)
+	format := fmt.Sprintf(`{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "org.opencontainers.image.version"}}|{{%s}}`, fallback)
 	args := []string{"inspect", "--format", format, reference}
 	if image {
 		args = append([]string{"image"}, args...)
 	}
 	value := commandOutput("docker", args...)
-	parts := strings.SplitN(value, "|", 2)
+	parts := strings.SplitN(value, "|", 3)
+	version := ""
+	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "<no value>" {
+		version = strings.TrimSpace(parts[1])
+	}
 	if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[0]) != "<no value>" {
-		return strings.TrimSpace(parts[0])
+		return strings.TrimSpace(parts[0]), version
 	}
-	if len(parts) == 2 {
-		return strings.TrimPrefix(strings.TrimSpace(parts[1]), "sha256:")
+	if len(parts) == 3 {
+		return strings.TrimPrefix(strings.TrimSpace(parts[2]), "sha256:"), version
 	}
-	return ""
+	return "", version
 }
 
 func commandOutput(name string, args ...string) string {
@@ -602,11 +677,17 @@ func composeBaseArgs() []string {
 	return []string{"compose", "-f", filepath.Join(workspace, "docker-compose.yml"), "--project-directory", hostWorkspace, "--env-file", envPath}
 }
 
-func controllerUpdateEnvironment() []string {
-	return append(os.Environ(),
+func controllerUpdateEnvironment(targetVersion ...string) []string {
+	environment := append(os.Environ(),
 		"COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"),
 		"GUANLAN_HOST_PROJECT_ROOT="+hostWorkspace,
 	)
+	if len(targetVersion) > 0 {
+		if normalized := normalizeControllerVersion(targetVersion[0]); normalized != "" {
+			environment = append(environment, "GUANLAN_TARGET_VERSION="+normalized)
+		}
+	}
+	return environment
 }
 
 func updateEnvironmentSetting(key, value string) error {

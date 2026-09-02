@@ -1,6 +1,6 @@
 # 部署与运维
 
-材料已按角色拆分：先阅读[总终端服务器搭建材料](controller-server.md)，再阅读[受监控服务器搭建材料](monitored-agent.md)。本页保留完整的运维参考和故障排查。
+第一次部署请先阅读[新手使用指南](user-guide.md)，其中包含逐步安装、首次配置、控制台使用、备份更新和按症状排错。材料也已按角色拆分：总控管理员可阅读[总终端服务器搭建材料](controller-server.md)，接入服务器时阅读[受监控服务器搭建材料](monitored-agent.md)。本页保留完整的运维参考和高级参数。
 
 ## 前置条件
 
@@ -84,7 +84,9 @@ sudo bash ./deploy/update-controller.sh --auto
 
 更新器默认给予单个国内镜像代理 45 秒快速失败时间，官方 GHCR 单个镜像最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS`、`GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；外层任务上限覆盖完整回退链，不会在单个来源仍正常工作时提前标记中断。更新失败不会删除数据库卷。
 
-更新器默认依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR；这些 OCI 镜像源全部失败后，再依次使用 Gitee、GitHub Git 仓库作为 Docker 远程构建上下文。Gitee Git 仓库本身不是 OCI 镜像仓库。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 配置镜像前缀，通过 `GUANLAN_SOURCE_REPOSITORIES` 配置逗号分隔的源码仓库，通过 `GUANLAN_SOURCE_REF` 固定分支或标签。`--source-build` 会直接走双源码构建，`--no-source-fallback` 会在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
+稳定发布以 `vX.Y.Z` GitHub Release 为入口。CI 先构建同一版本的 setup、server、web 和 Agent 镜像，全部成功后才把版本镜像提升为 `latest`，最后发布 Release；主分支提交只保留 `sha-*` 镜像，不再推进稳定更新通道。控制台缓存 Release 检查结果 20 分钟，并显示发布说明。
+
+更新器默认依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR；控制台发起更新时会直接拉取不可变的 `vX.Y.Z` 镜像并校验 OCI 版本标签，避免镜像代理缓存的旧 `latest` 混入同一次升级。这些 OCI 镜像源全部失败后，再依次使用 Gitee、GitHub Git 仓库的目标版本标签作为 Docker 远程构建上下文。Gitee Git 仓库本身不是 OCI 镜像仓库。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 配置镜像前缀，通过 `GUANLAN_SOURCE_REPOSITORIES` 配置逗号分隔的源码仓库，通过 `GUANLAN_SOURCE_REF` 固定普通命令行构建的分支或标签。`--source-build` 会直接走双源码构建，`--no-source-fallback` 会在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
 
 ### 数据库备份与恢复
 
@@ -98,6 +100,8 @@ CONTROLLER_BACKUP_RETENTION=7
 ```
 
 自动任务按 `APP_TIMEZONE` 每天 03:00 执行。备份文件和 `.env` 含有数据库及站点机密，必须限制项目目录访问并纳入离线备份策略。
+
+更新器不会在健康检查失败后自动切回旧镜像。Flyway 迁移是前向执行的，旧应用镜像不一定兼容已经升级的数据库结构；生产降级必须先确认版本兼容性，必要时同时恢复升级前的 PostgreSQL 备份和对应版本镜像。
 
 升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `GUANLAN_SETUP_IMAGE`、`GUANLAN_SERVER_IMAGE`、`GUANLAN_WEB_IMAGE` 和 `GUANLAN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
 

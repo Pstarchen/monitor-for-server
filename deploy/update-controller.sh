@@ -87,8 +87,19 @@ if command -v flock >/dev/null 2>&1; then
   fi
 fi
 
-source_ref="${GUANLAN_SOURCE_REF:-$(read_env_value GUANLAN_SOURCE_REF)}"
-source_ref="${source_ref:-main}"
+target_version="${GUANLAN_TARGET_VERSION:-$(read_env_value GUANLAN_TARGET_VERSION)}"
+if [[ -n "${target_version}" ]]; then
+  if [[ "${target_version}" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    target_version="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+  else
+    echo "GUANLAN_TARGET_VERSION 必须是稳定语义版本，例如 v1.20.5。" >&2
+    exit 2
+  fi
+  source_ref="${target_version}"
+else
+  source_ref="${GUANLAN_SOURCE_REF:-$(read_env_value GUANLAN_SOURCE_REF)}"
+  source_ref="${source_ref:-main}"
+fi
 source_build_timeout_seconds="${GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS)}"
 source_build_timeout_seconds="${source_build_timeout_seconds:-1200}"
 source_repository_list="${GUANLAN_SOURCE_REPOSITORIES:-$(read_env_value GUANLAN_SOURCE_REPOSITORIES)}"
@@ -143,9 +154,29 @@ if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; 
   source_images+=("$(image_value GUANLAN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:latest)")
 fi
 
-pull_one() {
+verify_image_version() {
+  local image="$1" actual
+  [[ -z "${target_version}" ]] && return 0
+  actual="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "${image}" 2>/dev/null || true)"
+  if [[ "${actual#v}" != "${target_version#v}" ]]; then
+    echo "镜像版本不匹配：${image} 标记为 ${actual:-unknown}，期望 ${target_version}。" >&2
+    return 1
+  fi
+}
+
+pull_reference() {
   local image="$1"
+  if [[ -n "${target_version}" && "${image}" =~ ^ghcr\.io/pstarchen/monitor-for-server-(setup|server|web|agent):latest$ ]]; then
+    printf '%s:%s' "${image%:latest}" "${target_version}"
+    return
+  fi
+  printf '%s' "${image}"
+}
+
+pull_one() {
+  local destination="$1" image
   local suffix prefix candidate
+  image="$(pull_reference "${destination}")"
   if [[ "${use_mirror}" == true && "${image}" == ghcr.io/* ]]; then
     suffix="${image#ghcr.io/}"
     local mirror_list="${GUANLAN_CONTROLLER_IMAGE_MIRRORS:-}"
@@ -158,13 +189,18 @@ pull_one() {
       [[ -z "${prefix}" ]] && continue
       candidate="${prefix}/${suffix}"
       echo "尝试国内镜像源：${candidate}"
-      if run_with_timeout "${mirror_timeout_seconds}" docker pull "${candidate}" >/dev/null && run_with_timeout "${mirror_timeout_seconds}" docker tag "${candidate}" "${image}"; then
+      if run_with_timeout "${mirror_timeout_seconds}" docker pull "${candidate}" >/dev/null && verify_image_version "${candidate}" && run_with_timeout "${mirror_timeout_seconds}" docker tag "${candidate}" "${destination}"; then
         return 0
       fi
     done
   fi
   echo "尝试官方镜像源：${image}"
-  run_with_timeout "${pull_timeout_seconds}" docker pull "${image}"
+  if ! run_with_timeout "${pull_timeout_seconds}" docker pull "${image}" || ! verify_image_version "${image}"; then
+    return 1
+  fi
+  if [[ "${image}" != "${destination}" ]]; then
+    run_with_timeout "${pull_timeout_seconds}" docker tag "${image}" "${destination}"
+  fi
 }
 
 pull_images() {
