@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# XINGCHEN_* is the public configuration namespace. Read the old namespace
-# once for compatibility with existing .env files and command invocations.
-for suffix in UPDATE_PULL_TIMEOUT_SECONDS UPDATE_MIRROR_TIMEOUT_SECONDS UPDATE_COMPOSE_TIMEOUT_SECONDS TARGET_VERSION SOURCE_REF SOURCE_BUILD_TIMEOUT_SECONDS SOURCE_REPOSITORIES HOST_PROJECT_ROOT SETUP_IMAGE SERVER_IMAGE WEB_IMAGE AGENT_IMAGE CONTROLLER_IMAGE_MIRRORS; do
-  primary="XINGCHEN_${suffix}"
-  legacy="GUANLAN_${suffix}"
-  if [[ -z "${!primary:-}" && -n "${!legacy:-}" ]]; then
-    export "${primary}=${!legacy}"
-  fi
-done
-
 usage() {
   cat <<'USAGE'
 Usage: update-controller.sh [--check|--apply|--auto] [--build|--source-build] [--no-mirror] [--no-source-fallback]
@@ -49,16 +39,9 @@ project_root="$(cd -- "${script_dir}/.." && pwd)"
 cd "${project_root}"
 
 read_env_value() {
-  local key="$1" value legacy
+  local key="$1" value
   value="$(awk -v key="${key}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true)"
-  if [[ -n "${value}" ]]; then
-    printf '%s' "${value}"
-    return
-  fi
-  if [[ "${key}" == XINGCHEN_* ]]; then
-    legacy="GUANLAN_${key#XINGCHEN_}"
-    awk -v key="${legacy}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true
-  fi
+  printf '%s' "${value}"
 }
 
 # Registry downloads can legitimately take several minutes on a constrained link.
@@ -289,7 +272,9 @@ set_env_value() {
 }
 
 ensure_compose_project_name() {
-  [[ -f "${project_root}/.env" ]] || return
+  if [[ ! -f "${project_root}/.env" ]]; then
+    return 0
+  fi
   local configured database
   configured="$(read_env_value COMPOSE_PROJECT_NAME)"
   [[ -n "${configured}" ]] && return

@@ -694,11 +694,6 @@ func environmentValueFromMap(values map[string]string, name, fallback string) st
 	if value := strings.TrimSpace(values[name]); value != "" {
 		return value
 	}
-	if strings.HasPrefix(name, "XINGCHEN_") {
-		if value := strings.TrimSpace(values["GUANLAN_"+strings.TrimPrefix(name, "XINGCHEN_")]); value != "" {
-			return value
-		}
-	}
 	return fallback
 }
 

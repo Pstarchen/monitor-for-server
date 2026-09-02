@@ -53,7 +53,6 @@ if ((Get-Service -Name $serviceName -ErrorAction SilentlyContinue) -eq $null -an
     $binaryName = 'guanlan-agent.exe'
 }
 $agentKey = $env:XINGCHEN_AGENT_KEY
-if ([string]::IsNullOrWhiteSpace($agentKey)) { $agentKey = $env:GUANLAN_AGENT_KEY }
 
 if ($Action -eq 'install' -and ([string]::IsNullOrWhiteSpace($ServerUrl) -or [string]::IsNullOrWhiteSpace($DeviceId) -or [string]::IsNullOrWhiteSpace($agentKey))) {
     throw '安装 Agent 需要 ServerUrl、DeviceId 和 XINGCHEN_AGENT_KEY。'
@@ -361,7 +360,6 @@ try {
 }
 finally {
     Remove-Item Env:XINGCHEN_AGENT_KEY -ErrorAction SilentlyContinue
-    Remove-Item Env:GUANLAN_AGENT_KEY -ErrorAction SilentlyContinue
     if ($temporaryBinary -and (Test-Path -LiteralPath $temporaryBinary)) {
         Remove-Item -LiteralPath $temporaryBinary -Force
     }

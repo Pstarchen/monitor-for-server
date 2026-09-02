@@ -86,7 +86,7 @@ type CustomMetric struct {
 
 func Load(args []string) (Config, error) {
 	flags := flag.NewFlagSet("xingchen-agent", flag.ContinueOnError)
-	configPath := flags.String("config", envCompat("XINGCHEN_AGENT_CONFIG", "GUANLAN_AGENT_CONFIG", "agent.json"), "path to JSON configuration")
+	configPath := flags.String("config", env("XINGCHEN_AGENT_CONFIG", "agent.json"), "path to JSON configuration")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -297,16 +297,6 @@ func parseDuration(value string, fallback time.Duration) (time.Duration, error) 
 
 func env(key, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func envCompat(primary, legacy, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(primary)); value != "" {
-		return value
-	}
-	if value := strings.TrimSpace(os.Getenv(legacy)); value != "" {
 		return value
 	}
 	return fallback

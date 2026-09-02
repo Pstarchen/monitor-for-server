@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# XINGCHEN_* is the public configuration namespace. Keep a one-way alias from
-# the previous GUANLAN_* namespace so already provisioned hosts can upgrade.
-for suffix in SERVER SERVER_URL DEVICE_ID AGENT_KEY AGENT_CONFIG AGENT_MANAGER_ROOT SYSTEMD_DIR LEGACY_AGENT_UPDATER_PATH REPOSITORY_URL REPOSITORY_URLS SOURCE_REF AGENT_SOURCE_BUILD_TIMEOUT_SECONDS UPDATE_MIRROR_TIMEOUT_SECONDS UPDATE_PULL_TIMEOUT_SECONDS UPDATE_COMPOSE_TIMEOUT_SECONDS AGENT_IMAGE AGENT_IMAGE_MIRRORS AGENT_MODE AGENT_RELEASE_REPO AGENT_RELEASE_BASE_URLS AGENT_VERSION AGENT_CONTAINER AGENT_VOLUME DOCKER_SOCKET CONTROLLER_IMAGE_MIRRORS HOST_PROJECT_ROOT TARGET_VERSION SOURCE_REPOSITORIES SETUP_IMAGE SERVER_IMAGE WEB_IMAGE; do
-  primary="XINGCHEN_${suffix}"
-  legacy="GUANLAN_${suffix}"
-  if [[ -z "${!primary:-}" && -n "${!legacy:-}" ]]; then
-    export "${primary}=${!legacy}"
-  fi
-done
-
 manager_root="${XINGCHEN_AGENT_MANAGER_ROOT:-/opt/xingchen/agent}"
 manager_path="${manager_root}/agent.sh"
 manager_metadata_path="${manager_root}/install.env"

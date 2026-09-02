@@ -31,12 +31,9 @@ try {
     $envFile = Join-Path $projectRoot '.env'
     if (Test-Path -LiteralPath $envFile) { $composeArgs += @('--env-file', $envFile) }
     function Read-UpdateSetting([string] $Name, [string] $DefaultValue = '') {
-        $legacyName = $Name -replace '^XINGCHEN_', 'GUANLAN_'
         $value = [Environment]::GetEnvironmentVariable($Name)
-        if (-not $value -and $legacyName -ne $Name) { $value = [Environment]::GetEnvironmentVariable($legacyName) }
         if (-not $value -and (Test-Path -LiteralPath $envFile)) {
             $line = Select-String -LiteralPath $envFile -Pattern "^$Name=(.*)$" | Select-Object -First 1
-            if (-not $line -and $legacyName -ne $Name) { $line = Select-String -LiteralPath $envFile -Pattern "^$legacyName=(.*)$" | Select-Object -First 1 }
             if ($line) { $value = $line.Matches[0].Groups[1].Value.Trim('"') }
         }
         if ($value) { return $value }
