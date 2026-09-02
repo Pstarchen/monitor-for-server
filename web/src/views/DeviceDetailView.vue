@@ -330,12 +330,12 @@ function onRealtime(event: Event) {
 
 onMounted(() => {
   load()
-  window.addEventListener('guanlan:realtime', onRealtime)
+  window.addEventListener('xingchen:realtime', onRealtime)
 })
 useVisibilityPolling(() => load(true, { silent: true }))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
-  window.removeEventListener('guanlan:realtime', onRealtime)
+  window.removeEventListener('xingchen:realtime', onRealtime)
 })
 </script>
 

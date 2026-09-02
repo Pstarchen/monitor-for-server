@@ -75,11 +75,11 @@ func TestControllerUpdateRunnerPassesRunnerEnvironment(t *testing.T) {
 
 func TestControllerUpdateEnvironmentPassesNormalizedTargetVersion(t *testing.T) {
 	environment := controllerUpdateEnvironment("1.20.5")
-	if !containsEnvironmentValue(environment, "GUANLAN_TARGET_VERSION=v1.20.5") {
+	if !containsEnvironmentValue(environment, "XINGCHEN_TARGET_VERSION=v1.20.5") {
 		t.Fatalf("controllerUpdateEnvironment() = %v, missing normalized target version", environment)
 	}
 	environment = controllerUpdateEnvironment("not-a-version")
-	if containsEnvironmentPrefix(environment, "GUANLAN_TARGET_VERSION=") {
+	if containsEnvironmentPrefix(environment, "XINGCHEN_TARGET_VERSION=") {
 		t.Fatalf("controllerUpdateEnvironment() accepted an invalid target version: %v", environment)
 	}
 }

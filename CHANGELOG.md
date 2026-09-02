@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.20.7
+
+- 统一对外品牌为 XINGCHEN（星辰监控），包括 Agent 安装命令、前端主题事件、MCP 服务标识和报告文件名。
+- 新增 `XINGCHEN_*` 配置命名空间；已有 `GUANLAN_*` 配置仅作为兼容回退，不再出现在推荐安装命令和使用指南中。
+- 保留原有数据卷、Agent 服务路径和已部署实例的兼容读取，升级不会创建新的数据库或丢失 Agent 配置。
+
+## v1.20.6
+
+- Agent 安装器改为 Nezha 风格的一键环境变量入口，默认下载对应架构的预编译 Release。
+- Agent 更新支持 Release API、SHA256 校验、原子替换、启动失败自动恢复、版本列表和指定版本回退。
+- Linux 原生 systemd 为默认模式，Docker Agent 改为显式 `--docker`；Windows 安装器同步支持 Release 更新和回退。
+- GitHub Release 自动发布 Linux amd64/arm64 与 Windows amd64 Agent 压缩包及 `checksums.txt`。
+
 ## v1.20.5
 
 - 总控更新改为以 GitHub Release 的稳定语义版本为入口；只有 setup、server、web 和 Agent 同版本镜像全部就绪后才推进 `latest` 并创建 Release。

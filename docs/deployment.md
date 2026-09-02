@@ -7,7 +7,7 @@
 - Docker Engine 24+ 与 Docker Compose v2。
 - Docker Compose 会自动启动 PostgreSQL 16 和 Redis。数据库、用户和密码由控制端安装器自动生成，数据库端口只在 Compose 内网可见，无需安装数据库客户端或执行 SQL。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
-- Linux 被监控主机推荐安装 Docker Engine；Docker 不可用时需要 systemd，以及预编译 Agent 或 Go 1.24+ 与 git。
+- Linux 被监控主机默认使用 systemd 安装预编译 Agent；Release 不可用时需要 Go 1.24+ 与 git 进行源码回退。只有需要容器模式时才要求 Docker Engine。
 - Windows 被监控主机需要 Windows 服务管理权限；Windows Docker Desktop 不能代表 Windows 宿主机，因此仍使用原生 Agent。
 
 ## Docker Compose 部署
@@ -82,11 +82,11 @@ sudo bash ./deploy/update-controller.sh --apply
 sudo bash ./deploy/update-controller.sh --auto
 ```
 
-更新器默认给予单个国内镜像代理 45 秒快速失败时间，官方 GHCR 单个镜像最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS`、`GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；外层任务上限覆盖完整回退链，不会在单个来源仍正常工作时提前标记中断。更新失败不会删除数据库卷。
+更新器默认给予单个国内镜像代理 45 秒快速失败时间，官方 GHCR 单个镜像最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS`、`XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；外层任务上限覆盖完整回退链，不会在单个来源仍正常工作时提前标记中断。更新失败不会删除数据库卷。
 
 稳定发布以 `vX.Y.Z` GitHub Release 为入口。CI 先构建同一版本的 setup、server、web 和 Agent 镜像，全部成功后才把版本镜像提升为 `latest`，最后发布 Release；主分支提交只保留 `sha-*` 镜像，不再推进稳定更新通道。控制台缓存 Release 检查结果 20 分钟，并显示发布说明。
 
-更新器默认依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR；控制台发起更新时会直接拉取不可变的 `vX.Y.Z` 镜像并校验 OCI 版本标签，避免镜像代理缓存的旧 `latest` 混入同一次升级。这些 OCI 镜像源全部失败后，再依次使用 Gitee、GitHub Git 仓库的目标版本标签作为 Docker 远程构建上下文。Gitee Git 仓库本身不是 OCI 镜像仓库。可通过 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 配置镜像前缀，通过 `GUANLAN_SOURCE_REPOSITORIES` 配置逗号分隔的源码仓库，通过 `GUANLAN_SOURCE_REF` 固定普通命令行构建的分支或标签。`--source-build` 会直接走双源码构建，`--no-source-fallback` 会在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
+更新器默认依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR；控制台发起更新时会直接拉取不可变的 `vX.Y.Z` 镜像并校验 OCI 版本标签，避免镜像代理缓存的旧 `latest` 混入同一次升级。这些 OCI 镜像源全部失败后，再依次使用 Gitee、GitHub Git 仓库的目标版本标签作为 Docker 远程构建上下文。Gitee Git 仓库本身不是 OCI 镜像仓库。可通过 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置镜像前缀，通过 `XINGCHEN_SOURCE_REPOSITORIES` 配置逗号分隔的源码仓库，通过 `XINGCHEN_SOURCE_REF` 固定普通命令行构建的分支或标签。`--source-build` 会直接走双源码构建，`--no-source-fallback` 会在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
 
 ### 数据库备份与恢复
 
@@ -103,7 +103,7 @@ CONTROLLER_BACKUP_RETENTION=7
 
 更新器不会在健康检查失败后自动切回旧镜像。Flyway 迁移是前向执行的，旧应用镜像不一定兼容已经升级的数据库结构；生产降级必须先确认版本兼容性，必要时同时恢复升级前的 PostgreSQL 备份和对应版本镜像。
 
-升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `GUANLAN_SETUP_IMAGE`、`GUANLAN_SERVER_IMAGE`、`GUANLAN_WEB_IMAGE` 和 `GUANLAN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
+升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE` 和 `XINGCHEN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
 
 生产环境生成的配置至少包含：
 
@@ -141,12 +141,12 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 ## Linux Agent
 
-安装器默认检测 Docker 守护进程，成功时直接拉取 GHCR 预构建镜像并启动容器，不要求 Go。控制台生成的命令只把密钥注入安装进程，不会用 `export` 留在当前 Shell；复制的命令仍包含密钥，执行后应按服务器安全策略清理终端历史。
+安装器默认从 Release 下载对应架构的预编译程序并注册 systemd 服务，不要求目标机安装 Go；Release 不可用时才回退源码。控制台生成的命令只把密钥注入安装进程，不会用 `export` 留在当前 Shell；复制的命令仍包含密钥，执行后应按服务器安全策略清理终端历史。
 
 总控同域入口是默认安装源，目标服务器无需直接访问代码托管平台；控制台也可以明确切换到 Gitee 或 GitHub 安装脚本。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh install --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s --disk / --disk /data
+curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' XINGCHEN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh --interval 3s --disk / --disk /data
 ```
 
 Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh`，GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`。控制台切换安装源后会自动生成完整命令，无需手工替换。
@@ -155,7 +155,7 @@ Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main
 
 需要个性化指标时，在 Agent 配置的 `custom_metrics` 数组中添加最多 32 个参数化程序。程序不经过 Shell，每项最多运行 3 秒，`kind` 支持 `number`、`text`、`exit_code`；服务端设备详情会展示结果，告警规则可对数值项设置阈值。详见 `docs/monitored-agent.md` 中的 JSON 示例。Linux 还可添加 `--system-logs` 采集存在的标准系统日志文件（最多展示每个文件最近 20 行）。
 
-`--server-url` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。默认镜像为 `ghcr.io/pstarchen/monitor-for-server-agent:latest`，支持 `linux/amd64` 与 `linux/arm64`。镜像代理与 GHCR 都失败时，安装器会从 Gitee、GitHub 源码构建同名 Docker 镜像；可用 `--source-url`（可重复）和 `--source-ref` 覆盖源码。`--image` 或 `GUANLAN_AGENT_IMAGE` 可指向内部 OCI 仓库，`--container` 可覆盖容器名。
+`XINGCHEN_SERVER` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。默认安装 GitHub Release 的预编译程序（支持 `linux/amd64` 与 `linux/arm64`），下载后必须通过 `checksums.txt` 的 SHA256 校验；更新失败会保留并恢复旧程序。需要 Docker 模式时显式添加 `--docker`，再使用 `--image` 或 `XINGCHEN_AGENT_IMAGE` 指向内部 OCI 仓库；Release 或镜像失败时仍可使用 `--source-url` 和 `--source-ref` 源码回退。
 
 - 容器：`guanlan-agent`，重启策略为 `unless-stopped`
 - 配置：`/etc/guanlan-agent/agent.json`，只读挂载到容器
@@ -169,12 +169,14 @@ Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main
 /opt/xingchen/agent/agent.sh logs
 /opt/xingchen/agent/agent.sh restart
 /opt/xingchen/agent/agent.sh update
+/opt/xingchen/agent/agent.sh list-versions
+/opt/xingchen/agent/agent.sh rollback v1.20.4
 /opt/xingchen/agent/agent.sh uninstall
 ```
 
 直接运行 `/opt/xingchen/agent/agent.sh` 会打开交互菜单。默认卸载会保留配置和离线缓存，只有 `uninstall --purge` 才会一并删除。
 
-Docker 不可用时，`--binary /path/to/guanlan-agent` 会使用本机 systemd 服务；`--no-docker --binary /path/to/guanlan-agent` 可强制跳过 Docker。未提供二进制时，在线安装器会依次拉取 Gitee、GitHub 源码，因此需要 Go 1.24+、git 和 systemd；可重复使用 `--source-url` 指定一个或多个私有源码源。此回退模式安装结果：
+如果 Release 暂时不可用，安装器会依次尝试源码回退，因此需要 Go 1.24+、git 和 systemd；也可用 `--binary /path/to/guanlan-agent` 指定本地程序。使用 `--no-docker` 可明确保持原生模式。此模式安装结果：
 
 - 程序：`/usr/local/bin/guanlan-agent`
 - 配置：`/etc/guanlan-agent/agent.json`，权限 `0600`
@@ -193,7 +195,7 @@ journalctl -u guanlan-agent -n 100 --no-pager
 以管理员 PowerShell 运行：
 
 ```powershell
-$env:GUANLAN_AGENT_KEY = '<一次性密钥>'
+$env:XINGCHEN_AGENT_KEY = '<一次性密钥>'
 & .\deploy\install-agent.ps1 `
   -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `

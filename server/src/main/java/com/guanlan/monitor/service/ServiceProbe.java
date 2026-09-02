@@ -61,7 +61,7 @@ public class ServiceProbe {
                 .build();
         HttpRequest request = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofMillis(check.getTimeoutMs()))
-                .header("User-Agent", "Guanlan-Monitor-ServiceProbe/1.0")
+                .header("User-Agent", "Xingchen-Monitor-ServiceProbe/1.0")
                 .GET()
                 .build();
         HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -237,7 +237,7 @@ public class ServiceProbe {
         try (Socket socket = connect(hostPort, check.getTimeoutMs())) {
             byte[] user = "monitor".getBytes(StandardCharsets.US_ASCII);
             byte[] database = "postgres".getBytes(StandardCharsets.US_ASCII);
-            byte[] application = "guanlan-monitor".getBytes(StandardCharsets.US_ASCII);
+            byte[] application = "xingchen-monitor".getBytes(StandardCharsets.US_ASCII);
             byte[] userKey = "user\0".getBytes(StandardCharsets.US_ASCII);
             byte[] databaseKey = "database\0".getBytes(StandardCharsets.US_ASCII);
             byte[] applicationKey = "application_name\0".getBytes(StandardCharsets.US_ASCII);

@@ -6,12 +6,12 @@
 
 ## Linux
 
-在线安装器默认优先使用 Docker：Docker 命令和守护进程可用时，直接拉取公开的 `ghcr.io/pstarchen/monitor-for-server-agent:latest` 镜像并启动容器，不需要 Go 或 git。只有 Docker 不可用时，安装器才使用 `--binary` 指定的本机程序，或拉取源码并用 Go 1.24+ 构建。
+在线安装器默认安装预编译 Agent，流程与 Nezha 的一键安装方式一致：识别操作系统和 CPU 架构，从 GitHub Release 下载对应压缩包，强制校验 `checksums.txt` 后安装 systemd 服务。GitHub 暂时不可用时才回退到 Gitee/GitHub 源码构建。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
 
 控制台默认使用总控同域入口，目标服务器无需访问代码托管平台；也可在命令上方明确切换到 Gitee 或 GitHub。复制按钮输出的是纯文本命令，不包含 Markdown 链接、历史版本号或多级下载回退。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh install --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s
+curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' XINGCHEN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh --interval 3s
 ```
 
 Gitee 源只替换安装脚本下载地址，安装参数和密钥注入方式保持一致：
@@ -24,7 +24,7 @@ curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
 
 GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`，控制台选择后会自动生成完整命令。
 
-`--server-url` 只填写域名或 `域名:端口` 即可。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 HTTP 并在配置中启用明文连接。也支持直接传入完整的 `http(s)://` 地址。生产环境建议配置 HTTPS；HTTP 仅适合没有证书的临时或内网部署。安装器会把配置写到 `/etc/guanlan-agent/agent.json`，把离线上报缓冲保存在 Docker 卷 `guanlan-agent-spool`，并以只读方式挂载宿主机文件系统用于采集真实主机指标。检查状态：
+`XINGCHEN_SERVER` 可以填写域名、`域名:端口` 或完整 `http(s)://` 地址。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会回退到 HTTP 并在配置中启用明文连接。生产环境建议配置 HTTPS；HTTP 仅适合临时或内网部署。原生模式会把配置写到 `/etc/guanlan-agent/agent.json`，离线上报缓冲写入 `/var/lib/guanlan-agent/spool`，程序安装到 `/usr/local/bin/guanlan-agent`。
 
 需要个性化指标时，可在 `custom_metrics` 中配置最多 32 个程序。程序通过参数数组直接执行，不经过 Shell；`kind` 支持 `number`、`text`、`exit_code`，每项最多运行 3 秒并截断 4096 字符输出。例如：
 
@@ -41,7 +41,7 @@ GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-
 
 安全巡检默认启用防火墙状态和计划任务摘要，但不会读取日志或文件内容。需要读取 Linux 标准系统日志（syslog、messages、auth.log、secure）时添加 `--system-logs`；需要日志尾部或文件完整性检测时，显式添加一个或多个 `--log-path`、`--integrity-path`；路径必须为绝对路径，且只读取白名单范围。Windows 安装器对应参数为 `-LogPath` 和 `-IntegrityPath`。
 
-安装器会自动探测这两个标准路径；使用非标准 Docker/Podman socket 时，显式传入 `--docker-socket /path/to/runtime.sock`（或设置 `GUANLAN_DOCKER_SOCKET`）。Docker 模式会把它以只读方式映射到 Agent 容器的固定路径，自动更新时也会保留映射；本机 systemd 模式会将 Agent 服务加入 socket 所属组，避免常见的 `root:docker 0660` 权限导致容器列表为空。若指定路径不存在或不是 Unix socket，安装器会直接报错并停止。
+安装器会自动探测这两个标准路径；使用非标准 Docker/Podman socket 时，显式传入 `--docker-socket /path/to/runtime.sock`（或设置 `XINGCHEN_DOCKER_SOCKET`）。Docker 模式会把它以只读方式映射到 Agent 容器的固定路径，自动更新时也会保留映射；本机 systemd 模式会将 Agent 服务加入 socket 所属组，避免常见的 `root:docker 0660` 权限导致容器列表为空。若指定路径不存在或不是 Unix socket，安装器会直接报错并停止。
 
 安装完成后，安装脚本会保存为 `/opt/xingchen/agent/agent.sh`。直接执行可打开管理菜单，也可以非交互执行：
 
@@ -53,16 +53,20 @@ GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-
 /opt/xingchen/agent/agent.sh uninstall
 ```
 
-默认卸载会保留配置和离线缓存；彻底删除时使用 `uninstall --purge`。管理脚本会自动识别当前是 Docker 容器还是本机 systemd 服务。
+默认卸载会保留配置和离线缓存；彻底删除时使用 `uninstall --purge`。管理脚本会记录安装模式和 Release 源，不会记录 Agent 密钥。
 
-内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `GUANLAN_AGENT_IMAGE` 指定 OCI 镜像。镜像代理和 GHCR 都不可用时，Docker 安装/更新会依次从 Gitee、GitHub 源码构建镜像；Gitee Git 仓库本身不作为 OCI 镜像仓库。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；未提供二进制时同样按 Gitee、GitHub 顺序拉取源码。可重复传入 `--source-url` 配置私有源码源，并用 `--source-ref` 固定分支或标签。
+内网可用 `--image registry.example.com/guanlan-agent:版本` 或 `XINGCHEN_AGENT_IMAGE` 指定 OCI 镜像。镜像代理和 GHCR 都不可用时，Docker 安装/更新会依次从 Gitee、GitHub 源码构建镜像；Gitee Git 仓库本身不作为 OCI 镜像仓库。Docker 不可用时可传 `--binary /path/to/guanlan-agent` 使用本机 systemd 服务；未提供二进制时同样按 Gitee、GitHub 顺序拉取源码。可重复传入 `--source-url` 配置私有源码源，并用 `--source-ref` 固定分支或标签。
 
-Linux Docker 模式安装后默认启用每日 Agent 自动更新。更新器依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR，国内代理默认 45 秒后快速切换，全部失败后从 Gitee、GitHub 源码构建 Docker 镜像；可通过 `GUANLAN_AGENT_IMAGE_MIRRORS` 自定义镜像前缀，通过 `GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS` 调整代理超时，或用 `--no-auto-update` 关闭。检查和手动执行更新：
+Linux 原生模式安装后默认启用每日 Agent 自动更新。更新器使用 Release API 的最新稳定版本，下载对应架构压缩包并强制校验 SHA256；下载失败或校验失败时保留当前程序，不会替换成未验证文件。更新前会在 `/var/lib/guanlan-agent/backups` 保留最近 5 份带时间戳的备份，启动失败会自动恢复旧程序。可用 `--no-auto-update` 关闭定时更新。检查和手动执行更新：
 
 ```bash
 systemctl status guanlan-agent-update.timer
 /opt/xingchen/agent/agent.sh update
+/opt/xingchen/agent/agent.sh list-versions
+/opt/xingchen/agent/agent.sh rollback v1.20.4
 ```
+
+也可以直接指定版本安装或更新：`./xingchen-agent.sh --version v1.20.6`。回退只接受 Release 中存在的稳定版本；不要把分支名、提交 SHA 或任意 URL 当作版本号。
 
 支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。本机回退模式安装后检查：
 
@@ -71,18 +75,17 @@ systemctl status guanlan-agent
 journalctl -u guanlan-agent -n 100 --no-pager
 ```
 
-配置位于 `/etc/guanlan-agent/agent.json`，权限为 `0600`；缓冲目录位于 `/var/lib/guanlan-agent/spool`。
+配置位于 `/etc/guanlan-agent/agent.json`，权限为 `0600`；缓冲目录位于 `/var/lib/guanlan-agent/spool`，备份目录位于 `/var/lib/guanlan-agent/backups`。
 
 ## Windows
 
-请用管理员 PowerShell 运行。控制台会根据所选安装源下载脚本，临时注入 Agent 密钥，并在完成后删除脚本和环境变量。建议使用预编译的 `guanlan-agent.exe`，避免在生产机安装 Go：
+请用管理员 PowerShell 运行。控制台会根据所选安装源下载脚本，临时注入 Agent 密钥，并在完成后删除脚本和环境变量。安装器会识别 Windows x64/ARM64，从 Release 下载并校验 `guanlan-agent_<版本>_windows_<架构>.zip`：
 
 ```powershell
-$env:GUANLAN_AGENT_KEY = '<一次性密钥>'
+$env:XINGCHEN_AGENT_KEY = '<一次性密钥>'
 & .\deploy\install-agent.ps1 `
   -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `
-  -BinaryPath 'C:\staging\guanlan-agent.exe' `
   -Interval '3s' `
   -DiskMountpoint 'C:\','D:' `
   -LogPath 'C:\inetpub\logs\LogFiles\W3SVC1\u_ex240831.log' `
@@ -99,11 +102,13 @@ Get-Content "$env:ProgramData\GuanlanMonitor\agent.json" | ConvertFrom-Json | Se
 
 Windows Agent 默认注册每日自动更新任务；需要关闭时在安装命令中添加 `-NoAutoUpdate`。
 
+Windows 管理命令：`-Action update` 更新到最新版本，`-Action rollback -Version v1.20.4` 回退到指定版本，`-Action list-versions` 查看可用版本，`-Action uninstall` 卸载（加 `-Purge` 同时删除配置和缓存）。
+
 ## 更新和改信息
 
 - 修改设备名称、分组、位置和主 IP：在总终端“设备管理”编辑，不需要重装 Agent。
 - 修改采集周期、磁盘白名单或服务检查：重新生成安装命令，在目标机重新运行安装器；安装器会更新现有容器或本机服务。
 - 轮换密钥：总终端管理员执行“轮换密钥”，旧密钥立即失效，然后在目标机重新运行安装器。
-- 更新 Agent 版本：重新运行 Linux 安装命令会拉取最新镜像并重建容器；固定版本可传 `--image ghcr.io/pstarchen/monitor-for-server-agent:v1.2.3`。本机模式则替换 `--binary` 指向的新程序并重跑安装器。
+- 更新 Agent 版本：运行 `/opt/xingchen/agent/agent.sh update`，或用 `./xingchen-agent.sh --version v1.20.6` 安装固定版本。原生更新会下载 Release、校验 SHA256、备份旧程序并在新服务启动失败时自动恢复；只有需要 Docker 采集模式时才添加 `--docker --image ghcr.io/pstarchen/monitor-for-server-agent:v1.20.6`。
 
 安装器传入域名时会优先探测 HTTPS，失败后再探测 HTTP；若最终使用 HTTP，Agent 数据将明文传输，生产环境应尽快配置证书。总控修改“Agent 上报周期”后，已安装 Agent 会在下一次成功上报时自动同步，无需重装。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。

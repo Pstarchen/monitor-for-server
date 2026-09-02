@@ -35,7 +35,7 @@ bash ./deploy/install-controller.sh
 2. 设置公网入口、来源、站点名、时区和首个管理员密码。
 3. 提交后页面会自动进入登录页；生产服务就绪前登录按钮会暂时锁定，就绪后即可登录。
 
-管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、GitHub Release 发布说明并应用更新，也可启用每日 04:00 自动更新。Release 检查结果缓存 20 分钟，GitHub 临时不可用时会保留上次成功结果。命令行仍可使用 `deploy/update-controller.sh --check` 检查、`--apply` 手动更新、`--auto` 启用同一自动更新设置。更新器先尝试 `GUANLAN_CONTROLLER_IMAGE_MIRRORS` 指定的镜像前缀与官方 GHCR，并校验镜像版本标签；全部失败后从 `GUANLAN_SOURCE_REPOSITORIES` 指定的 Gitee/GitHub 仓库按目标版本标签构建。
+管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、GitHub Release 发布说明并应用更新，也可启用每日 04:00 自动更新。Release 检查结果缓存 20 分钟，GitHub 临时不可用时会保留上次成功结果。命令行仍可使用 `deploy/update-controller.sh --check` 检查、`--apply` 手动更新、`--auto` 启用同一自动更新设置。更新器先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 指定的镜像前缀与官方 GHCR，并校验镜像版本标签；全部失败后从 `XINGCHEN_SOURCE_REPOSITORIES` 指定的 Gitee/GitHub 仓库按目标版本标签构建。
 
 如果暂时没有域名，可以先用 `http://<服务器IP>:18080`；HTTPS 和宝塔反代配置完成后，再在系统设置中切换为正式域名。
 

@@ -66,7 +66,7 @@ public class McpController {
 
     private ResponseEntity<?> handle(JsonNode id, String method, JsonNode params, ApiTokenPrincipal principal, Authentication authentication) {
         return switch (method) {
-            case "initialize" -> jsonRpcResult(id, Map.of("protocolVersion", "2024-11-05", "capabilities", Map.of("tools", Map.of()), "serverInfo", Map.of("name", "guanlan-monitor", "version", "1.0")));
+            case "initialize" -> jsonRpcResult(id, Map.of("protocolVersion", "2024-11-05", "capabilities", Map.of("tools", Map.of()), "serverInfo", Map.of("name", "xingchen-monitor", "version", "1.0")));
             case "ping" -> jsonRpcResult(id, Map.of());
             case "tools/list" -> jsonRpcResult(id, Map.of("tools", toolDefinitions()));
             case "tools/call" -> callTool(id, params, principal, authentication);

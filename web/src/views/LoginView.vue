@@ -21,7 +21,7 @@ const revealPassword = ref(false)
 const serviceReady = ref(true)
 const serviceMessage = ref('')
 const serviceFailed = ref(false)
-const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
+const dark = ref(localStorage.getItem('xingchen-theme') === 'dark')
 const returnTo = computed(() => safeLocalPath(Array.isArray(route.query.redirect) ? route.query.redirect[0] : route.query.redirect))
 let serviceTimer: number | undefined
 let disposed = false
@@ -29,7 +29,7 @@ let disposed = false
 function toggleTheme() {
   dark.value = !dark.value
   document.documentElement.classList.toggle('dark', dark.value)
-  localStorage.setItem('guanlan-theme', dark.value ? 'dark' : 'light')
+  localStorage.setItem('xingchen-theme', dark.value ? 'dark' : 'light')
 }
 
 async function submit() {

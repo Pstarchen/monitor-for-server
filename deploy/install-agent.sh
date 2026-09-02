@@ -1,45 +1,66 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-manager_root="${GUANLAN_AGENT_MANAGER_ROOT:-/opt/xingchen/agent}"
+# XINGCHEN_* is the public configuration namespace. Keep a one-way alias from
+# the previous GUANLAN_* namespace so already provisioned hosts can upgrade.
+for suffix in SERVER SERVER_URL DEVICE_ID AGENT_KEY AGENT_CONFIG AGENT_MANAGER_ROOT SYSTEMD_DIR LEGACY_AGENT_UPDATER_PATH REPOSITORY_URL REPOSITORY_URLS SOURCE_REF AGENT_SOURCE_BUILD_TIMEOUT_SECONDS UPDATE_MIRROR_TIMEOUT_SECONDS UPDATE_PULL_TIMEOUT_SECONDS UPDATE_COMPOSE_TIMEOUT_SECONDS AGENT_IMAGE AGENT_IMAGE_MIRRORS AGENT_MODE AGENT_RELEASE_REPO AGENT_RELEASE_BASE_URLS AGENT_VERSION AGENT_CONTAINER AGENT_VOLUME DOCKER_SOCKET CONTROLLER_IMAGE_MIRRORS HOST_PROJECT_ROOT TARGET_VERSION SOURCE_REPOSITORIES SETUP_IMAGE SERVER_IMAGE WEB_IMAGE; do
+  primary="XINGCHEN_${suffix}"
+  legacy="GUANLAN_${suffix}"
+  if [[ -z "${!primary:-}" && -n "${!legacy:-}" ]]; then
+    export "${primary}=${!legacy}"
+  fi
+done
+
+manager_root="${XINGCHEN_AGENT_MANAGER_ROOT:-/opt/xingchen/agent}"
 manager_path="${manager_root}/agent.sh"
 manager_metadata_path="${manager_root}/install.env"
 manager_updater_path="${manager_root}/update-agent.sh"
-systemd_dir="${GUANLAN_SYSTEMD_DIR:-/etc/systemd/system}"
-legacy_updater_path="${GUANLAN_LEGACY_AGENT_UPDATER_PATH:-/usr/local/sbin/guanlan-agent-update}"
+systemd_dir="${XINGCHEN_SYSTEMD_DIR:-/etc/systemd/system}"
+legacy_updater_path="${XINGCHEN_LEGACY_AGENT_UPDATER_PATH:-/usr/local/sbin/guanlan-agent-update}"
 original_args=("$@")
 action="install"
 if [[ $# -eq 0 ]]; then
-  action="menu"
-elif [[ "$1" =~ ^(install|update|restart|status|logs|uninstall|menu)$ ]]; then
+  if [[ -n "${XINGCHEN_SERVER:-${XINGCHEN_SERVER_URL:-}}" && -n "${XINGCHEN_DEVICE_ID:-}" && -n "${XINGCHEN_AGENT_KEY:-}" ]]; then
+    action="install"
+  else
+    action="menu"
+  fi
+elif [[ "$1" =~ ^(install|update|upgrade|rollback|list-versions|versions|restart|status|logs|uninstall|menu)$ ]]; then
   action="$1"
   shift
 fi
 
 usage() {
-  echo "Usage: GUANLAN_AGENT_KEY=... $0 install --server-url HOST_OR_URL --device-id ID [安装参数]"
+  echo "Usage: XINGCHEN_SERVER=HOST_OR_URL XINGCHEN_DEVICE_ID=ID XINGCHEN_AGENT_KEY=... $0"
+  echo "       $0 install --server-url HOST_OR_URL --device-id ID [安装参数]"
   echo "       [--source-url GIT_URL]... [--source-ref GIT_REF]"
-  echo "       $0 update|restart|status|logs|uninstall [--purge]"
+  echo "       $0 update|upgrade|rollback [VERSION] | list-versions"
+  echo "       $0 restart|status|logs|uninstall [--purge]"
   echo "       $0 menu"
 }
 
-server_url="${GUANLAN_SERVER_URL:-}"
-device_id="${GUANLAN_DEVICE_ID:-}"
-agent_key="${GUANLAN_AGENT_KEY:-}"
+server_url="${XINGCHEN_SERVER:-${XINGCHEN_SERVER_URL:-}}"
+device_id="${XINGCHEN_DEVICE_ID:-}"
+agent_key="${XINGCHEN_AGENT_KEY:-}"
 repository_urls=()
-if [[ -n "${GUANLAN_REPOSITORY_URL:-}" ]]; then
-  repository_urls+=("${GUANLAN_REPOSITORY_URL}")
+if [[ -n "${XINGCHEN_REPOSITORY_URL:-}" ]]; then
+  repository_urls+=("${XINGCHEN_REPOSITORY_URL}")
 else
-  IFS=',' read -r -a repository_urls <<< "${GUANLAN_REPOSITORY_URLS:-https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git}"
+  IFS=',' read -r -a repository_urls <<< "${XINGCHEN_REPOSITORY_URLS:-https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git}"
 fi
 source_url_overridden=false
-source_ref="${GUANLAN_SOURCE_REF:-main}"
-source_build_timeout="${GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
-mirror_pull_timeout="${GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45}"
-agent_pull_timeout="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
-agent_image="${GUANLAN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${GUANLAN_AGENT_VERSION:-latest}}"
-container_name="${GUANLAN_AGENT_CONTAINER:-guanlan-agent}"
+source_ref="${XINGCHEN_SOURCE_REF:-main}"
+source_build_timeout="${XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
+mirror_pull_timeout="${XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45}"
+agent_pull_timeout="${XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
+agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-latest}}"
+container_name="${XINGCHEN_AGENT_CONTAINER:-guanlan-agent}"
 binary_path=""
+agent_mode="${XINGCHEN_AGENT_MODE:-native}"
+release_repo="${XINGCHEN_AGENT_RELEASE_REPO:-Pstarchen/monitor-for-server}"
+release_base_urls="${XINGCHEN_AGENT_RELEASE_BASE_URLS:-https://github.com/Pstarchen/monitor-for-server/releases/download}"
+release_version="${XINGCHEN_AGENT_VERSION:-}"
+rollback_version=""
 interval="3s"
 services=()
 processes=()
@@ -61,7 +82,7 @@ no_docker=false
 allow_insecure_http=false
 auto_update=true
 purge=false
-docker_socket="${GUANLAN_DOCKER_SOCKET:-}"
+docker_socket="${XINGCHEN_DOCKER_SOCKET:-}"
 docker_socket_target="/run/guanlan-agent-docker.sock"
 
 while [[ $# -gt 0 ]]; do
@@ -73,6 +94,8 @@ while [[ $# -gt 0 ]]; do
     --allow-file-operations) allow_file_operations=true; shift ;;
     --no-auto-update) auto_update=false; shift ;;
     --binary) binary_path="${2:-}"; shift 2 ;;
+    --native) agent_mode="native"; shift ;;
+    --docker) agent_mode="docker"; shift ;;
     --image) agent_image="${2:-}"; shift 2 ;;
     --container) container_name="${2:-}"; shift 2 ;;
     --no-docker) no_docker=true; shift ;;
@@ -102,15 +125,28 @@ while [[ $# -gt 0 ]]; do
     --skip-containers) skip_containers=true; shift ;;
     --container-limit) container_limit="${2:-}"; shift 2 ;;
     --purge) purge=true; shift ;;
+    --version) release_version="${2:-}"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
-    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)
+      if [[ "${action}" == rollback && -z "${rollback_version}" ]]; then
+        rollback_version="$1"
+        shift
+      elif [[ "${action}" =~ ^(update|upgrade)$ && -z "${release_version}" && "$1" != -* ]]; then
+        release_version="$1"
+        shift
+      else
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      ;;
   esac
 done
 
 script_source="${BASH_SOURCE[0]-}"
 if [[ "${EUID}" -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1 && [[ -n "${script_source}" && -f "${script_source}" ]]; then
-    exec sudo --preserve-env=GUANLAN_AGENT_KEY,GUANLAN_AGENT_IMAGE,GUANLAN_AGENT_IMAGE_MIRRORS,GUANLAN_REPOSITORY_URL,GUANLAN_REPOSITORY_URLS,GUANLAN_SOURCE_REF,GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS,GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS,GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
+    exec sudo --preserve-env=XINGCHEN_SERVER,XINGCHEN_SERVER_URL,XINGCHEN_DEVICE_ID,XINGCHEN_AGENT_KEY,XINGCHEN_AGENT_IMAGE,XINGCHEN_AGENT_IMAGE_MIRRORS,XINGCHEN_AGENT_MODE,XINGCHEN_AGENT_RELEASE_REPO,XINGCHEN_AGENT_RELEASE_BASE_URLS,XINGCHEN_REPOSITORY_URL,XINGCHEN_REPOSITORY_URLS,XINGCHEN_SOURCE_REF,XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS,XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS,XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
   fi
   echo "请以 root 身份运行，或安装 sudo 后重试。" >&2
   exit 1
@@ -118,9 +154,25 @@ fi
 
 load_manager_metadata() {
   [[ -r "${manager_metadata_path}" ]] || return 0
-  local saved_container saved_volume
+  local saved_container saved_volume saved_mode saved_binary saved_repo saved_base_urls
+  saved_mode="$(sed -n 's/^AGENT_MODE=//p' "${manager_metadata_path}" | head -n 1)"
+  saved_binary="$(sed -n 's/^BINARY_PATH=//p' "${manager_metadata_path}" | head -n 1)"
+  saved_repo="$(sed -n 's/^RELEASE_REPO=//p' "${manager_metadata_path}" | head -n 1)"
+  saved_base_urls="$(sed -n 's/^RELEASE_BASE_URLS=//p' "${manager_metadata_path}" | head -n 1)"
   saved_container="$(sed -n 's/^CONTAINER_NAME=//p' "${manager_metadata_path}" | head -n 1)"
   saved_volume="$(sed -n 's/^SPOOL_VOLUME=//p' "${manager_metadata_path}" | head -n 1)"
+  if [[ "${saved_mode}" == native || "${saved_mode}" == docker ]]; then
+    agent_mode="${saved_mode}"
+  fi
+  if [[ -n "${saved_binary}" ]]; then
+    binary_path="${saved_binary}"
+  fi
+  if [[ "${saved_repo}" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
+    release_repo="${saved_repo}"
+  fi
+  if [[ -n "${saved_base_urls}" ]]; then
+    release_base_urls="${saved_base_urls}"
+  fi
   if [[ "${saved_container}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
     container_name="${saved_container}"
   fi
@@ -169,7 +221,7 @@ manager_update() {
     echo "当前安装缺少更新器，请从总控重新复制安装命令覆盖安装。" >&2
     return 1
   fi
-  "${manager_updater_path}"
+  "${manager_updater_path}" "$@"
   echo "Agent 更新检查已完成。"
 }
 
@@ -223,7 +275,11 @@ manager_menu() {
 if [[ "${action}" != install ]]; then
   load_manager_metadata
   case "${action}" in
-    update) manager_update ;;
+    update|upgrade)
+      if [[ -n "${release_version}" ]]; then manager_update update "${release_version}"; else manager_update update; fi
+      ;;
+    rollback) [[ -n "${rollback_version}" ]] || { echo "请提供要回退的版本，例如 rollback v1.20.4。" >&2; exit 2; }; manager_update rollback "${rollback_version}" ;;
+    list-versions|versions) manager_update list-versions ;;
     restart) manager_restart ;;
     status) manager_status ;;
     logs) manager_logs ;;
@@ -234,7 +290,7 @@ if [[ "${action}" != install ]]; then
 fi
 
 if [[ -z "${server_url}" || -z "${device_id}" || -z "${agent_key}" ]]; then
-  echo "Server URL, device ID and GUANLAN_AGENT_KEY are required." >&2
+  echo "Server URL, device ID and XINGCHEN_AGENT_KEY are required." >&2
   usage >&2
   exit 2
 fi
@@ -251,7 +307,7 @@ if ((${#repository_urls[@]} == 0)) || [[ -z "${source_ref}" || "${source_ref}" =
   exit 2
 fi
 if [[ ! "${source_build_timeout}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "GUANLAN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS 必须是正整数秒数。" >&2
+  echo "XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS 必须是正整数秒数。" >&2
   exit 2
 fi
 for repository_url in "${repository_urls[@]}"; do
@@ -262,6 +318,18 @@ for repository_url in "${repository_urls[@]}"; do
 done
 if [[ ! "${container_name}" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
   echo "Container name contains invalid characters: ${container_name}" >&2
+  exit 2
+fi
+if [[ "${agent_mode}" != native && "${agent_mode}" != docker ]]; then
+  echo "Agent mode must be native or docker." >&2
+  exit 2
+fi
+if [[ ! "${release_repo}" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
+  echo "Agent release repository is invalid." >&2
+  exit 2
+fi
+if [[ -z "${release_base_urls}" ]]; then
+  echo "Agent release download URL list cannot be empty." >&2
   exit 2
 fi
 
@@ -347,6 +415,97 @@ run_with_timeout() {
   else
     "$@"
   fi
+}
+
+release_platform() {
+  release_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  release_arch="$(uname -m)"
+  [[ "${release_os}" == linux ]] || { echo "当前系统不支持预编译 Agent：${release_os}" >&2; return 1; }
+  case "${release_arch}" in
+    x86_64|amd64) release_arch=amd64 ;;
+    aarch64|arm64) release_arch=arm64 ;;
+    *) echo "当前 CPU 架构不支持预编译 Agent：${release_arch}" >&2; return 1 ;;
+  esac
+}
+
+normalize_release_version() {
+  local value="${1:-}"
+  value="${value#v}"
+  if [[ "${value}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    printf 'v%s.%s.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+    return 0
+  fi
+  return 1
+}
+
+get_release_version() {
+  if [[ -n "${release_version}" ]]; then
+    normalize_release_version "${release_version}" || { echo "版本号必须是稳定语义版本，例如 v1.20.6。" >&2; return 2; }
+    return
+  fi
+  local response latest
+  response="$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 --proto '=https' --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest")" || return 1
+  latest="$(printf '%s' "${response}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  normalize_release_version "${latest}"
+}
+
+release_asset_name() {
+  printf 'guanlan-agent_%s_%s_%s.tar.gz' "${1#v}" "${release_os}" "${release_arch}"
+}
+
+download_release_binary() {
+  local requested_version="${1:-}" destination="$2" version asset base archive checksum expected actual extracted
+  release_platform || return 1
+  release_version="${requested_version}"
+  version="$(get_release_version)" || { echo "无法获取 Agent Release 版本，请稍后重试或指定 --version。" >&2; return 1; }
+  asset="$(release_asset_name "${version}")"
+  mkdir -p "${destination}"
+  IFS=',' read -r -a release_bases <<< "${release_base_urls}"
+  for base in "${release_bases[@]}"; do
+    base="${base%/}"
+    [[ "${base}" =~ ^https://(github\.com|gitee\.com)/[^/]+/[^/]+/releases/download$ ]] || continue
+    archive="${destination}/${asset}"
+    checksum="${destination}/checksums.txt"
+    echo "正在下载 Agent ${version}（${release_os}/${release_arch}）..."
+    if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 300 --max-filesize 52428800 --proto '=https' --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}"; then
+      rm -f "${archive}"
+      continue
+    fi
+    [[ -s "${archive}" ]] || { rm -f "${archive}"; continue; }
+    if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto '=https' --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}"; then
+      rm -f "${archive}" "${checksum}"
+      continue
+    fi
+    [[ -s "${checksum}" ]] || { rm -f "${archive}" "${checksum}"; continue; }
+    expected="$(awk -v name="${asset}" '$2 == name || substr($2, 2) == name { print $1; exit }' "${checksum}")"
+    actual="$(sha256sum "${archive}" | awk '{print $1}')"
+    if [[ -z "${expected}" || "${expected}" != "${actual}" ]]; then
+      echo "Agent 下载校验失败，已丢弃 ${asset}。" >&2
+      rm -f "${archive}" "${checksum}"
+      continue
+    fi
+    if tar -tzf "${archive}" | grep -qE '(^|/)\.\.?(/|$)'; then
+      echo "Agent 压缩包包含不安全路径，已拒绝。" >&2
+      rm -f "${archive}" "${checksum}"
+      continue
+    fi
+    tar -xzf "${archive}" -C "${destination}"
+    extracted="$(find "${destination}" -maxdepth 2 -type f -name 'guanlan-agent' -print -quit)"
+    if [[ -z "${extracted}" ]]; then
+      echo "Agent 压缩包中未找到可执行文件。" >&2
+      rm -f "${archive}" "${checksum}"
+      continue
+    fi
+    if [[ "${extracted}" != "${destination}/guanlan-agent" ]]; then
+      install -m 0755 "${extracted}" "${destination}/guanlan-agent"
+    else
+      chmod 0755 "${extracted}"
+    fi
+    release_downloaded_version="${version}"
+    rm -f "${archive}" "${checksum}"
+    return 0
+  done
+  return 1
 }
 
 script_dir=""
@@ -483,7 +642,7 @@ install_docker_agent() {
     return 1
   fi
 
-  local spool_volume="${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}"
+  local spool_volume="${XINGCHEN_AGENT_VOLUME:-guanlan-agent-spool}"
   docker volume create "${spool_volume}" >/dev/null
   install -d -m 0750 "${agent_config_dir}"
   install -m 0600 "${config_tmp}" "${agent_config_path}"
@@ -534,7 +693,7 @@ pull_agent_image() {
   fi
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
-    IFS=',' read -r -a mirror_prefixes <<< "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}"
+    IFS=',' read -r -a mirror_prefixes <<< "${XINGCHEN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}"
     for mirror_prefix in "${mirror_prefixes[@]}"; do
       mirror_prefix="${mirror_prefix%/}"
       [[ -z "${mirror_prefix}" ]] && continue
@@ -586,8 +745,8 @@ install_agent_updater() {
     printf 'image=%s\n' "$(shell_quote "${agent_image}")"
     printf 'container_name=%s\n' "$(shell_quote "${container_name}")"
     printf 'config_path=%s\n' "$(shell_quote "${agent_config_path}")"
-    printf 'spool_volume=%s\n' "$(shell_quote "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}")"
-    printf 'mirror_list=%s\n' "$(shell_quote "${GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}")"
+    printf 'spool_volume=%s\n' "$(shell_quote "${XINGCHEN_AGENT_VOLUME:-guanlan-agent-spool}")"
+    printf 'mirror_list=%s\n' "$(shell_quote "${XINGCHEN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn}")"
     printf 'mirror_timeout=%s\n' "$(shell_quote "${mirror_pull_timeout}")"
     printf 'pull_timeout=%s\n' "$(shell_quote "${agent_pull_timeout}")"
     printf 'source_ref=%s\n' "$(shell_quote "${source_ref}")"
@@ -690,34 +849,26 @@ install_local_agent_updater() {
   install -d -m 0755 "${manager_root}" "${systemd_dir}"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
-    printf 'source_ref=%s\n' "$(shell_quote "${source_ref}")"
-    printf 'repositories=('
-    for repository_url in "${repository_urls[@]}"; do
-      printf ' %s' "$(shell_quote "${repository_url}")"
-    done
-    printf ' )\n'
+    printf 'release_repo=%s\n' "$(shell_quote "${release_repo}")"
+    printf 'release_base_urls=%s\n' "$(shell_quote "${release_base_urls}")"
     printf 'binary_path=%s\n' "$(shell_quote "/usr/local/bin/guanlan-agent")"
     printf 'service_name=%s\n' "$(shell_quote "guanlan-agent.service")"
+    printf 'backup_dir=%s\n' "$(shell_quote "/var/lib/guanlan-agent/backups")"
     printf '%s\n' \
       'temp_dir="$(mktemp -d)"' \
       'if command -v flock >/dev/null 2>&1; then lock_path="/run/lock/guanlan-agent-update.lock"; mkdir -p "$(dirname "${lock_path}")"; exec 9>"${lock_path}"; flock -n 9 || exit 75; fi' \
       'trap '\''rm -rf "${temp_dir}"'\'' EXIT' \
-      'command -v git >/dev/null 2>&1 || exit 0' \
-      'command -v go >/dev/null 2>&1 || exit 0' \
-      'clone_source() {' \
-      '  local repository' \
-      '  for repository in "${repositories[@]}"; do' \
-      '    rm -rf -- "${temp_dir}/source"' \
-      '    echo "正在尝试 Agent 源码仓库：${repository} (${source_ref})"' \
-      '    if git clone --branch "${source_ref}" --depth 1 --filter=blob:none --sparse "${repository}" "${temp_dir}/source" >/dev/null && git -C "${temp_dir}/source" sparse-checkout set agent >/dev/null; then return 0; fi' \
-      '  done' \
-      '  return 1' \
-      '}' \
-      'clone_source || { echo "GitHub 与 Gitee Agent 源码均不可用。" >&2; exit 1; }' \
-      '(cd "${temp_dir}/source/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/guanlan-agent" ./cmd/agent) || exit 0' \
-      'cmp -s "${temp_dir}/guanlan-agent" "${binary_path}" && exit 0' \
-      'install -m 0755 "${temp_dir}/guanlan-agent" "${binary_path}"' \
-      'systemctl restart "${service_name}"'
+      'normalize_version() { local value="${1#v}"; [[ "${value}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1; printf "v%s" "${value}"; }' \
+      'platform() { os="$(uname -s | tr "[:upper:]" "[:lower:]")"; arch="$(uname -m)"; [[ "${os}" == linux || "${os}" == darwin ]] || return 1; case "${arch}" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) return 1 ;; esac; }' \
+      'version_for_update() { if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; else curl -fsSL --retry 3 --connect-timeout 10 --max-time 30 --proto "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1 | while IFS= read -r value; do normalize_version "${value}"; done; fi; }' \
+      'download() { local version="${1}" asset="guanlan-agent_${1#v}_${os}_${arch}.tar.gz" base archive checksum expected actual found; IFS="," read -r -a bases <<< "${release_base_urls}"; for base in "${bases[@]}"; do base="${base%/}"; [[ "${base}" =~ ^https://(github\\.com|gitee\\.com)/[^/]+/[^/]+/releases/download$ ]] || continue; archive="${temp_dir}/${asset}"; checksum="${temp_dir}/checksums.txt"; curl -fsSL --retry 3 --connect-timeout 10 --max-time 300 --max-filesize 52428800 --proto "=https" --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}" || continue; curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto "=https" --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}" || continue; expected="$(awk -v n="${asset}" '\''$2 == n || substr($2, 2) == n { print $1; exit }'\'' "${checksum}")"; actual="$(sha256sum "${archive}" | awk '\''{print $1}'\'')"; [[ -n "${expected}" && "${expected}" == "${actual}" ]] || continue; if tar -tzf "${archive}" | grep -qE "(^|/)\.\.?(/|$)"; then continue; fi; tar -xzf "${archive}" -C "${temp_dir}"; found="$(find "${temp_dir}" -maxdepth 2 -type f -name guanlan-agent -print -quit)"; [[ -n "${found}" ]] || continue; install -m 0755 "${found}" "${temp_dir}/guanlan-agent.new"; return 0; done; return 1; }' \
+      'atomic_install() { local old="${binary_path}.previous.$$" backup_version="unknown" backup_path; mkdir -p "${backup_dir}"; backup_version="$("${binary_path}" --version 2>/dev/null | sed -n "s/.*\(v[0-9][0-9.]*\).*/\1/p" | head -n 1 || true)"; backup_path="${backup_dir}/guanlan-agent.${backup_version#v:-unknown}.$(date -u +%Y%m%d%H%M%S).backup"; cp -p "${binary_path}" "${backup_path}" 2>/dev/null || true; find "${backup_dir}" -type f -name "guanlan-agent.*.backup" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | awk '\''NR > 5 { sub(/^[^ ]+ /, ""); print }'\'' | xargs -r rm -f; systemctl stop "${service_name}" >/dev/null 2>&1 || true; mv "${binary_path}" "${old}"; if ! mv "${temp_dir}/guanlan-agent.new" "${binary_path}"; then mv "${old}" "${binary_path}"; systemctl start "${service_name}" >/dev/null 2>&1 || true; return 1; fi; if ! systemctl start "${service_name}" >/dev/null 2>&1 || ! systemctl is-active --quiet "${service_name}"; then rm -f "${binary_path}"; mv "${old}" "${binary_path}"; systemctl start "${service_name}" >/dev/null 2>&1 || true; return 1; fi; rm -f "${old}"; }' \
+      'command="${1:-update}"; requested_version="${2:-}"; platform || { echo "当前系统或架构不支持预编译 Agent。" >&2; exit 1; }' \
+      'if [[ "${command}" == list-versions ]]; then curl -fsSL --retry 3 --connect-timeout 10 --max-time 30 --proto "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases?per_page=20" | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p"; exit 0; fi' \
+      'version="$(version_for_update)" || { echo "无法获取 Agent Release 版本。" >&2; exit 1; }' \
+      'download "${version}" || { echo "Agent ${version} 下载或校验失败。" >&2; exit 1; }' \
+      'atomic_install || { echo "Agent 更新失败，已恢复旧版本。" >&2; exit 1; }' \
+      'echo "Agent 已更新到 ${version}。"'
   } > "${updater}"
   chmod 0755 "${updater}"
   if [[ "${auto_update}" != true ]]; then
@@ -731,25 +882,31 @@ install_local_agent_updater() {
 
 install_local_agent() {
   if [[ -z "${binary_path}" ]]; then
-  source_root="${project_root}"
-  if [[ -z "${source_root}" || ! -f "${source_root}/agent/go.mod" ]]; then
-    if ! command -v git >/dev/null 2>&1; then
-      echo "未找到 Agent 源码。请安装 git，或通过 --binary 提供预编译 Agent。" >&2
-      exit 1
+    if ! download_release_binary "${release_version}" "${temp_dir}/release"; then
+      echo "预编译 Agent Release 不可用，准备回退到源码构建。" >&2
+      source_root="${project_root}"
+      if [[ -z "${source_root}" || ! -f "${source_root}/agent/go.mod" ]]; then
+        if ! command -v git >/dev/null 2>&1; then
+          echo "未找到 Agent 源码。请安装 git，或通过 --binary 提供预编译 Agent。" >&2
+          exit 1
+        fi
+        echo "正在下载 Agent 源码..."
+        if ! clone_agent_source "${temp_dir}/source"; then
+          echo "GitHub 与 Gitee Agent 源码均不可用。" >&2
+          exit 1
+        fi
+        source_root="${temp_dir}/source"
+      fi
+      if ! command -v go >/dev/null 2>&1; then
+        echo "未提供预编译 Agent 时需要 Go 1.24+。也可以使用 --binary 指定已构建程序。" >&2
+        exit 1
+      fi
+      (cd "${source_root}/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/guanlan-agent" ./cmd/agent)
+      binary_path="${temp_dir}/guanlan-agent"
+    else
+      binary_path="${temp_dir}/release/guanlan-agent"
+      release_version="${release_downloaded_version}"
     fi
-    echo "正在下载 Agent 源码..."
-    if ! clone_agent_source "${temp_dir}/source"; then
-      echo "GitHub 与 Gitee Agent 源码均不可用。" >&2
-      exit 1
-    fi
-    source_root="${temp_dir}/source"
-  fi
-  if ! command -v go >/dev/null 2>&1; then
-    echo "未提供预编译 Agent 时需要 Go 1.24+。也可以使用 --binary 指定已构建程序。" >&2
-    exit 1
-  fi
-  (cd "${source_root}/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/guanlan-agent" ./cmd/agent)
-  binary_path="${temp_dir}/guanlan-agent"
   fi
   if [[ ! -f "${binary_path}" ]]; then
   echo "Agent binary not found: ${binary_path}" >&2
@@ -763,7 +920,7 @@ install_local_agent() {
   if ! id guanlan-agent >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/guanlan-agent --shell /usr/sbin/nologin guanlan-agent
   fi
-  install -d -o guanlan-agent -g guanlan-agent -m 0750 "${agent_config_dir}" /var/lib/guanlan-agent/spool
+  install -d -o guanlan-agent -g guanlan-agent -m 0750 "${agent_config_dir}" /var/lib/guanlan-agent/spool /var/lib/guanlan-agent/backups
   install -m 0755 "${binary_path}" /usr/local/bin/guanlan-agent
   install -o guanlan-agent -g guanlan-agent -m 0600 "${config_tmp}" "${agent_config_path}"
 
@@ -825,19 +982,20 @@ install_manager() {
   if [[ "${source_path}" != "${manager_real_path}" ]]; then
     install -m 0755 "${script_source}" "${manager_path}"
   fi
-  printf 'CONTAINER_NAME=%s\nSPOOL_VOLUME=%s\n' "${container_name}" "${GUANLAN_AGENT_VOLUME:-guanlan-agent-spool}" > "${manager_metadata_path}"
+  printf 'AGENT_MODE=%s\nBINARY_PATH=%s\nRELEASE_REPO=%s\nRELEASE_BASE_URLS=%s\nCONTAINER_NAME=%s\nSPOOL_VOLUME=%s\n' \
+    "${agent_mode}" "/usr/local/bin/guanlan-agent" "${release_repo}" "${release_base_urls}" "${container_name}" "${XINGCHEN_AGENT_VOLUME:-guanlan-agent-spool}" > "${manager_metadata_path}"
   chmod 0600 "${manager_metadata_path}"
   rm -f "${legacy_updater_path}"
   echo "Agent 管理入口：${manager_path}"
 }
 
-if [[ "${docker_available}" == true ]]; then
+if [[ "${agent_mode}" == docker && "${docker_available}" == true && "${no_docker}" != true ]]; then
   install_docker_agent
 else
   install_local_agent
 fi
 install_manager
-unset agent_key GUANLAN_AGENT_KEY
+unset agent_key XINGCHEN_AGENT_KEY
 if [[ "${docker_available}" != true ]]; then
   echo "星辰监控 Agent installed and started. Check with: systemctl status guanlan-agent"
 fi

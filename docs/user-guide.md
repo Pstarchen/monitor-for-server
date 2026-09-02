@@ -294,13 +294,13 @@ docker compose up -d --force-recreate server web
 ```bash
 curl -fL 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh \
   && chmod +x xingchen-agent.sh \
-  && env GUANLAN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh install \
-    --server-url 'https://monitor.example.com' \
-    --device-id '<设备ID>' \
-    --interval 3s
+  && env XINGCHEN_SERVER='https://monitor.example.com' \
+    XINGCHEN_DEVICE_ID='<设备ID>' \
+    XINGCHEN_AGENT_KEY='<一次性密钥>' \
+    ./xingchen-agent.sh --interval 3s
 ```
 
-Docker 可用时，安装器默认用容器运行 Agent；Docker 不可用时才尝试本机 systemd 模式。检查状态和日志：
+安装器默认用预编译程序注册本机 systemd 服务；只有命令中显式添加 `--docker` 才用容器模式。检查状态和日志：
 
 ```bash
 /opt/xingchen/agent/agent.sh status
@@ -615,6 +615,8 @@ curl -fsS https://monitor.example.com/healthz
 /opt/xingchen/agent/agent.sh logs
 /opt/xingchen/agent/agent.sh restart
 /opt/xingchen/agent/agent.sh update
+/opt/xingchen/agent/agent.sh list-versions
+/opt/xingchen/agent/agent.sh rollback v1.20.4
 ```
 
 默认卸载会保留配置和离线缓存：
@@ -640,7 +642,15 @@ sc.exe query GuanlanAgent
 sc.exe qc GuanlanAgent
 ```
 
-重新运行控制台生成的安装命令可以更新配置和程序。Windows Agent 配置目录为 `%ProgramData%\GuanlanMonitor`，程序目录为 `%ProgramFiles%\GuanlanMonitor`。
+更新和回退：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\install-agent.ps1 -Action update
+powershell -ExecutionPolicy Bypass -File .\deploy\install-agent.ps1 -Action list-versions
+powershell -ExecutionPolicy Bypass -File .\deploy\install-agent.ps1 -Action rollback -Version v1.20.4
+```
+
+重新运行控制台生成的安装命令可以更新配置和程序。Windows Agent 配置目录为 `%ProgramData%\GuanlanMonitor`，程序目录为 `%ProgramFiles%\GuanlanMonitor`；更新前会保留 `.backup`，新服务启动失败会自动恢复。
 
 ### 10.4 推荐检查频率
 

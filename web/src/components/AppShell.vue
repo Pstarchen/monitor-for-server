@@ -30,7 +30,7 @@ const twoFactorSecret = ref('')
 const twoFactorUri = ref('')
 const twoFactorQr = ref('')
 const githubUrl = 'https://github.com/Pstarchen/monitor-for-server'
-const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
+const dark = ref(localStorage.getItem('xingchen-theme') === 'dark')
 const alertCenterOpen = ref(false)
 const alertPreview = ref<AlertEvent[]>([])
 const alertPreviewLoading = ref(false)
@@ -80,7 +80,7 @@ function isActive(path: string) {
 
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
-  localStorage.setItem('guanlan-theme', dark.value ? 'dark' : 'light')
+  localStorage.setItem('xingchen-theme', dark.value ? 'dark' : 'light')
 }
 
 function toggleTheme() {
@@ -241,7 +241,7 @@ function connectRealtime() {
   socket = new WebSocket(`${protocol}//${location.host}/ws/metrics`)
   socket.onmessage = (event) => {
     try {
-      window.dispatchEvent(new CustomEvent('guanlan:realtime', { detail: JSON.parse(event.data) }))
+      window.dispatchEvent(new CustomEvent('xingchen:realtime', { detail: JSON.parse(event.data) }))
     } catch {
       // Ignore malformed events and retain polling as the source of truth.
     }
@@ -268,7 +268,7 @@ onMounted(() => {
   connectRealtime()
   scheduleInitialAlertPreview()
   alertPollTimer = window.setInterval(() => loadAlertPreview(true), 60_000)
-  window.addEventListener('guanlan:realtime', scheduleAlertRefresh)
+  window.addEventListener('xingchen:realtime', scheduleAlertRefresh)
 })
 
 onBeforeUnmount(() => {
@@ -278,7 +278,7 @@ onBeforeUnmount(() => {
   window.clearTimeout(alertInitialTimer)
   window.clearInterval(alertPollTimer)
   if (alertIdleHandle && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(alertIdleHandle)
-  window.removeEventListener('guanlan:realtime', scheduleAlertRefresh)
+  window.removeEventListener('xingchen:realtime', scheduleAlertRefresh)
   socket?.close()
 })
 </script>

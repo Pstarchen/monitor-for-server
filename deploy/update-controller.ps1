@@ -31,9 +31,12 @@ try {
     $envFile = Join-Path $projectRoot '.env'
     if (Test-Path -LiteralPath $envFile) { $composeArgs += @('--env-file', $envFile) }
     function Read-UpdateSetting([string] $Name, [string] $DefaultValue = '') {
+        $legacyName = $Name -replace '^XINGCHEN_', 'GUANLAN_'
         $value = [Environment]::GetEnvironmentVariable($Name)
+        if (-not $value -and $legacyName -ne $Name) { $value = [Environment]::GetEnvironmentVariable($legacyName) }
         if (-not $value -and (Test-Path -LiteralPath $envFile)) {
             $line = Select-String -LiteralPath $envFile -Pattern "^$Name=(.*)$" | Select-Object -First 1
+            if (-not $line -and $legacyName -ne $Name) { $line = Select-String -LiteralPath $envFile -Pattern "^$legacyName=(.*)$" | Select-Object -First 1 }
             if ($line) { $value = $line.Matches[0].Groups[1].Value.Trim('"') }
         }
         if ($value) { return $value }
@@ -41,9 +44,9 @@ try {
     }
     # Registry mirrors should fail over quickly, while the official registry
     # keeps a longer window for constrained international links.
-    $pullTimeoutSeconds = [int](Read-UpdateSetting 'GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS' '180')
-    $mirrorTimeoutSeconds = [int](Read-UpdateSetting 'GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS' '45')
-    $composeTimeoutSeconds = [int](Read-UpdateSetting 'GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS' '900')
+    $pullTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS' '180')
+    $mirrorTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS' '45')
+    $composeTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS' '900')
     if ($pullTimeoutSeconds -lt 1 -or $mirrorTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
     $env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
     $env:COMPOSE_HTTP_TIMEOUT = [string]$composeTimeoutSeconds
@@ -77,24 +80,24 @@ try {
     }
     $services = @('setup', 'server', 'web')
     $imageNames = @(
-        'GUANLAN_SETUP_IMAGE=ghcr.io/pstarchen/monitor-for-server-setup:latest',
-        'GUANLAN_SERVER_IMAGE=ghcr.io/pstarchen/monitor-for-server-server:latest',
-        'GUANLAN_WEB_IMAGE=ghcr.io/pstarchen/monitor-for-server-web:latest'
+        'XINGCHEN_SETUP_IMAGE=ghcr.io/pstarchen/monitor-for-server-setup:latest',
+        'XINGCHEN_SERVER_IMAGE=ghcr.io/pstarchen/monitor-for-server-server:latest',
+        'XINGCHEN_WEB_IMAGE=ghcr.io/pstarchen/monitor-for-server-web:latest'
     )
     $sourceContexts = @('setup', 'server', 'web')
-    $targetVersion = Read-UpdateSetting 'GUANLAN_TARGET_VERSION'
+    $targetVersion = Read-UpdateSetting 'XINGCHEN_TARGET_VERSION'
     if ($targetVersion) {
-        if ($targetVersion -notmatch '^v?(\d+)\.(\d+)\.(\d+)$') { throw 'GUANLAN_TARGET_VERSION 必须是稳定语义版本，例如 v1.20.5。' }
+        if ($targetVersion -notmatch '^v?(\d+)\.(\d+)\.(\d+)$') { throw 'XINGCHEN_TARGET_VERSION 必须是稳定语义版本，例如 v1.20.5。' }
         $targetVersion = "v$($Matches[1]).$($Matches[2]).$($Matches[3])"
         $sourceRef = $targetVersion
     }
     else {
-        $sourceRef = Read-UpdateSetting 'GUANLAN_SOURCE_REF' 'main'
+        $sourceRef = Read-UpdateSetting 'XINGCHEN_SOURCE_REF' 'main'
     }
     if ($sourceRef -notmatch '^[a-zA-Z0-9._/-]+$' -or $sourceRef.StartsWith('-') -or $sourceRef.Contains('..')) {
         throw '总控源码 Git ref 无效。'
     }
-    $sourceRepositories = @((Read-UpdateSetting 'GUANLAN_SOURCE_REPOSITORIES' 'https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git').Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $sourceRepositories = @((Read-UpdateSetting 'XINGCHEN_SOURCE_REPOSITORIES' 'https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git').Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($sourceRepositories.Count -eq 0) { throw '总控源码仓库地址不能为空。' }
     $resolvedImages = @()
     foreach ($entry in $imageNames) {
@@ -128,7 +131,7 @@ try {
         }
         if (-not $NoMirror -and $sourceImage.StartsWith('ghcr.io/')) {
             $suffix = $sourceImage.Substring(7)
-            $mirrorValue = Read-UpdateSetting 'GUANLAN_CONTROLLER_IMAGE_MIRRORS'
+            $mirrorValue = Read-UpdateSetting 'XINGCHEN_CONTROLLER_IMAGE_MIRRORS'
             $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @('ghcr.1ms.run', 'ghcr.nju.edu.cn') }
             foreach ($mirror in $mirrors) {
                 $candidate = $mirror.TrimEnd('/') + '/' + $suffix

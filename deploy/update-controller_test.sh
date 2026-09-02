@@ -69,8 +69,8 @@ mkdir -p "${timeout_root}/deploy"
 cp "${updater}" "${timeout_root}/deploy/update-controller.sh"
 printf '%s\n' \
   'POSTGRES_PASSWORD="test-only"' \
-  'GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS="7"' \
-  'GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS="11"' > "${timeout_root}/.env"
+  'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS="7"' \
+  'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS="11"' > "${timeout_root}/.env"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" bash "${timeout_root}/deploy/update-controller.sh" --check
 grep -F 'timeout 7s docker pull ghcr.1ms.run/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
@@ -114,19 +114,19 @@ if grep -q 'remove-orphans' "${log_file}"; then
 fi
 
 : > "${log_file}"
-GUANLAN_TARGET_VERSION=v1.20.5 TEST_IMAGE_VERSION=v1.20.5 run_update --apply --no-mirror
+XINGCHEN_TARGET_VERSION=v1.20.5 TEST_IMAGE_VERSION=v1.20.5 run_update --apply --no-mirror
 grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.5' "${log_file}" >/dev/null
 grep -F 'docker image inspect --format {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/pstarchen/monitor-for-server-server:v1.20.5' "${log_file}" >/dev/null
 grep -F 'docker tag ghcr.io/pstarchen/monitor-for-server-server:v1.20.5 ghcr.io/pstarchen/monitor-for-server-server:latest' "${log_file}" >/dev/null
 
 : > "${log_file}"
-if GUANLAN_TARGET_VERSION=v1.20.5 TEST_IMAGE_VERSION=v1.20.4 run_update --check --no-mirror --no-source-fallback; then
+if XINGCHEN_TARGET_VERSION=v1.20.5 TEST_IMAGE_VERSION=v1.20.4 run_update --check --no-mirror --no-source-fallback; then
   echo 'Update accepted an image from a different release.' >&2
   exit 1
 fi
 
 : > "${log_file}"
-GUANLAN_TARGET_VERSION=v1.20.5 TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
+XINGCHEN_TARGET_VERSION=v1.20.5 TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
 grep -E 'docker build --pull --tag xingchen-controller-source-[^ ]+-0:candidate https://gitee.com/starchen520/monitor-for-server.git#v1.20.5:setup' "${log_file}" >/dev/null
 grep -E 'docker build --pull --tag xingchen-controller-source-[^ ]+-0:candidate https://github.com/Pstarchen/monitor-for-server.git#v1.20.5:setup' "${log_file}" >/dev/null
 

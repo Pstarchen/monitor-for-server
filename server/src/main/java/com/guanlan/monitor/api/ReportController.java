@@ -51,7 +51,7 @@ public class ReportController {
         }
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(new MediaType("text", "csv", StandardCharsets.UTF_8));
-        headers.setContentDisposition(ContentDisposition.attachment().filename("guanlan-report.csv", StandardCharsets.UTF_8).build());
+        headers.setContentDisposition(ContentDisposition.attachment().filename("xingchen-report.csv", StandardCharsets.UTF_8).build());
         return ResponseEntity.ok().headers(headers).body(csv.toString().getBytes(StandardCharsets.UTF_8));
     }
 

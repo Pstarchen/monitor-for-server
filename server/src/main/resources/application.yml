@@ -11,7 +11,7 @@ server:
 
 spring:
   application:
-    name: guanlan-monitor
+    name: xingchen-monitor
   servlet:
     multipart:
       max-file-size: 50MB

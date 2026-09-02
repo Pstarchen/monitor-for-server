@@ -15,7 +15,7 @@ const loading = ref(true)
 const error = ref('')
 const sort = ref<SortKey>('default')
 const search = ref('')
-const dark = ref(localStorage.getItem('guanlan-theme') === 'dark')
+const dark = ref(localStorage.getItem('xingchen-theme') === 'dark')
 const githubUrl = 'https://github.com/Pstarchen/monitor-for-server'
 let timer = 0
 let pollTimer = 0
@@ -43,7 +43,7 @@ const onlineServices = computed(() => (overview.value?.services ?? []).filter((s
 
 function applyTheme() {
   document.documentElement.classList.toggle('dark', dark.value)
-  localStorage.setItem('guanlan-theme', dark.value ? 'dark' : 'light')
+  localStorage.setItem('xingchen-theme', dark.value ? 'dark' : 'light')
 }
 
 function toggleTheme() {
@@ -94,14 +94,14 @@ onMounted(() => {
   loadBranding()
   applyTheme()
   load()
-  window.addEventListener('guanlan:realtime', scheduleRefresh)
+  window.addEventListener('xingchen:realtime', scheduleRefresh)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   pollTimer = window.setInterval(poll, 30_000)
 })
 onBeforeUnmount(() => {
   window.clearTimeout(timer)
   window.clearInterval(pollTimer)
-  window.removeEventListener('guanlan:realtime', scheduleRefresh)
+  window.removeEventListener('xingchen:realtime', scheduleRefresh)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>

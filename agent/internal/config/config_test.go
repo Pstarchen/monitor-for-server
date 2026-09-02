@@ -167,3 +167,15 @@ func TestLoadRejectsUnsafeResourceLimits(t *testing.T) {
 		t.Fatal("expected unsafe resource limits to be rejected")
 	}
 }
+
+func TestEnvCompatPrefersXingchenNamespace(t *testing.T) {
+	t.Setenv("GUANLAN_AGENT_CONFIG", "legacy.json")
+	t.Setenv("XINGCHEN_AGENT_CONFIG", "xingchen.json")
+	if got := envCompat("XINGCHEN_AGENT_CONFIG", "GUANLAN_AGENT_CONFIG", "default.json"); got != "xingchen.json" {
+		t.Fatalf("envCompat() = %q, want XINGCHEN value", got)
+	}
+	t.Setenv("XINGCHEN_AGENT_CONFIG", "")
+	if got := envCompat("XINGCHEN_AGENT_CONFIG", "GUANLAN_AGENT_CONFIG", "default.json"); got != "legacy.json" {
+		t.Fatalf("envCompat() = %q, want legacy fallback", got)
+	}
+}

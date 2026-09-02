@@ -771,7 +771,7 @@ class AuthAndAgentIntegrationTest {
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/mcp")
                         .header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.result.serverInfo.name").value("guanlan-monitor"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.serverInfo.name").value("xingchen-monitor"));
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/mcp")
                         .header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)

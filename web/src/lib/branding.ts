@@ -21,13 +21,13 @@ export function brandAssetUrl(value: string | null | undefined, revision = 0): s
 function syncDocumentBranding(): void {
   if (typeof document !== 'undefined') {
     document.title = siteName.value
-    const icon = document.querySelector<HTMLLinkElement>('link[data-guanlan-site-icon]') ?? document.createElement('link')
+    const icon = document.querySelector<HTMLLinkElement>('link[data-xingchen-site-icon]') ?? document.createElement('link')
     const href = siteIconUrl.value || '/brand-icon.png'
     icon.rel = 'icon'
     if (href.split(/[?#]/, 1)[0].toLowerCase().endsWith('.svg')) icon.type = 'image/svg+xml'
     else icon.removeAttribute('type')
     icon.href = href
-    icon.dataset.guanlanSiteIcon = ''
+    icon.dataset.xingchenSiteIcon = ''
     if (!icon.parentNode) document.head.appendChild(icon)
   }
 }

@@ -3,18 +3,21 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 installer="${script_dir}/install-agent.sh"
-grep -F 'GUANLAN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn' "${installer}" >/dev/null
-grep -F 'GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45' "${installer}" >/dev/null
+grep -F 'XINGCHEN_AGENT_IMAGE_MIRRORS:-ghcr.1ms.run,ghcr.nju.edu.cn' "${installer}" >/dev/null
+grep -F 'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45' "${installer}" >/dev/null
 grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
 grep -F 'https://monitor.example.com/api/setup/agent-installer?platform=linux' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F 'https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F -- 'curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F 'env GUANLAN_AGENT_KEY=' "${script_dir}/../docs/monitored-agent.md" >/dev/null
-grep -F './xingchen-agent.sh install --server-url' "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F "XINGCHEN_AGENT_KEY='<一次性密钥>'" "${script_dir}/../docs/monitored-agent.md" >/dev/null
+grep -F "XINGCHEN_SERVER='https://monitor.example.com'" "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F '/opt/xingchen/agent/agent.sh update' "${script_dir}/../docs/monitored-agent.md" >/dev/null
 grep -F 'manager_update()' "${installer}" >/dev/null
-if grep -Eq 'v1\.12\.0|cdn\.jsdelivr\.net|export GUANLAN_AGENT_KEY' "${script_dir}/../docs/monitored-agent.md"; then
+grep -F 'checksums.txt' "${installer}" >/dev/null
+grep -F 'atomic_install()' "${installer}" >/dev/null
+grep -F 'agent_mode="${XINGCHEN_AGENT_MODE:-native}"' "${installer}" >/dev/null
+if grep -Eq 'v1\.12\.0|cdn\.jsdelivr\.net|export XINGCHEN_AGENT_KEY' "${script_dir}/../docs/monitored-agent.md"; then
   echo 'Documentation still contains the retired multi-source installer command.' >&2
   exit 1
 fi
@@ -131,18 +134,18 @@ run_installer() {
     "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
     "TEST_FAIL_AGENT_PULLS=${TEST_FAIL_AGENT_PULLS:-0}"
     "TEST_FAIL_GITEE_BUILD=${TEST_FAIL_GITEE_BUILD:-0}"
-    "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
-    "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
-    "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
-    "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
-    "GUANLAN_AGENT_KEY=test-agent-key"
+    "XINGCHEN_AGENT_IMAGE_MIRRORS=ghcr.io"
+    "XINGCHEN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+    "XINGCHEN_SYSTEMD_DIR=${temp_dir}/systemd"
+    "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
+    "XINGCHEN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
     env "${environment[@]}" bash "${installer}" \
-      --server-url "${server_url}" --device-id test-device --no-auto-update "$@"
+      --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@"
   else
     sudo env "${environment[@]}" bash "${installer}" \
-      --server-url "${server_url}" --device-id test-device --no-auto-update "$@"
+      --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@"
   fi
 }
 
@@ -156,18 +159,18 @@ run_installer_stdin() {
     "TEST_DOCKER_AVAILABLE=${docker_available}"
     "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
     "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
-    "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
-    "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
-    "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
-    "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
-    "GUANLAN_AGENT_KEY=test-agent-key"
+    "XINGCHEN_AGENT_IMAGE_MIRRORS=ghcr.io"
+    "XINGCHEN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+    "XINGCHEN_SYSTEMD_DIR=${temp_dir}/systemd"
+    "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
+    "XINGCHEN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
     env "${environment[@]}" bash -s -- \
-      --server-url "${server_url}" --device-id test-device --no-auto-update "$@" < "${installer}"
+    --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@" < "${installer}"
   else
     sudo env "${environment[@]}" bash -s -- \
-      --server-url "${server_url}" --device-id test-device --no-auto-update "$@" < "${installer}"
+    --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@" < "${installer}"
   fi
 }
 
@@ -198,9 +201,9 @@ manager_environment=(
   "TEST_LOG=${log_file}"
   "TEST_DOCKER_AVAILABLE=1"
   "TEST_CONTAINER_EXISTS=1"
-  "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
-  "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
-  "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
+  "XINGCHEN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+  "XINGCHEN_SYSTEMD_DIR=${temp_dir}/systemd"
+  "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
 )
 if [[ "${EUID}" -eq 0 ]]; then
   env "${manager_environment[@]}" bash "${installer}" update
@@ -307,15 +310,15 @@ auto_update_environment=(
   "TEST_LOG=${log_file}"
   "TEST_CONFIG=${config_file}"
   "TEST_DOCKER_AVAILABLE=1"
-  "GUANLAN_AGENT_IMAGE_MIRRORS=ghcr.io"
-  "GUANLAN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
-  "GUANLAN_SYSTEMD_DIR=${temp_dir}/systemd"
-  "GUANLAN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
-  "GUANLAN_AGENT_KEY=test-agent-key"
+  "XINGCHEN_AGENT_IMAGE_MIRRORS=ghcr.io"
+  "XINGCHEN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
+  "XINGCHEN_SYSTEMD_DIR=${temp_dir}/systemd"
+  "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
+  "XINGCHEN_AGENT_KEY=test-agent-key"
 )
 if [[ "${EUID}" -eq 0 ]]; then
   env "${auto_update_environment[@]}" bash "${installer}" \
-    --server-url "${server_url}" --device-id test-device
+    --server-url "${server_url}" --device-id test-device --docker
 else
   sudo env "${auto_update_environment[@]}" bash "${installer}" \
     --server-url "${server_url}" --device-id test-device

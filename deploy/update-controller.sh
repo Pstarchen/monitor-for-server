@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# XINGCHEN_* is the public configuration namespace. Read the old namespace
+# once for compatibility with existing .env files and command invocations.
+for suffix in UPDATE_PULL_TIMEOUT_SECONDS UPDATE_MIRROR_TIMEOUT_SECONDS UPDATE_COMPOSE_TIMEOUT_SECONDS TARGET_VERSION SOURCE_REF SOURCE_BUILD_TIMEOUT_SECONDS SOURCE_REPOSITORIES HOST_PROJECT_ROOT SETUP_IMAGE SERVER_IMAGE WEB_IMAGE AGENT_IMAGE CONTROLLER_IMAGE_MIRRORS; do
+  primary="XINGCHEN_${suffix}"
+  legacy="GUANLAN_${suffix}"
+  if [[ -z "${!primary:-}" && -n "${!legacy:-}" ]]; then
+    export "${primary}=${!legacy}"
+  fi
+done
+
 usage() {
   cat <<'USAGE'
 Usage: update-controller.sh [--check|--apply|--auto] [--build|--source-build] [--no-mirror] [--no-source-fallback]
@@ -39,17 +49,25 @@ project_root="$(cd -- "${script_dir}/.." && pwd)"
 cd "${project_root}"
 
 read_env_value() {
-  local key="$1"
-  awk -v key="${key}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true
+  local key="$1" value legacy
+  value="$(awk -v key="${key}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true)"
+  if [[ -n "${value}" ]]; then
+    printf '%s' "${value}"
+    return
+  fi
+  if [[ "${key}" == XINGCHEN_* ]]; then
+    legacy="GUANLAN_${key#XINGCHEN_}"
+    awk -v key="${legacy}" 'index($0, key "=") == 1 {value=substr($0, length(key) + 2); gsub(/^"|"$/, "", value); print value; exit}' .env 2>/dev/null || true
+  fi
 }
 
 # Registry downloads can legitimately take several minutes on a constrained link.
 # Keep the timeout finite, configurable, and aligned with the Windows updater.
-pull_timeout_seconds="${GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_UPDATE_PULL_TIMEOUT_SECONDS)}"
+pull_timeout_seconds="${XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS:-$(read_env_value XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS)}"
 pull_timeout_seconds="${pull_timeout_seconds:-180}"
-mirror_timeout_seconds="${GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_UPDATE_MIRROR_TIMEOUT_SECONDS)}"
+mirror_timeout_seconds="${XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-$(read_env_value XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS)}"
 mirror_timeout_seconds="${mirror_timeout_seconds:-45}"
-compose_timeout_seconds="${GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_UPDATE_COMPOSE_TIMEOUT_SECONDS)}"
+compose_timeout_seconds="${XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS:-$(read_env_value XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS)}"
 compose_timeout_seconds="${compose_timeout_seconds:-900}"
 if [[ ! "${pull_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${mirror_timeout_seconds}" =~ ^[1-9][0-9]*$ || ! "${compose_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
   echo "更新超时必须是正整数秒数。" >&2
@@ -87,25 +105,25 @@ if command -v flock >/dev/null 2>&1; then
   fi
 fi
 
-target_version="${GUANLAN_TARGET_VERSION:-$(read_env_value GUANLAN_TARGET_VERSION)}"
+target_version="${XINGCHEN_TARGET_VERSION:-$(read_env_value XINGCHEN_TARGET_VERSION)}"
 if [[ -n "${target_version}" ]]; then
   if [[ "${target_version}" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
     target_version="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
   else
-    echo "GUANLAN_TARGET_VERSION 必须是稳定语义版本，例如 v1.20.5。" >&2
+    echo "XINGCHEN_TARGET_VERSION 必须是稳定语义版本，例如 v1.20.5。" >&2
     exit 2
   fi
   source_ref="${target_version}"
 else
-  source_ref="${GUANLAN_SOURCE_REF:-$(read_env_value GUANLAN_SOURCE_REF)}"
+  source_ref="${XINGCHEN_SOURCE_REF:-$(read_env_value XINGCHEN_SOURCE_REF)}"
   source_ref="${source_ref:-main}"
 fi
-source_build_timeout_seconds="${GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS:-$(read_env_value GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS)}"
+source_build_timeout_seconds="${XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS:-$(read_env_value XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS)}"
 source_build_timeout_seconds="${source_build_timeout_seconds:-1200}"
-source_repository_list="${GUANLAN_SOURCE_REPOSITORIES:-$(read_env_value GUANLAN_SOURCE_REPOSITORIES)}"
+source_repository_list="${XINGCHEN_SOURCE_REPOSITORIES:-$(read_env_value XINGCHEN_SOURCE_REPOSITORIES)}"
 IFS=',' read -r -a source_repositories <<< "${source_repository_list:-https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git}"
 if [[ ! "${source_build_timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
-  echo "GUANLAN_SOURCE_BUILD_TIMEOUT_SECONDS 必须是正整数秒数。" >&2
+  echo "XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS 必须是正整数秒数。" >&2
   exit 2
 fi
 if ((${#source_repositories[@]} == 0)) || [[ -z "${source_ref}" || "${source_ref}" == -* || "${source_ref}" == *..* || ! "${source_ref}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
@@ -127,7 +145,7 @@ fi
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   compose_args+=(--profile host-monitoring)
 fi
-compose_project_root="${GUANLAN_HOST_PROJECT_ROOT:-${project_root}}"
+compose_project_root="${XINGCHEN_HOST_PROJECT_ROOT:-${project_root}}"
 compose_args+=(-f "${project_root}/docker-compose.yml" --project-directory "${compose_project_root}" --env-file "${project_root}/.env")
 services=(setup server web)
 source_contexts=(setup server web)
@@ -146,12 +164,12 @@ image_value() {
 }
 
 source_images=(
-  "$(image_value GUANLAN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:latest)"
-  "$(image_value GUANLAN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:latest)"
-  "$(image_value GUANLAN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:latest)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:latest)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:latest)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:latest)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
-  source_images+=("$(image_value GUANLAN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:latest)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:latest)")
 fi
 
 verify_image_version() {
@@ -179,9 +197,9 @@ pull_one() {
   image="$(pull_reference "${destination}")"
   if [[ "${use_mirror}" == true && "${image}" == ghcr.io/* ]]; then
     suffix="${image#ghcr.io/}"
-    local mirror_list="${GUANLAN_CONTROLLER_IMAGE_MIRRORS:-}"
+    local mirror_list="${XINGCHEN_CONTROLLER_IMAGE_MIRRORS:-}"
     if [[ -z "${mirror_list}" && -f .env ]]; then
-      mirror_list="$(read_env_value GUANLAN_CONTROLLER_IMAGE_MIRRORS)"
+      mirror_list="$(read_env_value XINGCHEN_CONTROLLER_IMAGE_MIRRORS)"
     fi
     IFS=',' read -r -a prefixes <<< "${mirror_list:-ghcr.1ms.run,ghcr.nju.edu.cn}"
     for prefix in "${prefixes[@]}"; do

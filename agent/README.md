@@ -1,8 +1,10 @@
 # 星辰监控 Agent
 
-Agent 默认读取当前目录的 `agent.json`，也可通过 `-config` 或 `GUANLAN_AGENT_CONFIG` 指定配置文件。生产环境必须使用 HTTPS；只有本机开发地址会默认允许 HTTP。
+Agent 默认读取当前目录的 `agent.json`，也可通过 `-config` 或 `XINGCHEN_AGENT_CONFIG` 指定配置文件。生产环境必须使用 HTTPS；只有本机开发地址会默认允许 HTTP。
 
-Linux 安装器优先拉取 `ghcr.io/pstarchen/monitor-for-server-agent:latest`。镜像以 `/guanlan-agent` 为入口，支持 `linux/amd64` 和 `linux/arm64`；安装器负责挂载配置、缓冲卷及只读宿主机根目录。
+Linux 安装器默认从 GitHub Release 下载 `linux/amd64` 或 `linux/arm64` 预编译程序，并在安装前校验 `checksums.txt`；安装到 `/usr/local/bin/guanlan-agent` 后由 `guanlan-agent.service` 管理。GitHub 暂时不可用时才回退到 Gitee/GitHub 源码构建。需要容器隔离或宿主机 Docker 指标时，可显式添加 `--docker` 使用 GHCR 镜像。
+
+安装器命令兼容 Nezha 式环境变量入口：`XINGCHEN_SERVER`、`XINGCHEN_DEVICE_ID`、`XINGCHEN_AGENT_KEY`。安装完成后，`/opt/xingchen/agent/agent.sh update` 会下载最新 Release，更新前在 `/var/lib/guanlan-agent/backups` 保留旧程序；`list-versions` 和 `rollback v1.20.4` 可查看及回退已发布版本。
 
 ```powershell
 go build -o bin/guanlan-agent.exe ./cmd/agent

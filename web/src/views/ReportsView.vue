@@ -46,7 +46,7 @@ async function download() {
     const url = URL.createObjectURL(response.data)
     const link = document.createElement('a')
     link.href = url
-    link.download = `guanlan-report-${rangeDays.value}d.csv`
+    link.download = `xingchen-report-${rangeDays.value}d.csv`
     link.click()
     URL.revokeObjectURL(url)
     ElMessage.success('报告已下载')

@@ -346,11 +346,17 @@ func environmentValue(name, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 		return value
 	}
+	if strings.HasPrefix(name, "XINGCHEN_") {
+		legacy := "GUANLAN_" + strings.TrimPrefix(name, "XINGCHEN_")
+		if value := strings.TrimSpace(os.Getenv(legacy)); value != "" {
+			return value
+		}
+	}
 	return fallback
 }
 
 func detectHostWorkspace() string {
-	if configured := strings.TrimSpace(os.Getenv("GUANLAN_HOST_PROJECT_ROOT")); configured != "" {
+	if configured := environmentValue("XINGCHEN_HOST_PROJECT_ROOT", ""); configured != "" {
 		return filepath.Clean(configured)
 	}
 	hostname, err := os.Hostname()
@@ -374,7 +380,13 @@ func configuredEnvironmentValue(name string) string {
 	if err != nil {
 		return ""
 	}
-	return values[name]
+	if value := strings.TrimSpace(values[name]); value != "" {
+		return value
+	}
+	if strings.HasPrefix(name, "XINGCHEN_") {
+		return strings.TrimSpace(values["GUANLAN_"+strings.TrimPrefix(name, "XINGCHEN_")])
+	}
+	return ""
 }
 
 func setupCompleted() bool {

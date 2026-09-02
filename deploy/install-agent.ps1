@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] [string] $ServerUrl,
-    [Parameter(Mandatory = $true)] [string] $DeviceId,
+    [ValidateSet('install', 'update', 'rollback', 'list-versions', 'status', 'uninstall')] [string] $Action = 'install',
+    [string] $ServerUrl,
+    [string] $DeviceId,
     [ValidateSet('1s', '3s', '10s', '30s', '60s')] [string] $Interval = '3s',
     [string] $BinaryPath,
     [string[]] $RepositoryUrl = @(
@@ -9,6 +10,9 @@ param(
         'https://github.com/Pstarchen/monitor-for-server.git'
     ),
     [string] $SourceRef = 'main',
+    [string] $Version,
+    [ValidatePattern('^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$')] [string] $ReleaseRepo = 'Pstarchen/monitor-for-server',
+    [string[]] $ReleaseBaseUrl = @('https://github.com/Pstarchen/monitor-for-server/releases/download'),
     [string[]] $MonitoredService = @(),
     [string[]] $MonitoredProcess = @(),
     [string[]] $DiskMountpoint = @(),
@@ -25,7 +29,8 @@ param(
     [switch] $SkipPorts,
     [ValidateRange(1, 512)] [int] $PortCollectionLimit = 512,
     [switch] $SkipContainers,
-    [ValidateRange(1, 100)] [int] $ContainerCollectionLimit = 100
+    [ValidateRange(1, 100)] [int] $ContainerCollectionLimit = 100,
+    [switch] $Purge
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,15 +38,23 @@ $serviceName = 'GuanlanAgent'
 $installDir = Join-Path $env:ProgramFiles 'GuanlanMonitor'
 $dataDir = Join-Path $env:ProgramData 'GuanlanMonitor'
 $configPath = Join-Path $dataDir 'agent.json'
-$agentKey = $env:GUANLAN_AGENT_KEY
+$agentKey = $env:XINGCHEN_AGENT_KEY
+if ([string]::IsNullOrWhiteSpace($agentKey)) { $agentKey = $env:GUANLAN_AGENT_KEY }
+
+if ($Action -eq 'install' -and ([string]::IsNullOrWhiteSpace($ServerUrl) -or [string]::IsNullOrWhiteSpace($DeviceId) -or [string]::IsNullOrWhiteSpace($agentKey))) {
+    throw '安装 Agent 需要 ServerUrl、DeviceId 和 XINGCHEN_AGENT_KEY。'
+}
+if ($Action -ne 'install' -and -not (Test-Path -LiteralPath $configPath)) {
+    throw "Agent 尚未安装：$configPath"
+}
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw '请以管理员身份运行此安装脚本。'
 }
-if ([string]::IsNullOrWhiteSpace($agentKey)) {
-    throw '请通过 GUANLAN_AGENT_KEY 环境变量提供一次性 Agent 密钥。'
+if ($Action -eq 'install' -and [string]::IsNullOrWhiteSpace($agentKey)) {
+    throw '请通过 XINGCHEN_AGENT_KEY 环境变量提供一次性 Agent 密钥。'
 }
 if ($RepositoryUrl.Count -eq 0 -or @($RepositoryUrl | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
     throw 'Agent 源码仓库地址不能为空。'
@@ -100,35 +113,88 @@ function Resolve-ServerUrl {
     throw "无法访问 $raw 的 HTTPS 或 HTTP 健康检查。请检查 DNS、端口和服务状态。"
 }
 
+function Normalize-ReleaseVersion([string] $Value) {
+    $normalized = $Value.Trim().TrimStart('v')
+    if ($normalized -notmatch '^\d+\.\d+\.\d+$') { throw "版本号必须是稳定语义版本，例如 v1.20.6。" }
+    return "v$normalized"
+}
+
+function Get-ReleaseVersion([string] $Requested) {
+    if (-not [string]::IsNullOrWhiteSpace($Requested)) { return Normalize-ReleaseVersion $Requested }
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'guanlan-agent-installer' } -TimeoutSec 30
+    return Normalize-ReleaseVersion ([string] $release.tag_name)
+}
+
+function Get-ReleaseBinary([string] $Requested, [string] $Destination) {
+    $version = Get-ReleaseVersion $Requested
+    $arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
+        'X64' { 'amd64' }
+        'Arm64' { 'arm64' }
+        default { throw '当前 Windows CPU 架构不支持预编译 Agent。' }
+    }
+    $asset = "guanlan-agent_$($version.TrimStart('v'))_windows_$arch.zip"
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    foreach ($base in $ReleaseBaseUrl) {
+        if ($base -notmatch '^https://(github\.com|gitee\.com)/[^/]+/[^/]+/releases/download$') { continue }
+        $archive = Join-Path $Destination $asset
+        $checksums = Join-Path $Destination 'checksums.txt'
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/$asset" -OutFile $archive -TimeoutSec 300
+            Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/checksums.txt" -OutFile $checksums -TimeoutSec 60
+            $expected = (Get-Content -LiteralPath $checksums | ForEach-Object { $parts = $_ -split '\s+'; if ($parts.Count -ge 2 -and ($parts[1] -eq $asset -or $parts[1].TrimStart('*') -eq $asset)) { $parts[0]; break } })
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($expected) -or $expected.ToLowerInvariant() -ne $actual) { throw 'Agent Release SHA256 校验失败。' }
+            Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
+            $binary = Join-Path $Destination 'guanlan-agent.exe'
+            if (-not (Test-Path -LiteralPath $binary)) { throw 'Agent 压缩包中未找到 guanlan-agent.exe。' }
+            return [pscustomobject]@{ Path = $binary; Version = $version }
+        }
+        catch {
+            Remove-Item -LiteralPath $archive, $checksums -Force -ErrorAction SilentlyContinue
+        }
+    }
+    throw "Agent $version 下载或校验失败。"
+}
+
 function Install-AgentUpdater {
     if ($NoAutoUpdate) { return }
     $updaterPath = Join-Path $dataDir 'update-agent.ps1'
     $taskName = 'GuanlanAgentUpdate'
-    $repositoryList = ($RepositoryUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
+    $releaseBaseList = ($ReleaseBaseUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
     $script = @"
-`$ErrorActionPreference = 'SilentlyContinue'
-if (-not (Get-Command git -ErrorAction SilentlyContinue) -or -not (Get-Command go -ErrorAction SilentlyContinue)) { exit 0 }
-`$repositories = @($repositoryList)
+`$ErrorActionPreference = 'Stop'
+`$releaseRepo = '$ReleaseRepo'
+`$releaseBases = @($releaseBaseList)
 `$temp = Join-Path ([IO.Path]::GetTempPath()) ('guanlan-agent-update-' + [Guid]::NewGuid().ToString('N'))
 try {
-    `$cloned = `$false
-    foreach (`$repository in `$repositories) {
-        if (Test-Path -LiteralPath `$temp) { Remove-Item -LiteralPath `$temp -Recurse -Force -ErrorAction SilentlyContinue }
-        Write-Host "正在尝试 Agent 源码仓库：`$repository ($SourceRef)"
-        & git clone --branch '$SourceRef' --depth 1 --filter=blob:none --sparse `$repository `$temp | Out-Null
-        if (`$LASTEXITCODE -eq 0) {
-            & git -C `$temp sparse-checkout set agent | Out-Null
-            if (`$LASTEXITCODE -eq 0) { `$cloned = `$true; break }
-        }
+    `$requested = `$args[0]
+    if ([string]::IsNullOrWhiteSpace(`$requested)) { `$release = Invoke-RestMethod -Uri "https://api.github.com/repos/`$releaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'guanlan-agent-updater' } -TimeoutSec 30; `$requested = [string]`$release.tag_name }
+    `$version = (`$requested.TrimStart('v'))
+    if (`$version -notmatch '^\d+\.\d+\.\d+$') { throw '无效的 Agent Release 版本。' }
+    `$version = "v`$version"
+    `$arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq 'Arm64') { 'arm64' } else { 'amd64' }
+    `$asset = "guanlan-agent_`$(`$version.TrimStart('v'))_windows_`$arch.zip"
+    New-Item -ItemType Directory -Force -Path `$temp | Out-Null
+    `$downloaded = `$false
+    foreach (`$base in `$releaseBases) {
+        try {
+            `$archive = Join-Path `$temp `$asset; `$checksums = Join-Path `$temp 'checksums.txt'
+            Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/`$asset" -OutFile `$archive -TimeoutSec 300
+            Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/checksums.txt" -OutFile `$checksums -TimeoutSec 60
+            `$expected = (Get-Content `$checksums | ForEach-Object { `$parts = `$_ -split '\s+'; if (`$parts.Count -ge 2 -and (`$parts[1] -eq `$asset -or `$parts[1].TrimStart('*') -eq `$asset)) { `$parts[0]; break } })
+            `$actual = (Get-FileHash -Algorithm SHA256 -LiteralPath `$archive).Hash.ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace(`$expected) -or `$expected.ToLowerInvariant() -ne `$actual) { throw 'Agent Release SHA256 校验失败。' }
+            Expand-Archive -LiteralPath `$archive -DestinationPath `$temp -Force
+            `$downloaded = `$true; break
+        } catch { }
     }
-    if (-not `$cloned) { Write-Error 'GitHub 与 Gitee Agent 源码均不可用。'; exit 1 }
-    `$built = Join-Path `$temp 'guanlan-agent.exe'
-    Push-Location (Join-Path `$temp 'agent')
-    try { `$env:CGO_ENABLED = '0'; & go build -trimpath -ldflags '-s -w' -o `$built ./cmd/agent } finally { Pop-Location; Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue }
-    if (`$LASTEXITCODE -ne 0) { exit 0 }
+    if (-not `$downloaded) { throw 'Agent Release 下载或校验失败。' }
+    `$newBinary = Join-Path `$temp 'guanlan-agent.exe'
+    `$backup = '$targetBinary.backup'
     Stop-Service -Name '$serviceName' -Force -ErrorAction SilentlyContinue
-    Copy-Item -LiteralPath `$built -Destination '$targetBinary' -Force
-    Start-Service -Name '$serviceName'
+    if (Test-Path -LiteralPath '$targetBinary') { Copy-Item -LiteralPath '$targetBinary' -Destination `$backup -Force }
+    try { Copy-Item -LiteralPath `$newBinary -Destination '$targetBinary' -Force; Start-Service -Name '$serviceName'; (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20)); Remove-Item -LiteralPath `$backup -Force -ErrorAction SilentlyContinue }
+    catch { if (Test-Path -LiteralPath `$backup) { Copy-Item -LiteralPath `$backup -Destination '$targetBinary' -Force }; Start-Service -Name '$serviceName' -ErrorAction SilentlyContinue; throw }
 } finally { if (Test-Path -LiteralPath `$temp) { Remove-Item -LiteralPath `$temp -Recurse -Force -ErrorAction SilentlyContinue } }
 "@
     [IO.File]::WriteAllText($updaterPath, $script, [Text.UTF8Encoding]::new($false))
@@ -150,6 +216,33 @@ function Get-AgentSource([string] $Destination) {
     return $false
 }
 
+if ($Action -ne 'install') {
+    switch ($Action) {
+        'status' { Get-Service -Name $serviceName -ErrorAction SilentlyContinue | Format-Table -AutoSize; exit 0 }
+        'list-versions' {
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'guanlan-agent-installer' } -TimeoutSec 30
+            $release | ForEach-Object { $_.tag_name }
+            exit 0
+        }
+        'update' { $requestedVersion = $Version }
+        'rollback' { if ([string]::IsNullOrWhiteSpace($Version)) { throw '回退需要 -Version v1.20.4。' }; $requestedVersion = $Version }
+        'uninstall' {
+            Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+            & sc.exe delete $serviceName | Out-Null
+            Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
+            if ($Purge) { Remove-Item -LiteralPath $dataDir -Recurse -Force -ErrorAction SilentlyContinue }
+            Write-Host '星辰监控 Agent 已卸载。'
+            exit 0
+        }
+    }
+    if ($Action -in @('update', 'rollback')) {
+        $updaterPath = Join-Path $dataDir 'update-agent.ps1'
+        if (-not (Test-Path -LiteralPath $updaterPath)) { throw '当前安装缺少更新器，请重新运行安装命令。' }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updaterPath $requestedVersion
+        exit $LASTEXITCODE
+    }
+}
+
 $resolvedServer = Resolve-ServerUrl
 $ServerUrl = $resolvedServer.Url
 $configAllowInsecureHttp = $resolvedServer.AllowInsecure
@@ -157,30 +250,35 @@ $configAllowInsecureHttp = $resolvedServer.AllowInsecure
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $temporaryBinary = $null
 $temporarySource = $null
+$temporaryRelease = $null
 try {
     if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
-        $sourceRoot = $projectRoot
-        if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
-            if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-                throw '未找到 Agent 源码。请安装 git，或通过 -BinaryPath 提供预编译 Agent。'
-            }
-            $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
-            if (-not (Get-AgentSource $temporarySource)) { throw 'GitHub 与 Gitee Agent 源码均不可用。' }
-            $sourceRoot = $temporarySource
-        }
-        if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
-            throw '未提供 -BinaryPath 时需要 Go 1.24+；也可以指定预编译 Agent。'
-        }
         $temporaryBinary = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-{0}.exe" -f [Guid]::NewGuid().ToString('N'))
-        Push-Location (Join-Path $sourceRoot 'agent')
         try {
-            $env:CGO_ENABLED = '0'
-            & go build -trimpath -ldflags '-s -w' -o $temporaryBinary ./cmd/agent
-            if ($LASTEXITCODE -ne 0) { throw 'Agent 编译失败。' }
+            $temporaryRelease = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-release-{0}" -f [Guid]::NewGuid().ToString('N'))
+            $release = Get-ReleaseBinary $Version $temporaryRelease
+            Copy-Item -LiteralPath $release.Path -Destination $temporaryBinary -Force
+            $Version = $release.Version
         }
-        finally {
-            Pop-Location
-            Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+        catch {
+            Write-Warning '预编译 Agent Release 不可用，回退到源码构建。'
+            $sourceRoot = $projectRoot
+            if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
+                if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw '未找到 Agent 源码。请安装 git，或通过 -BinaryPath 提供预编译 Agent。' }
+                $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("guanlan-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
+                if (-not (Get-AgentSource $temporarySource)) { throw 'GitHub 与 Gitee Agent 源码均不可用。' }
+                $sourceRoot = $temporarySource
+            }
+            if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw '未提供 -BinaryPath 时需要 Go 1.24+；也可以指定预编译 Agent。' }
+            Push-Location (Join-Path $sourceRoot 'agent')
+            try {
+                $env:CGO_ENABLED = '0'
+                & go build -trimpath -ldflags '-s -w' -o $temporaryBinary ./cmd/agent
+                if ($LASTEXITCODE -ne 0) { throw 'Agent 编译失败。' }
+            } finally {
+                Pop-Location
+                Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+            }
         }
         $BinaryPath = $temporaryBinary
     }
@@ -240,11 +338,15 @@ try {
     Write-Host '星辰监控 Agent 已安装并启动。可运行 Get-Service GuanlanAgent 查看状态。'
 }
 finally {
+    Remove-Item Env:XINGCHEN_AGENT_KEY -ErrorAction SilentlyContinue
     Remove-Item Env:GUANLAN_AGENT_KEY -ErrorAction SilentlyContinue
     if ($temporaryBinary -and (Test-Path -LiteralPath $temporaryBinary)) {
         Remove-Item -LiteralPath $temporaryBinary -Force
     }
     if ($temporarySource -and (Test-Path -LiteralPath $temporarySource)) {
         Remove-Item -LiteralPath $temporarySource -Recurse -Force
+    }
+    if ($temporaryRelease -and (Test-Path -LiteralPath $temporaryRelease)) {
+        Remove-Item -LiteralPath $temporaryRelease -Recurse -Force
     }
 }

@@ -6,7 +6,8 @@ RUN go mod download
 COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/guanlan-agent ./cmd/agent
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/guanlan-agent ./cmd/agent
 
 FROM alpine:3.22 AS artifact
 # smartmontools is optional at runtime: the collector reports UNKNOWN when

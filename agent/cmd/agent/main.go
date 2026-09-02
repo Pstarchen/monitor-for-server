@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,12 +18,18 @@ import (
 	"guanlan-monitor/agent/internal/worker"
 )
 
+var version = "dev"
+
 const (
 	maxReplayReportsPerCycle = 10
 	replayBudget             = 5 * time.Second
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version" || os.Args[1] == "version") {
+		fmt.Println(version)
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	cfg, err := config.Load(os.Args[1:])
 	if err != nil {

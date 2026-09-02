@@ -248,14 +248,14 @@ function scheduleRefresh(event: Event) {
 onMounted(() => {
   void load()
   void loadAuxiliary()
-  window.addEventListener('guanlan:realtime', scheduleRefresh)
+  window.addEventListener('xingchen:realtime', scheduleRefresh)
 })
 watch([trendDeviceIds, trendRangeHours], loadTrend)
 useVisibilityPolling(() => load(true, true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
   trendController?.abort()
-  window.removeEventListener('guanlan:realtime', scheduleRefresh)
+  window.removeEventListener('xingchen:realtime', scheduleRefresh)
 })
 </script>
 

@@ -139,7 +139,7 @@ func (s *controllerUpdateService) githubJSON(ctx context.Context, path string, d
 		return err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "guanlan-monitor-controller-updater")
+	request.Header.Set("User-Agent", "xingchen-monitor-controller-updater")
 	client := s.client
 	if client == nil {
 		client = &http.Client{Timeout: controllerReleaseCheckTimeout}

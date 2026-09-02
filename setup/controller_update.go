@@ -96,9 +96,9 @@ type controllerImage struct {
 }
 
 var controllerImages = []controllerImage{
-	{service: "setup", environment: "GUANLAN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:latest"},
-	{service: "server", environment: "GUANLAN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:latest"},
-	{service: "web", environment: "GUANLAN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:latest"},
+	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:latest"},
+	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:latest"},
+	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:latest"},
 }
 
 func newControllerUpdateService() *controllerUpdateService {
@@ -562,9 +562,9 @@ func inspectControllerImages() (string, string, string, []controllerServiceStatu
 				current, version = inspectReferenceMetadata(containerID, false)
 				health = commandOutput("docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}", containerID)
 			}
-			imageReference := strings.TrimSpace(os.Getenv(image.environment))
+			imageReference := strings.TrimSpace(environmentValue(image.environment, ""))
 			if imageReference == "" {
-				imageReference = strings.TrimSpace(values[image.environment])
+				imageReference = environmentValueFromMap(values, image.environment, "")
 			}
 			if imageReference == "" {
 				imageReference = image.defaultImage
@@ -680,14 +680,26 @@ func composeBaseArgs() []string {
 func controllerUpdateEnvironment(targetVersion ...string) []string {
 	environment := append(os.Environ(),
 		"COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "guanlan-monitor"),
-		"GUANLAN_HOST_PROJECT_ROOT="+hostWorkspace,
+		"XINGCHEN_HOST_PROJECT_ROOT="+hostWorkspace,
 	)
 	if len(targetVersion) > 0 {
 		if normalized := normalizeControllerVersion(targetVersion[0]); normalized != "" {
-			environment = append(environment, "GUANLAN_TARGET_VERSION="+normalized)
+			environment = append(environment, "XINGCHEN_TARGET_VERSION="+normalized)
 		}
 	}
 	return environment
+}
+
+func environmentValueFromMap(values map[string]string, name, fallback string) string {
+	if value := strings.TrimSpace(values[name]); value != "" {
+		return value
+	}
+	if strings.HasPrefix(name, "XINGCHEN_") {
+		if value := strings.TrimSpace(values["GUANLAN_"+strings.TrimPrefix(name, "XINGCHEN_")]); value != "" {
+			return value
+		}
+	}
+	return fallback
 }
 
 func updateEnvironmentSetting(key, value string) error {

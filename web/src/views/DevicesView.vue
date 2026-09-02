@@ -99,7 +99,7 @@ function exportInventory() {
     device.model ?? '',
     device.serialNumber ?? '',
   ])
-  downloadCsv(`guanlan-devices-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
+  downloadCsv(`xingchen-devices-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
   ElMessage.success(`已导出 ${rows.length} 台设备`)
 }
 const installCommand = computed(() => {
@@ -273,7 +273,7 @@ onMounted(() => {
     }
   })
   loadAgentBootstrap()
-  window.addEventListener('guanlan:realtime', scheduleRefresh)
+  window.addEventListener('xingchen:realtime', scheduleRefresh)
 })
 watch(() => route.query.edit, (value) => {
   const requested = devices.value.find((device) => device.id === value)
@@ -282,7 +282,7 @@ watch(() => route.query.edit, (value) => {
 useVisibilityPolling(() => load(true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
-  window.removeEventListener('guanlan:realtime', scheduleRefresh)
+  window.removeEventListener('xingchen:realtime', scheduleRefresh)
 })
 </script>
 
