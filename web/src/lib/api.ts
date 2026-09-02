@@ -10,6 +10,9 @@ export const api = axios.create({
 
 let csrfHeaderName = 'X-XSRF-TOKEN'
 let csrfToken = ''
+let setupStatusCache: SetupStatus | null = null
+let setupStatusCacheExpiresAt = 0
+let setupStatusRequest: Promise<SetupStatus> | null = null
 
 api.interceptors.request.use((config) => {
   const method = config.method?.toLowerCase()
@@ -30,8 +33,23 @@ export function clearCsrf(): void {
   csrfToken = ''
 }
 
-export async function getSetupStatus(): Promise<SetupStatus> {
-  return (await api.get<SetupStatus>('/setup/status')).data
+export async function getSetupStatus(force = false): Promise<SetupStatus> {
+  if (!force && setupStatusCache && Date.now() < setupStatusCacheExpiresAt) return setupStatusCache
+  if (setupStatusRequest) return setupStatusRequest
+  setupStatusRequest = api.get<SetupStatus>('/setup/status').then((response) => {
+    setupStatusCache = response.data
+    setupStatusCacheExpiresAt = Date.now() + 1_000
+    return response.data
+  }).finally(() => {
+    setupStatusRequest = null
+  })
+  return setupStatusRequest
+}
+
+export function invalidateSetupStatusCache(): void {
+  setupStatusCache = null
+  setupStatusCacheExpiresAt = 0
+  setupStatusRequest = null
 }
 
 export function errorMessage(error: unknown): string {

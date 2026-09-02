@@ -6,6 +6,7 @@ import com.guanlan.monitor.api.dto.DeviceDtos;
 import com.guanlan.monitor.api.dto.MetricView;
 import com.guanlan.monitor.api.dto.MobileDiagnosticsDtos;
 import com.guanlan.monitor.domain.Device;
+import com.guanlan.monitor.repository.MetricSnapshotRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -57,20 +58,20 @@ public class MobileDiagnosticsService {
         HistoryRange range = HistoryRange.parse(requestedRange);
         Instant to = Instant.now();
         Instant from = to.minus(range.duration);
-        List<MetricView> raw = metrics.history(deviceId, from, to);
+        List<MetricSnapshotRepository.HistorySample> raw = metrics.compactHistory(deviceId, from, to);
         List<MobileDiagnosticsDtos.HistoryPoint> points = downsample(raw, from, range.sampleStepSeconds);
         return new MobileDiagnosticsDtos.History(
                 deviceId, range.wireValue, from, to, range.sampleStepSeconds, points);
     }
 
-    private List<MobileDiagnosticsDtos.HistoryPoint> downsample(List<MetricView> raw, Instant from,
+    private List<MobileDiagnosticsDtos.HistoryPoint> downsample(List<MetricSnapshotRepository.HistorySample> raw, Instant from,
                                                                  long sampleStepSeconds) {
         if (raw.isEmpty()) return List.of();
         List<MobileDiagnosticsDtos.HistoryPoint> points = new ArrayList<>();
         long activeBucket = Long.MIN_VALUE;
-        MetricView activeMetric = null;
-        for (MetricView metric : raw) {
-            long secondsFromStart = Math.max(0, Duration.between(from, metric.collectedAt()).getSeconds());
+        MetricSnapshotRepository.HistorySample activeMetric = null;
+        for (MetricSnapshotRepository.HistorySample metric : raw) {
+            long secondsFromStart = Math.max(0, Duration.between(from, metric.getCollectedAt()).getSeconds());
             long bucket = secondsFromStart / sampleStepSeconds;
             if (activeMetric != null && bucket != activeBucket) {
                 points.add(historyPoint(activeMetric));
@@ -85,11 +86,11 @@ public class MobileDiagnosticsService {
         return List.copyOf(points);
     }
 
-    private MobileDiagnosticsDtos.HistoryPoint historyPoint(MetricView metric) {
+    private MobileDiagnosticsDtos.HistoryPoint historyPoint(MetricSnapshotRepository.HistorySample metric) {
         return new MobileDiagnosticsDtos.HistoryPoint(
-                metric.collectedAt(), metric.cpuUsage(), metric.memoryUsage(), metric.swapUsage(),
-                metric.load1(), metric.load5(), metric.load15(), metric.temperatureMax(),
-                metric.diskUsage(), metric.networkSentBps(), metric.networkRecvBps());
+                metric.getCollectedAt(), metric.getCpuUsage(), metric.getMemoryUsage(), metric.getSwapUsage(),
+                metric.getLoad1(), metric.getLoad5(), metric.getLoad15(), metric.getTemperatureMax(),
+                metric.getDiskUsage(), metric.getNetworkSentBps(), metric.getNetworkRecvBps());
     }
 
     private MobileDiagnosticsDtos.NetworkInterface networkInterface(AgentReportRequest.NetworkInterface item) {

@@ -5,6 +5,7 @@ import com.guanlan.monitor.api.dto.AgentReportRequest;
 import com.guanlan.monitor.api.dto.DeviceDtos;
 import com.guanlan.monitor.api.dto.MetricView;
 import com.guanlan.monitor.domain.Device;
+import com.guanlan.monitor.repository.MetricSnapshotRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 
@@ -64,7 +65,7 @@ class MobileDiagnosticsServiceTest {
 
     @Test
     void normalizesHistoryRangeAndUsesItsSamplingStep() {
-        when(metrics.history(ArgumentMatchers.eq("device-1"), ArgumentMatchers.any(), ArgumentMatchers.any()))
+        when(metrics.compactHistory(ArgumentMatchers.eq("device-1"), ArgumentMatchers.any(), ArgumentMatchers.any()))
                 .thenReturn(List.of());
 
         var result = service.history("device-1", " 6h ");
@@ -77,14 +78,12 @@ class MobileDiagnosticsServiceTest {
 
     @Test
     void capsThirtyDayHistoryAtSevenHundredTwentyPoints() {
-        when(metrics.history(ArgumentMatchers.eq("device-1"), ArgumentMatchers.any(), ArgumentMatchers.any()))
+        when(metrics.compactHistory(ArgumentMatchers.eq("device-1"), ArgumentMatchers.any(), ArgumentMatchers.any()))
                 .thenAnswer(invocation -> {
                     Instant from = invocation.getArgument(1);
-                    List<MetricView> result = new ArrayList<>();
+                    List<MetricSnapshotRepository.HistorySample> result = new ArrayList<>();
                     for (int index = 0; index <= 30 * 48; index++) {
-                        MetricView metric = mock(MetricView.class);
-                        when(metric.collectedAt()).thenReturn(from.plusSeconds(index * 30L * 60));
-                        result.add(metric);
+                        result.add(new HistorySample(from.plusSeconds(index * 30L * 60)));
                     }
                     return result;
                 });
@@ -102,7 +101,20 @@ class MobileDiagnosticsServiceTest {
         assertThatThrownBy(() -> service.history("device-1", "2H"))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("1H");
-        verify(metrics, never()).history(ArgumentMatchers.anyString(), ArgumentMatchers.any(), ArgumentMatchers.any());
+        verify(metrics, never()).compactHistory(ArgumentMatchers.anyString(), ArgumentMatchers.any(), ArgumentMatchers.any());
+    }
+
+    private record HistorySample(Instant getCollectedAt) implements MetricSnapshotRepository.HistorySample {
+        @Override public double getCpuUsage() { return 42; }
+        @Override public double getMemoryUsage() { return 38; }
+        @Override public double getSwapUsage() { return 0; }
+        @Override public double getLoad1() { return 1; }
+        @Override public double getLoad5() { return 1; }
+        @Override public double getLoad15() { return 1; }
+        @Override public double getTemperatureMax() { return 40; }
+        @Override public double getDiskUsage() { return 55; }
+        @Override public double getNetworkSentBps() { return 10; }
+        @Override public double getNetworkRecvBps() { return 20; }
     }
 
     @SafeVarargs

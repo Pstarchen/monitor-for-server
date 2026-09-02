@@ -150,11 +150,22 @@ public class MetricService {
     @Transactional(readOnly = true)
     public List<MetricView> history(String deviceId, Instant from, Instant to) {
         devices.require(deviceId);
+        validateHistoryWindow(from, to);
+        return metrics.findByDeviceIdAndCollectedAtBetweenOrderByCollectedAtAsc(deviceId, from, to).stream()
+                .map(metric -> MetricView.from(metric, mapper)).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MetricSnapshotRepository.HistorySample> compactHistory(String deviceId, Instant from, Instant to) {
+        devices.require(deviceId);
+        validateHistoryWindow(from, to);
+        return metrics.findHistorySamples(deviceId, from, to);
+    }
+
+    private void validateHistoryWindow(Instant from, Instant to) {
         if (from == null || to == null || from.isAfter(to) || Duration.between(from, to).toDays() > 31) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "历史查询时间范围无效或超过 31 天");
         }
-        return metrics.findByDeviceIdAndCollectedAtBetweenOrderByCollectedAtAsc(deviceId, from, to).stream()
-                .map(metric -> MetricView.from(metric, mapper)).toList();
     }
 
     private String json(Object value) {

@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import * as echarts from 'echarts'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { init, use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
+use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const props = defineProps<{
   labels: string[]
@@ -9,14 +14,17 @@ const props = defineProps<{
   ariaLabel?: string
 }>()
 const root = ref<HTMLDivElement>()
-let chart: echarts.ECharts | null = null
+let chart: ReturnType<typeof init> | null = null
 let resizeObserver: ResizeObserver | null = null
 let themeObserver: MutationObserver | null = null
+let visibilityObserver: IntersectionObserver | null = null
 let renderedDark: boolean | null = null
+let renderFrame = 0
+let visible = false
 
-function render() {
+function renderNow() {
   if (!root.value || root.value.clientWidth === 0 || root.value.clientHeight === 0) return
-  if (!chart) chart = echarts.init(root.value)
+  if (!chart) chart = init(root.value, undefined, { renderer: 'canvas' })
   const dark = document.documentElement.classList.contains('dark')
   const unit = (props.unit ?? '').trim()
   const suffix = unit && unit !== '%' ? ` ${unit}` : unit
@@ -26,7 +34,7 @@ function render() {
     return `${Math.abs(numeric) >= 100 ? numeric.toFixed(0) : numeric.toFixed(1)}${suffix}`
   }
   chart.setOption({
-    animationDuration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 420,
+    animationDuration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 240,
     grid: { left: 12, right: 14, top: 34, bottom: 30, containLabel: true },
     tooltip: {
       trigger: 'axis',
@@ -39,32 +47,57 @@ function render() {
     legend: { top: 0, right: 8, textStyle: { color: dark ? '#a3a3a3' : '#626262' } },
     xAxis: { type: 'category', data: props.labels, boundaryGap: false, axisLine: { lineStyle: { color: dark ? '#393939' : '#e4e4e4' } }, axisLabel: { color: dark ? '#8d8d8d' : '#767676', hideOverlap: true } },
     yAxis: { type: 'value', axisLabel: { color: dark ? '#8d8d8d' : '#767676', width: 76, overflow: 'truncate', formatter: formatValue }, splitLine: { lineStyle: { color: dark ? '#2b2b2b' : '#eeeeee' } } },
-    series: props.series.map((item) => ({ name: item.name, data: item.data, type: 'line', showSymbol: false, smooth: 0.25, lineStyle: { width: 2, color: item.color }, itemStyle: { color: item.color }, areaStyle: { opacity: 0.04, color: item.color } })),
+    series: props.series.map((item) => ({ name: item.name, data: item.data, type: 'line', showSymbol: false, sampling: 'lttb', smooth: 0.25, lineStyle: { width: 2, color: item.color }, itemStyle: { color: item.color }, areaStyle: { opacity: 0.04, color: item.color } })),
   }, true)
   renderedDark = dark
 }
 
+function scheduleRender() {
+  if (!visible || renderFrame) return
+  renderFrame = window.requestAnimationFrame(() => {
+    renderFrame = 0
+    void nextTick(renderNow)
+  })
+}
+
 function resize() {
+  if (!visible) return
   if (!root.value || root.value.clientWidth === 0 || root.value.clientHeight === 0) return
   const dark = document.documentElement.classList.contains('dark')
-  if (!chart || dark !== renderedDark) render()
+  if (!chart || dark !== renderedDark) scheduleRender()
   else chart.resize()
 }
-watch(() => [props.labels, props.series], () => nextTick(render), { deep: true })
+
+watch(() => [props.labels, props.series, props.unit], scheduleRender)
 onMounted(() => {
-  render()
-  window.addEventListener('resize', resize)
+  if (typeof IntersectionObserver !== 'undefined' && root.value) {
+    visibilityObserver = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      visible = true
+      visibilityObserver?.disconnect()
+      visibilityObserver = null
+      scheduleRender()
+    }, { rootMargin: '240px 0px' })
+    visibilityObserver.observe(root.value)
+  } else {
+    visible = true
+    scheduleRender()
+  }
   if (root.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(resize)
     resizeObserver.observe(root.value)
+  } else {
+    window.addEventListener('resize', resize)
   }
-  themeObserver = new MutationObserver(() => render())
+  themeObserver = new MutationObserver(scheduleRender)
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resize)
+  window.cancelAnimationFrame(renderFrame)
   resizeObserver?.disconnect()
   themeObserver?.disconnect()
+  visibilityObserver?.disconnect()
   chart?.dispose()
 })
 </script>

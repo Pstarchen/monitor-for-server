@@ -12,8 +12,11 @@ export const useAuthStore = defineStore('auth', () => {
   async function initialize() {
     if (initialized.value) return
     try {
-      await refreshCsrf()
-      user.value = (await api.get<User>('/auth/me')).data
+      const [, userResponse] = await Promise.all([
+        refreshCsrf(),
+        api.get<User>('/auth/me'),
+      ])
+      user.value = userResponse.data
       await loadDevicePermissions()
     } catch {
       user.value = null
@@ -35,9 +38,9 @@ export const useAuthStore = defineStore('auth', () => {
     } else {
       user.value = response.data.user
       initialized.value = true
-      await loadDevicePermissions()
+      await Promise.all([loadDevicePermissions(), refreshCsrf()])
     }
-    await refreshCsrf()
+    if (response.data.requiresTwoFactor) await refreshCsrf()
     return { returnTo: response.data.returnTo, requiresTwoFactor: response.data.requiresTwoFactor }
   }
 
@@ -45,8 +48,7 @@ export const useAuthStore = defineStore('auth', () => {
     const response = await api.post<{ user: User; returnTo: string; requiresTwoFactor: false }>('/auth/2fa/verify', { code, returnTo })
     user.value = response.data.user
     initialized.value = true
-    await loadDevicePermissions()
-    await refreshCsrf()
+    await Promise.all([loadDevicePermissions(), refreshCsrf()])
     return response.data.returnTo
   }
 
@@ -82,6 +84,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function loadDevicePermissions() {
     if (!user.value) {
+      devicePermissions.value = []
+      return
+    }
+    if (user.value.role === 'ADMIN') {
       devicePermissions.value = []
       return
     }

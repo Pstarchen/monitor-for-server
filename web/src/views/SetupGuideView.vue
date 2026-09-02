@@ -48,7 +48,7 @@ async function completeSetup() {
 onMounted(async () => {
   loadBranding()
   try {
-    const status = await getSetupStatus()
+    const status = await getSetupStatus(true)
     if (status.configured && status.state !== 'error') await router.replace({ name: 'login' })
     if (status.state === 'error') error.value = status.message ?? '服务启动失败，请重新提交配置'
   } catch { }

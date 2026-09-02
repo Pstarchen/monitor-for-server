@@ -73,7 +73,7 @@ function returnToPasswordStep() {
 
 async function checkServiceReadiness() {
   try {
-    const status = await getSetupStatus()
+    const status = await getSetupStatus(true)
     if (!status.configured) {
       await router.replace({ name: 'setup' })
       return

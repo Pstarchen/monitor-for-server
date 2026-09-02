@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity, ArrowDown, ArrowUp, BellRing, CheckCircle2, Clock3, Cpu, HardDrive,
@@ -11,17 +11,17 @@ import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ServiceAvailabilityCard from '@/components/ServiceAvailabilityCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import MetricChart from '@/components/MetricChart.vue'
 import { api, errorMessage } from '@/lib/api'
-import { trendWindow, type TrendRangeHours } from '@/lib/dashboard-trend'
+import { alignTrendValues, trendRangeValue, type TrendRangeHours } from '@/lib/dashboard-trend'
 import { dateTime, percent, rate, rateScale, relativeTime, uptime } from '@/lib/format'
 import { matchesRealtimeEvent } from '@/lib/realtime'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
-import type { Dashboard, Device, DeviceNote, DeviceStatus, Metric, ServiceCheck } from '@/types'
+import type { Dashboard, Device, DeviceNote, DeviceStatus, MetricHistoryPoint, MetricHistoryResponse, ServiceCheck } from '@/types'
 
 type SortKey = 'attention' | 'cpu' | 'memory' | 'disk' | 'name'
 
 const router = useRouter()
+const MetricChart = defineAsyncComponent(() => import('@/components/MetricChart.vue'))
 const dashboard = ref<Dashboard | null>(null)
 const serviceChecks = ref<ServiceCheck[]>([])
 const loading = ref(true)
@@ -29,8 +29,10 @@ const refreshing = ref(false)
 const error = ref('')
 const servicesError = ref('')
 const servicesRefreshing = ref(false)
+const servicesLoading = ref(true)
 const recentNotes = ref<DeviceNote[]>([])
 const notesError = ref('')
+const notesLoading = ref(true)
 const search = ref('')
 const status = ref<DeviceStatus | ''>('')
 const group = ref('')
@@ -38,11 +40,14 @@ const tag = ref('')
 const sort = ref<SortKey>('attention')
 const trendDeviceIds = ref<string[]>([])
 const trendRangeHours = ref<TrendRangeHours>(6)
-const trendHistories = ref<Record<string, Metric[]>>({})
+const trendHistories = ref<Record<string, MetricHistoryPoint[]>>({})
 const trendLoading = ref(false)
 const trendError = ref('')
 let refreshTimer = 0
 let trendRequestId = 0
+let dashboardRequestId = 0
+let auxiliaryRequestId = 0
+let trendController: AbortController | null = null
 
 const groups = computed(() => Array.from(new Set(
   (dashboard.value?.devices ?? []).map((device) => device.groupName).filter((value): value is string => Boolean(value)),
@@ -82,18 +87,10 @@ const trendLabels = computed(() => trendHistory.value.map((item) => new Intl.Dat
 const trendIoScale = computed(() => rateScale(selectedTrendDevices.value.flatMap((device) => trendHistories.value[device.id] ?? []).reduce((max, item) => Math.max(max, item.networkRecvBps, item.networkSentBps), 0)))
 const trendPalette = ['#2867a6', '#17834d', '#986400', '#c73832']
 
-function alignedValues(deviceId: string, read: (metric: Metric) => number) {
+function alignedValues(deviceId: string, read: (metric: MetricHistoryPoint) => number) {
   const source = trendHistories.value[deviceId] ?? []
   if (deviceId === trendDeviceId.value) return source.map(read)
-  return trendHistory.value.map((point) => {
-    let nearest: Metric | undefined
-    let distance = Number.POSITIVE_INFINITY
-    for (const item of source) {
-      const candidate = Math.abs(new Date(item.collectedAt).getTime() - new Date(point.collectedAt).getTime())
-      if (candidate < distance) { nearest = item; distance = candidate }
-    }
-    return nearest && distance <= 5 * 60_000 ? read(nearest) : null
-  })
+  return alignTrendValues(trendHistory.value, source, read)
 }
 
 const trendResourceSeries = computed(() => selectedTrendDevices.value.flatMap((device, index) => [
@@ -120,16 +117,20 @@ async function loadTrend() {
     return
   }
   const requestId = ++trendRequestId
+  trendController?.abort()
+  trendController = new AbortController()
   trendLoading.value = true
   trendError.value = ''
-  const { from, to } = trendWindow(trendRangeHours.value)
   try {
-    const responses = await Promise.allSettled(ids.map((id) => api.get<Metric[]>(`/devices/${id}/metrics/history`, { params: { from: from.toISOString(), to: to.toISOString() } })))
+    const responses = await Promise.allSettled(ids.map((id) => api.get<MetricHistoryResponse>(`/v2/devices/${id}/metrics/history`, {
+      params: { range: trendRangeValue(trendRangeHours.value) },
+      signal: trendController?.signal,
+    })))
     if (requestId !== trendRequestId) return
-    const next: Record<string, Metric[]> = {}
+    const next: Record<string, MetricHistoryPoint[]> = {}
     let failures = 0
     responses.forEach((response, index) => {
-      if (response.status === 'fulfilled') next[ids[index]] = response.value.data
+      if (response.status === 'fulfilled') next[ids[index]] = response.value.data.points
       else failures += 1
     })
     if (failures === ids.length) {
@@ -146,39 +147,54 @@ async function loadTrend() {
 }
 
 async function load(background = false, silent = false) {
+  const requestId = ++dashboardRequestId
   if (background && !silent) refreshing.value = true
   else if (!background) loading.value = true
   if (!silent) error.value = ''
   try {
-    const [dashboardRequest, servicesRequest, notesRequest] = await Promise.allSettled([
-      api.get<Dashboard>('/dashboard'),
-      api.get<ServiceCheck[]>('/services'),
-      api.get<DeviceNote[]>('/device-notes/recent', { params: { limit: 8 } }),
-    ])
-    if (dashboardRequest.status === 'rejected') throw dashboardRequest.reason
-    dashboard.value = dashboardRequest.value.data
-    if (servicesRequest.status === 'fulfilled') {
-      serviceChecks.value = servicesRequest.value.data
-      servicesError.value = ''
-    } else {
-      servicesError.value = errorMessage(servicesRequest.reason)
-    }
-    if (notesRequest.status === 'fulfilled') {
-      recentNotes.value = notesRequest.value.data
-      notesError.value = ''
-    } else {
-      notesError.value = errorMessage(notesRequest.reason)
-    }
+    const response = await api.get<Dashboard>('/dashboard')
+    if (requestId !== dashboardRequestId) return
+    dashboard.value = response.data
     syncTrendDevice()
     if (background && trendDeviceIds.value.length) void loadTrend()
   } catch (cause) {
-    if (!silent) error.value = errorMessage(cause)
+    if (requestId === dashboardRequestId && !silent) error.value = errorMessage(cause)
   } finally {
-    if (!silent) {
+    if (requestId === dashboardRequestId && !silent) {
       loading.value = false
       refreshing.value = false
     }
   }
+}
+
+async function loadAuxiliary() {
+  const requestId = ++auxiliaryRequestId
+  servicesLoading.value = true
+  notesLoading.value = true
+  const [servicesRequest, notesRequest] = await Promise.allSettled([
+    api.get<ServiceCheck[]>('/services'),
+    api.get<DeviceNote[]>('/device-notes/recent', { params: { limit: 8 } }),
+  ])
+  if (requestId !== auxiliaryRequestId) return
+  if (servicesRequest.status === 'fulfilled') {
+    serviceChecks.value = servicesRequest.value.data
+    servicesError.value = ''
+  } else {
+    servicesError.value = errorMessage(servicesRequest.reason)
+  }
+  if (notesRequest.status === 'fulfilled') {
+    recentNotes.value = notesRequest.value.data
+    notesError.value = ''
+  } else {
+    notesError.value = errorMessage(notesRequest.reason)
+  }
+  servicesLoading.value = false
+  notesLoading.value = false
+}
+
+function refreshAll() {
+  void loadAuxiliary()
+  return load(true)
 }
 
 async function loadServices() {
@@ -230,13 +246,15 @@ function scheduleRefresh(event: Event) {
 }
 
 onMounted(() => {
-  load()
+  void load()
+  void loadAuxiliary()
   window.addEventListener('guanlan:realtime', scheduleRefresh)
 })
 watch([trendDeviceIds, trendRangeHours], loadTrend)
 useVisibilityPolling(() => load(true, true))
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
+  trendController?.abort()
   window.removeEventListener('guanlan:realtime', scheduleRefresh)
 })
 </script>
@@ -245,7 +263,7 @@ onBeforeUnmount(() => {
   <section>
     <PageHeader eyebrow="MONITORING OVERVIEW" title="运行总览" description="查看全部节点的在线状态、实时吞吐与资源负载。">
       <template #actions>
-        <el-button class="button-press" :loading="refreshing" @click="load(true)"><RefreshCw :size="16" />刷新</el-button>
+        <el-button class="button-press" :loading="refreshing" @click="refreshAll"><RefreshCw :size="16" />刷新</el-button>
       </template>
     </PageHeader>
 
@@ -307,7 +325,8 @@ onBeforeUnmount(() => {
           <span class="filter-count"><MessageSquare :size="14" />{{ recentNotes.length }} 条记录</span>
         </div>
         <article class="panel dashboard-notes-panel">
-          <div v-if="notesError" class="inline-error" role="alert"><span>{{ notesError }}</span><el-button text @click="load(true)">重试</el-button></div>
+          <LoadingState v-if="notesLoading" />
+          <div v-else-if="notesError" class="inline-error" role="alert"><span>{{ notesError }}</span><el-button text @click="loadAuxiliary">重试</el-button></div>
           <div v-else-if="recentNotes.length" class="dashboard-note-list">
             <button v-for="note in recentNotes" :key="note.id" type="button" @click="router.push(`/devices/${note.deviceId}`)">
               <span class="dashboard-note-icon"><MessageSquare :size="15" /></span>
@@ -345,7 +364,8 @@ onBeforeUnmount(() => {
             <el-button text @click="router.push('/services')">查看全部</el-button>
           </div>
         </div>
-        <div v-if="servicesError && serviceChecks.length" class="service-availability-notice" role="alert">
+        <div v-if="servicesLoading" class="panel"><LoadingState /></div>
+        <div v-else-if="servicesError && serviceChecks.length" class="service-availability-notice" role="alert">
           <span>服务可用性刷新失败：{{ servicesError }}</span><el-button text :loading="servicesRefreshing" @click="loadServices">重试</el-button>
         </div>
         <div v-else-if="servicesError" class="panel state-panel">

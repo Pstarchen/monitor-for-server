@@ -167,9 +167,6 @@ p, h1, h2, h3 { margin: 0; }
 .empty-state p { max-width: 360px; font-size: 12px; line-height: 1.6; }
 .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--foreground); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.route-enter-active, .route-leave-active { transition: opacity 160ms ease, transform 160ms ease; }
-.route-enter-from { opacity: 0; transform: translateY(8px); }
-.route-leave-to { opacity: 0; transform: translateY(-4px); }
 .button-press:active { transform: scale(.97); }
 .filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
 .device-filter-select { width: 190px; }

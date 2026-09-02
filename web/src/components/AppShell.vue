@@ -6,7 +6,6 @@ import {
   Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
-import QRCode from 'qrcode'
 import { api, errorMessage } from '@/lib/api'
 import StatusBadge from '@/components/StatusBadge.vue'
 import BrandMark from '@/components/BrandMark.vue'
@@ -42,6 +41,8 @@ let socket: WebSocket | null = null
 let reconnectTimer = 0
 let alertRefreshTimer = 0
 let alertPollTimer = 0
+let alertInitialTimer = 0
+let alertIdleHandle = 0
 let active = true
 
 const navigation = [
@@ -155,6 +156,7 @@ async function startTwoFactorSetup() {
   profileError.value = ''
   try {
     const response = await api.post<{ secret: string; otpauthUri: string }>('/auth/2fa/setup', { currentPassword: profileForm.currentPassword })
+    const { default: QRCode } = await import('qrcode')
     twoFactorSecret.value = response.data.secret
     twoFactorUri.value = response.data.otpauthUri
     twoFactorQr.value = await QRCode.toDataURL(response.data.otpauthUri, { width: 184, margin: 1 })
@@ -249,11 +251,22 @@ function connectRealtime() {
   }
 }
 
+function scheduleInitialAlertPreview() {
+  const run = () => {
+    if (active && !alertPreviewLoadedAt.value && !alertPreviewLoading.value) void loadAlertPreview()
+  }
+  if (typeof window.requestIdleCallback === 'function') {
+    alertIdleHandle = window.requestIdleCallback(run, { timeout: 2_500 })
+  } else {
+    alertInitialTimer = window.setTimeout(run, 1_500)
+  }
+}
+
 onMounted(() => {
   loadBranding()
   applyTheme()
   connectRealtime()
-  void loadAlertPreview()
+  scheduleInitialAlertPreview()
   alertPollTimer = window.setInterval(() => loadAlertPreview(true), 60_000)
   window.addEventListener('guanlan:realtime', scheduleAlertRefresh)
 })
@@ -262,7 +275,9 @@ onBeforeUnmount(() => {
   active = false
   window.clearTimeout(reconnectTimer)
   window.clearTimeout(alertRefreshTimer)
+  window.clearTimeout(alertInitialTimer)
   window.clearInterval(alertPollTimer)
+  if (alertIdleHandle && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(alertIdleHandle)
   window.removeEventListener('guanlan:realtime', scheduleAlertRefresh)
   socket?.close()
 })
@@ -367,9 +382,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
       <main class="page-content">
-        <RouterView v-slot="{ Component }">
-          <Transition name="route" mode="out-in"><component :is="Component" /></Transition>
-        </RouterView>
+        <RouterView />
       </main>
     </div>
 

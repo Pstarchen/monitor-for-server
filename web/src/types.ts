@@ -401,6 +401,29 @@ export interface Settings {
   pushKit: PushKitSettings
 }
 
+export interface MetricHistoryPoint {
+  collectedAt: string
+  cpuUsage: number
+  memoryUsage: number
+  swapUsage: number
+  load1: number
+  load5: number
+  load15: number
+  temperatureCelsius: number
+  diskUsage: number
+  networkSentBps: number
+  networkRecvBps: number
+}
+
+export interface MetricHistoryResponse {
+  deviceId: string
+  range: string
+  from: string
+  to: string
+  sampleStepSeconds: number
+  points: MetricHistoryPoint[]
+}
+
 export interface PushKitSettings {
   enabled: boolean
   configured: boolean
