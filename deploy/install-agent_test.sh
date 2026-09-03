@@ -552,13 +552,13 @@ if run_installer 1; then
   echo 'Remote HTTP fallback succeeded without explicit opt-in.' >&2
   exit 1
 fi
-if grep -F -- '--proto =http' "${log_file}" >/dev/null; then
+if grep -Eq -- '(^|[[:space:]])--proto[[:space:]]+=http([[:space:]]|$)' "${log_file}"; then
   echo 'Installer probed remote HTTP before explicit opt-in.' >&2
   exit 1
 fi
 : > "${log_file}"
 run_installer 1 --allow-insecure-http
-grep -F 'curl -4 --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =http' "${log_file}" >/dev/null
+grep -Eq 'curl -4 --fail --silent --show-error --location --max-time 10 --connect-timeout 5 --proto =http([[:space:]]|$)' "${log_file}" >/dev/null
 grep -F '"server_url": "http://monitor.example.com"' "${config_file}" >/dev/null
 grep -F '"allow_insecure_http": true' "${config_file}" >/dev/null
 
