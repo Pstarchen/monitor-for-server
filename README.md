@@ -6,6 +6,7 @@
 
 配套客户端「星辰云巡」可在 HarmonyOS 设备上查看服务器实时指标、历史趋势、设备诊断、服务可用性和告警动态。部署本项目后，可在 Web 控制台创建 API Token，通过绑定二维码或手动输入地址与 Token 连接客户端。
 
+- [访问星辰监控官网](https://xcmon.xciy.cn/)
 - [前往华为应用市场安装星辰云巡](https://appgallery.huawei.com/app/detail?id=cn.xciy.xcyx&channelId=SHARE&source=appshare)
 - [查看星辰云巡开源仓库](https://github.com/Pstarchen/xingchenyunxun)
 
