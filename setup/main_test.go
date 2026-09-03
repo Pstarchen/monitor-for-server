@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +49,9 @@ func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.sh"), []byte("#!/usr/bin/env bash\r\nset -e\r\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.ps1"), []byte("#requires -version 5.1\r\n$ErrorActionPreference = 'Stop'\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	service := &setupService{}
 
 	request := httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=linux", nil)
@@ -62,11 +67,39 @@ func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
 		t.Fatalf("installer filename = %q", response.Header().Get("Content-Disposition"))
 	}
 
+	request = httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=linux&format=sha256", nil)
+	response = httptest.NewRecorder()
+	service.agentInstaller(response, request)
+	normalized := []byte("#!/usr/bin/env bash\nset -e\n")
+	digest := sha256.Sum256(normalized)
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != hex.EncodeToString(digest[:]) {
+		t.Fatalf("installer digest response = %d %q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Content-Disposition") != `attachment; filename="install-agent.sh.sha256"` {
+		t.Fatalf("installer digest filename = %q", response.Header().Get("Content-Disposition"))
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=windows&format=sha256", nil)
+	response = httptest.NewRecorder()
+	service.agentInstaller(response, request)
+	windowsContent := []byte("#requires -version 5.1\r\n$ErrorActionPreference = 'Stop'\r\n")
+	windowsDigest := sha256.Sum256(windowsContent)
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != hex.EncodeToString(windowsDigest[:]) {
+		t.Fatalf("Windows installer digest response = %d %q", response.Code, response.Body.String())
+	}
+
 	request = httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=../../.env", nil)
 	response = httptest.NewRecorder()
 	service.agentInstaller(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid platform returned %d, want 400", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=linux&format=script", nil)
+	response = httptest.NewRecorder()
+	service.agentInstaller(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid installer format returned %d, want 400", response.Code)
 	}
 }
 

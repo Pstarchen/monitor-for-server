@@ -18,11 +18,11 @@ services:
     networks: [monitor]
 
   setup:
-    image: ${XINGCHEN_SETUP_IMAGE:-ghcr.io/pstarchen/monitor-for-server-setup:v1.20.11}
+    image: ${XINGCHEN_SETUP_IMAGE:-ghcr.io/pstarchen/monitor-for-server-setup:v1.20.12}
     build:
       context: ./setup
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.12}
     restart: unless-stopped
     environment:
       SETUP_WORKSPACE: /workspace
@@ -75,11 +75,11 @@ services:
     networks: [monitor]
 
   server:
-    image: ${XINGCHEN_SERVER_IMAGE:-ghcr.io/pstarchen/monitor-for-server-server:v1.20.11}
+    image: ${XINGCHEN_SERVER_IMAGE:-ghcr.io/pstarchen/monitor-for-server-server:v1.20.12}
     build:
       context: ./server
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.12}
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-bootstrap}
@@ -150,11 +150,11 @@ services:
 
   controller-agent:
     profiles: [host-monitoring]
-    image: ${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:v1.20.11}
+    image: ${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:v1.20.12}
     build:
       context: ./agent
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.12}
     restart: unless-stopped
     pid: host
     network_mode: host
@@ -187,11 +187,11 @@ services:
       retries: 4
 
   web:
-    image: ${XINGCHEN_WEB_IMAGE:-ghcr.io/pstarchen/monitor-for-server-web:v1.20.11}
+    image: ${XINGCHEN_WEB_IMAGE:-ghcr.io/pstarchen/monitor-for-server-web:v1.20.12}
     build:
       context: ./web
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.12}
     restart: unless-stopped
     ports:
       - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-18080}:80"

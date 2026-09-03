@@ -151,20 +151,20 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 ## 创建设备
 
 1. 登录 Web 控制台并打开“设备管理”。
-2. 添加设备并立即保存设备 ID 与只显示一次的长期 Agent 密钥。
-3. 密钥关闭后无法找回；遗失时由管理员轮换密钥。当前密钥并非单次消费的 enrollment token。
+2. 添加设备后复制设备 ID、一次性接入令牌和页面生成的安装命令。
+3. 接入令牌只显示一次、15 分钟后过期且只能消费一次；过期或安装失败时可为该设备重新签发，不需要接触长期 Agent 密钥。
 
 ## Linux Agent
 
-安装器默认通过总控查询 manifest 并下载对应架构的预编译程序，不要求目标机安装 Go。控制台生成的命令不包含 Agent 密钥；安装器完成提权后会在交互终端静默询问，输入不回显也不进入命令历史。非交互自动化仍可通过临时 `XINGCHEN_AGENT_KEY` 环境变量提供，但应在进程启动后立即清除。
+安装器默认通过总控查询 manifest 并下载对应架构的预编译程序，不要求目标机安装 Go。控制台生成的命令不包含接入令牌或 Agent 密钥；安装器完成提权、准备好目标制品后在交互终端静默询问一次性令牌，再通过 `/api/agent/v1/enroll` 的 JSON body 交换长期密钥。非交互自动化可临时使用 `XINGCHEN_ENROLLMENT_TOKEN`，旧自动化的 `XINGCHEN_AGENT_KEY` 入口继续兼容；两者都会在安装器退出时清除。
 
-总控同域入口是默认安装源，目标服务器无需直接访问代码托管平台；控制台也可以明确切换到 Gitee 或 GitHub 安装脚本。
+控制台只通过总控同域入口下发安装器及其 SHA256；目标服务器无需直接访问代码托管平台，也不会执行 Gitee 或 GitHub `main` 分支上的未固定脚本。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && ./xingchen-agent.sh --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s --disk / --disk /data
+installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && (trap 'rm -f "$installer"' EXIT && curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o "$installer" && expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256') && actual_sha=$(sha256sum "$installer" | awk '{print $1}') && test "$actual_sha" = "$expected_sha" && chmod 700 "$installer" && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' "$installer" --interval 3s --disk / --disk /data)
 ```
 
-Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh`，GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`。控制台切换安装源后会自动生成完整命令，无需手工替换。
+不要手工替换安装器 URL。若总控需要从外部同步版本或源码，应在总控侧配置受信内部制品源或 `XINGCHEN_SOURCE_REPOSITORIES`；GitHub 仍只能作为管理员显式启用的末级回退。
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。使用 `--process java`（可重复指定，最多 32 个）可额外保留关键进程，即使其不在 CPU 排名前 12；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。Windows 安装器对应使用 `-MonitoredProcess java`、`-CollectAllProcesses`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
@@ -210,7 +210,6 @@ journalctl -u xingchen-agent -n 100 --no-pager
 以管理员 PowerShell 运行：
 
 ```powershell
-$env:XINGCHEN_AGENT_KEY = '<Agent密钥>'
 & .\deploy\install-agent.ps1 `
   -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `
@@ -218,6 +217,8 @@ $env:XINGCHEN_AGENT_KEY = '<Agent密钥>'
   -DiskMountpoint 'C:\','D:\' `
   -MonitoredService 'W3SVC','MSSQLSERVER'
 ```
+
+脚本会用隐藏输入读取控制台签发的一次性接入令牌。自动化场景可在受控进程环境中临时提供 `XINGCHEN_ENROLLMENT_TOKEN`，不要把令牌写入脚本参数、URL 或日志。
 
 轻量采集可添加 `-SkipProcesses -SkipConnections`；需要完整进程清单时添加 `-CollectAllProcesses -ProcessCollectionLimit 128`（上限 256）。端口和容器也可分别通过 `-SkipPorts`、`-SkipContainers` 关闭，或用 `-PortCollectionLimit`、`-ContainerCollectionLimit` 调低明细上限。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `-AllowCommandExecution`、`-AllowFileOperations`，两项默认关闭。不传 `-DiskMountpoint` 时采集全部可用分区。
 

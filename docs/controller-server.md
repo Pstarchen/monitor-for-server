@@ -59,7 +59,7 @@ docker compose --profile host-monitoring ps
 docker compose logs --tail 100 server
 ```
 
-首次启动从 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。Linux 总终端会自动注册为“总控服务器”并显示在“设备管理”中，无需创建设备、复制密钥或另装 Agent。其他节点仍在“设备管理”创建并保存只显示一次的长期 Agent 密钥。
+首次启动从 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。Linux 总终端会自动注册为“总控服务器”并显示在“设备管理”中，无需创建设备、复制凭据或另装 Agent。其他节点在“设备管理”创建并使用 15 分钟一次性接入令牌安装 Agent。
 
 ## 总控宿主机监控
 

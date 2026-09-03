@@ -25,15 +25,15 @@ PostgreSQL、Redis 和服务端端口默认只在 Docker 内网开放。公网�
 
 每台被监控服务器安装一个 Agent。Agent 采集 CPU、内存、磁盘、网络、进程、端口和可选的容器信息，然后通过 HTTP(S) 主动连接总控。通常不需要在被监控服务器上开放入站端口。
 
-### 1.3 设备 ID 和长期 Agent 密钥
+### 1.3 设备 ID 和一次性接入令牌
 
-在控制台“设备管理”中创建设备后，会得到设备 ID 和只显示一次的长期 Agent 密钥。安装 Agent 时两者必须同时使用：
+在控制台“设备管理”中创建设备后，会得到设备 ID 和只显示一次的接入令牌。安装 Agent 时两者必须同时使用：
 
 - 设备 ID 表示数据属于哪台设备。
-- Agent 密钥证明这台服务器有权上报。
-- 密钥明文只显示一次，关闭弹窗后不能找回，只能由管理员轮换。
+- 接入令牌证明这次安装已获授权，15 分钟后过期且只能消费一次。
+- 安装器交换得到的长期 Agent 密钥直接写入受限配置文件，不显示在安装命令中。
 
-不要把 Agent 密钥、API Token、管理员密码或 `.env` 内容发到聊天群、工单和截图中。
+不要把接入令牌、Agent 密钥、API Token、管理员密码或 `.env` 内容发到聊天群、工单和截图中。
 
 ## 2. 推荐的首次部署顺序
 
@@ -273,14 +273,14 @@ docker compose up -d --force-recreate server web
 ### 7.2 在 Agent 接入弹窗中选择参数
 
 - “监控平台域名或地址”：应是目标服务器能够访问的总控地址，生产环境使用 HTTPS。
-- “安装源”：优先选“总控直连”；目标服务器访问总控正常即可下载安装脚本。若不可用，再选 Gitee 或 GitHub。
+- 安装脚本固定从总控同域下载；目标服务器只需能访问总控，不需要连接 GitHub、Gitee 或公共 CDN。
 - “Linux/Windows”：选择目标服务器真实系统。
 - “采集周期”：新手建议保留 3 秒；设备很多或总控配置较低时可改为 10 秒或 30 秒。
 - “磁盘白名单”：只想采集特定挂载点时填写，例如 Linux 的 `/, /data` 或 Windows 的 `C:\, D:\`。
 - “轻量采集”：低配置或连接很多的服务器可启用，它会跳过进程和连接统计。
 - “完整进程”：只有确实需要完整进程清单时启用，并设置合理上限。
 
-参数选好后点击“复制安装命令”。这条命令包含正确的设备 ID、总控地址和安装源，但不会包含长期 Agent 密钥；安装器提权后会在终端中静默询问，应优先使用该流程，不要手工拼接。
+参数选好后分别点击“复制令牌”和“复制安装命令”。命令包含正确的设备 ID 和总控地址，但不包含接入令牌或长期 Agent 密钥；执行安装器前会校验总控返回的 SHA256，安装器提权并准备好制品后再在终端中静默询问令牌。应优先使用该流程，不要手工拼接。
 
 ### 7.3 Linux 安装 Agent
 
@@ -292,10 +292,15 @@ docker compose up -d --force-recreate server web
 控制台生成的命令形式大致如下，下面的占位符不能直接照抄：
 
 ```bash
-curl -fL 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh \
-  && chmod +x xingchen-agent.sh \
-  && ./xingchen-agent.sh --server-url 'https://monitor.example.com' \
-    --device-id '<设备ID>' --interval 3s
+installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && ( \
+  trap 'rm -f "$installer"' EXIT \
+  && curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o "$installer" \
+  && expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256') \
+  && actual_sha=$(sha256sum "$installer" | awk '{print $1}') \
+  && test "$actual_sha" = "$expected_sha" \
+  && chmod 700 "$installer" \
+  && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' "$installer" --interval 3s
+)
 ```
 
 安装器默认用预编译程序注册本机 systemd 服务；只有命令中显式添加 `--docker` 才用容器模式。检查状态和日志：

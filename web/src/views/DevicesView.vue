@@ -8,14 +8,16 @@ import LoadingState from '@/components/LoadingState.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
-import { buildAgentInstallCommand, type AgentInstallSource } from '@/lib/agent-install'
+import { buildAgentInstallCommand } from '@/lib/agent-install'
 import { copyText } from '@/lib/clipboard'
 import { downloadCsv } from '@/lib/csv'
-import { percent, relativeTime } from '@/lib/format'
+import { dateTime, percent, relativeTime } from '@/lib/format'
 import { matchesRealtimeEvent } from '@/lib/realtime'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
-import type { AgentBootstrap, Device, DeviceCredential, DeviceHealthState, DeviceStatus, DdnsConfig } from '@/types'
+import type { AgentBootstrap, Device, DeviceCredential, DeviceEnrollmentToken, DeviceHealthState, DeviceStatus, DdnsConfig } from '@/types'
+
+type EnrollmentCredential = DeviceEnrollmentToken & { device: Device }
 
 const router = useRouter()
 const route = useRoute()
@@ -33,9 +35,9 @@ const healthState = ref<DeviceHealthState | ''>('')
 const dialog = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
-const credential = ref<DeviceCredential | null>(null)
+const enrollment = ref<EnrollmentCredential | null>(null)
+const issuingEnrollmentId = ref<string | null>(null)
 const credentialPlatform = ref<'linux' | 'windows'>('linux')
-const agentInstallSource = ref<AgentInstallSource>('controller')
 const agentServerUrl = ref(window.location.origin)
 const collectionSeconds = ref(3)
 const lightweight = ref(false)
@@ -43,17 +45,7 @@ const collectAllProcesses = ref(false)
 const processCollectionLimit = ref(64)
 const diskMountpoints = ref('')
 const form = reactive({ name: '', location: '', groupName: '', primaryIp: '', tags: [] as string[], assetTag: '', ownerName: '', vendor: '', model: '', serialNumber: '', environment: '', purchaseDate: '', warrantyExpiresAt: '', description: '', ddnsEnabled: false, ddnsConfigId: null as number | null, publicVisible: true })
-const agentInstallSourceOptions: Array<{ label: string; value: AgentInstallSource }> = [
-  { label: '总控直连', value: 'controller' },
-  { label: 'Gitee', value: 'gitee' },
-  { label: 'GitHub', value: 'github' },
-]
-const agentInstallSourceHelp: Record<AgentInstallSource, string> = {
-  controller: '从当前总控下载安装脚本，Agent 镜像会自动选择可用镜像源。',
-  gitee: '从 Gitee 下载安装脚本，适用于访问 GitHub 困难的中国大陆服务器。',
-  github: '从 GitHub 官方仓库下载安装脚本。',
-}
-const agentKeyElement = ref<HTMLElement | null>(null)
+const enrollmentTokenElement = ref<HTMLElement | null>(null)
 const installCommandElement = ref<HTMLElement | null>(null)
 let refreshTimer = 0
 
@@ -103,14 +95,13 @@ function exportInventory() {
   ElMessage.success(`已导出 ${rows.length} 台设备`)
 }
 const installCommand = computed(() => {
-  if (!credential.value) return ''
+  if (!enrollment.value) return ''
   const url = agentServerHost(agentServerUrl.value)
   const disks = diskMountpoints.value.split(/[\n,]/).map((value) => value.trim()).filter(Boolean)
   return buildAgentInstallCommand({
     platform: credentialPlatform.value,
-    source: agentInstallSource.value,
     serverUrl: url,
-    deviceId: credential.value.device.id,
+    deviceId: enrollment.value.device.id,
     collectionSeconds: collectionSeconds.value,
     diskMountpoints: disks,
     lightweight: lightweight.value,
@@ -143,10 +134,9 @@ async function loadAgentBootstrap() {
   }
 }
 
-function showCredential(value: DeviceCredential) {
-  credential.value = value
+function showEnrollment(device: Device, value: DeviceEnrollmentToken) {
+  enrollment.value = { device, ...value }
   credentialPlatform.value = 'linux'
-  agentInstallSource.value = 'controller'
   lightweight.value = false
   collectAllProcesses.value = false
   processCollectionLimit.value = 64
@@ -178,7 +168,11 @@ async function save() {
       await api.put(`/devices/${editingId.value}`, payload)
       ElMessage.success('设备信息已更新')
     } else {
-      showCredential((await api.post<DeviceCredential>('/devices', payload)).data)
+      const created = (await api.post<DeviceCredential>('/devices', payload)).data.device
+      dialog.value = false
+      await load(true)
+      await issueEnrollmentToken(created)
+      return
     }
     dialog.value = false
     await load(true)
@@ -189,13 +183,16 @@ async function save() {
   }
 }
 
-async function rotateKey(device: Device) {
+async function issueEnrollmentToken(device: Device) {
+  if (issuingEnrollmentId.value) return
+  issuingEnrollmentId.value = device.id
   try {
-    await ElMessageBox.confirm(`轮换后，设备“${device.name}”使用的旧密钥会立即失效。`, '轮换 Agent 密钥', { type: 'warning', confirmButtonText: '确认轮换', cancelButtonText: '取消' })
-    showCredential((await api.post<DeviceCredential>(`/devices/${device.id}/rotate-key`)).data)
-    await load(true)
+    const token = (await api.post<DeviceEnrollmentToken>(`/devices/${device.id}/enrollment-token`)).data
+    showEnrollment(device, token)
   } catch (cause) {
-    if (cause !== 'cancel' && cause !== 'close') ElMessage.error(errorMessage(cause))
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    issuingEnrollmentId.value = null
   }
 }
 
@@ -210,14 +207,14 @@ async function remove(device: Device) {
   }
 }
 
-async function copyKey() {
-  if (!credential.value) return
+async function copyEnrollmentToken() {
+  if (!enrollment.value) return
   try {
-    await copyText(credential.value.agentKey)
-    ElMessage.success('密钥已复制')
+    await copyText(enrollment.value.token)
+    ElMessage.success('接入令牌已复制')
   } catch {
-    selectText(agentKeyElement.value)
-    ElMessage.warning('浏览器禁止自动复制，密钥已选中，请按 Ctrl+C')
+    selectText(enrollmentTokenElement.value)
+    ElMessage.warning('浏览器禁止自动复制，接入令牌已选中，请按 Ctrl+C')
   }
 }
 
@@ -331,7 +328,7 @@ onBeforeUnmount(() => {
               <td>{{ relativeTime(device.lastSeenAt) }}</td>
               <td class="row-actions">
                 <button v-if="canEdit && auth.canManageDevice(device.id)" class="table-icon-button" type="button" title="编辑设备" aria-label="编辑设备" @click="openEdit(device)"><Pencil :size="16" /></button>
-                <button v-if="auth.user?.role === 'ADMIN' && !device.controllerManaged" class="table-icon-button" type="button" title="轮换密钥" aria-label="轮换密钥" @click="rotateKey(device)"><KeyRound :size="16" /></button>
+                <button v-if="canEdit && auth.canManageDevice(device.id) && !device.controllerManaged" class="table-icon-button" type="button" title="签发接入令牌" aria-label="签发接入令牌" :disabled="Boolean(issuingEnrollmentId)" @click="issueEnrollmentToken(device)"><KeyRound :size="16" /></button>
                 <button v-if="auth.user?.role === 'ADMIN' && !device.controllerManaged" class="table-icon-button danger-command" type="button" title="删除设备" aria-label="删除设备" @click="remove(device)"><Trash2 :size="16" /></button>
               </td>
             </tr>
@@ -367,17 +364,14 @@ onBeforeUnmount(() => {
       <template #footer><el-button @click="dialog = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ editingId ? '保存修改' : '创建设备' }}</el-button></template>
     </el-dialog>
 
-    <el-dialog :model-value="Boolean(credential)" title="Agent 接入" width="min(720px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) credential = null }">
-      <div v-if="credential" class="credential-panel">
-        <div class="credential-warning"><KeyRound :size="18" /><p><strong>密钥仅显示这一次</strong><span>安装器会在终端中静默询问密钥；关闭窗口后无法再次查看。</span></p></div>
-        <dl><div><dt>设备 ID</dt><dd>{{ credential.device.id }}</dd></div><div><dt>Agent 密钥</dt><dd ref="agentKeyElement">{{ credential.agentKey }}</dd></div></dl>
+    <el-dialog class="agent-enrollment-dialog" :model-value="Boolean(enrollment)" title="Agent 接入" width="min(720px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) enrollment = null }">
+      <div v-if="enrollment" class="credential-panel">
+        <div class="credential-warning"><KeyRound :size="18" /><p><strong>接入令牌仅显示这一次</strong><span>令牌在 15 分钟内有效且只能使用一次，安装器会在终端中隐藏输入。</span></p></div>
+        <dl><div><dt>设备 ID</dt><dd>{{ enrollment.device.id }}</dd></div><div><dt>接入令牌</dt><dd ref="enrollmentTokenElement">{{ enrollment.token }}</dd></div><div><dt>失效时间</dt><dd>{{ dateTime(enrollment.expiresAt) }}</dd></div></dl>
         <div class="agent-install-options">
           <el-form label-position="top">
             <el-form-item label="监控平台域名或地址"><el-input v-model="agentServerUrl" /></el-form-item>
-            <el-form-item label="安装源">
-              <el-segmented v-model="agentInstallSource" :options="agentInstallSourceOptions" aria-label="Agent 安装源" />
-              <p class="field-help">{{ agentInstallSourceHelp[agentInstallSource] }}</p>
-            </el-form-item>
+            <p class="field-help">安装脚本从当前总控同域下载并校验，目标服务器不需要访问 GitHub、Gitee 或公共 CDN。</p>
             <div class="form-grid two-fields">
               <el-form-item label="采集周期"><el-select v-model="collectionSeconds"><el-option v-for="value in [1, 3, 10, 30, 60]" :key="value" :label="`${value} 秒`" :value="value" /></el-select></el-form-item>
               <el-form-item label="磁盘白名单"><el-input v-model="diskMountpoints" placeholder="例如：/, /data" /></el-form-item>
@@ -394,7 +388,7 @@ onBeforeUnmount(() => {
         </el-tabs>
         <div class="install-command"><Terminal :size="16" /><code ref="installCommandElement">{{ installCommand }}</code><button type="button" title="复制安装命令" aria-label="复制安装命令" @click="copyInstallCommand"><Copy :size="15" /></button></div>
       </div>
-      <template #footer><el-button @click="credential = null">完成</el-button><el-button @click="copyKey"><KeyRound :size="16" />复制密钥</el-button><el-button type="primary" @click="copyInstallCommand"><Copy :size="16" />复制安装命令</el-button></template>
+      <template #footer><el-button @click="enrollment = null">完成</el-button><el-button @click="copyEnrollmentToken"><KeyRound :size="16" />复制令牌</el-button><el-button type="primary" @click="copyInstallCommand"><Copy :size="16" />复制安装命令</el-button></template>
     </el-dialog>
   </section>
 </template>

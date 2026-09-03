@@ -16,16 +16,22 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 
 @Service
 @RequiredArgsConstructor
 public class DeviceService {
+    private static final Duration ENROLLMENT_TOKEN_TTL = Duration.ofMinutes(15);
+
     private final DeviceRepository devices;
     private final MetricSnapshotRepository metrics;
     private final PasswordEncoder passwordEncoder;
@@ -105,8 +111,46 @@ public class DeviceService {
         String rawKey = newKey();
         device.setAgentKeyPrefix(rawKey.substring(0, 8));
         device.setAgentKeyHash(passwordEncoder.encode(rawKey));
+        device.setAgentEnrollmentTokenHash(null);
+        device.setAgentEnrollmentTokenExpiresAt(null);
         audit.record("DEVICE_KEY_ROTATE", "device:" + id, "轮换 Agent 密钥");
         return new DeviceDtos.Credential(view(device), rawKey);
+    }
+
+    @Transactional
+    public DeviceDtos.EnrollmentToken issueEnrollmentToken(String id) {
+        Device device = require(id);
+        if (device.isControllerManaged()) {
+            throw new ApiException(HttpStatus.CONFLICT, "总控服务器由系统管理，不能签发 Agent 接入令牌");
+        }
+        String token = newKey();
+        Instant expiresAt = Instant.now().plus(ENROLLMENT_TOKEN_TTL);
+        device.setAgentEnrollmentTokenHash(sha256(token));
+        device.setAgentEnrollmentTokenExpiresAt(expiresAt);
+        audit.record("DEVICE_ENROLLMENT_TOKEN_ISSUE", "device:" + id, "签发一次性 Agent 接入令牌");
+        return new DeviceDtos.EnrollmentToken(token, expiresAt);
+    }
+
+    @Transactional
+    public DeviceDtos.EnrollmentCredential enroll(DeviceDtos.EnrollmentRequest request) {
+        Instant now = Instant.now();
+        String tokenHash = sha256(request.token());
+        boolean eligible = devices
+                .findByIdAndAgentEnrollmentTokenHashAndAgentEnrollmentTokenExpiresAtAfterAndControllerManagedFalse(
+                        request.deviceId(), tokenHash, now)
+                .isPresent();
+        if (!eligible) {
+            throw invalidEnrollmentToken();
+        }
+
+        String rawKey = newKey();
+        int consumed = devices.consumeEnrollmentToken(request.deviceId(), tokenHash, now,
+                passwordEncoder.encode(rawKey), rawKey.substring(0, 8), now);
+        if (consumed != 1) {
+            throw invalidEnrollmentToken();
+        }
+        audit.record("DEVICE_ENROLL", "device:" + request.deviceId(), "Agent 使用一次性令牌完成接入");
+        return new DeviceDtos.EnrollmentCredential(rawKey);
     }
 
     @Transactional
@@ -181,6 +225,19 @@ public class DeviceService {
         byte[] bytes = new byte[32];
         random.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private ApiException invalidEnrollmentToken() {
+        return new ApiException(HttpStatus.UNAUTHORIZED, "Agent 接入令牌无效、已过期或已使用");
     }
 
     private List<String> normalizeTags(List<String> values) {

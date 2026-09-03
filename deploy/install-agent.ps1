@@ -69,6 +69,9 @@ if (-not $PSBoundParameters.ContainsKey('AllowGitHubApi') -and $env:XINGCHEN_AGE
     $AllowGitHubApi = $true
 }
 $agentKey = $env:XINGCHEN_AGENT_KEY
+$enrollmentToken = $env:XINGCHEN_ENROLLMENT_TOKEN
+Remove-Item Env:XINGCHEN_AGENT_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:XINGCHEN_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
 
 if ($Action -ne 'install' -and -not (Test-Path -LiteralPath $configPath)) {
     throw "Agent 尚未安装：$configPath"
@@ -79,14 +82,14 @@ $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw '请以管理员身份运行此安装脚本。'
 }
-if ($Action -eq 'install' -and [string]::IsNullOrWhiteSpace($agentKey) -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
-    $secureAgentKey = Read-Host '请输入 Agent 密钥（输入不会回显）' -AsSecureString
-    $agentKeyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureAgentKey)
-    try { $agentKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($agentKeyPointer) }
-    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($agentKeyPointer) }
+if ($Action -eq 'install' -and [string]::IsNullOrWhiteSpace($agentKey) -and [string]::IsNullOrWhiteSpace($enrollmentToken) -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+    $secureEnrollmentToken = Read-Host '请输入一次性 Agent 接入令牌（输入不会回显）' -AsSecureString
+    $enrollmentTokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureEnrollmentToken)
+    try { $enrollmentToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($enrollmentTokenPointer) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($enrollmentTokenPointer) }
 }
-if ($Action -eq 'install' -and ([string]::IsNullOrWhiteSpace($ServerUrl) -or [string]::IsNullOrWhiteSpace($DeviceId) -or [string]::IsNullOrWhiteSpace($agentKey))) {
-    throw '安装 Agent 需要 ServerUrl、DeviceId 和 Agent 密钥；非交互安装请通过 XINGCHEN_AGENT_KEY 环境变量提供。'
+if ($Action -eq 'install' -and ([string]::IsNullOrWhiteSpace($ServerUrl) -or [string]::IsNullOrWhiteSpace($DeviceId) -or ([string]::IsNullOrWhiteSpace($agentKey) -and [string]::IsNullOrWhiteSpace($enrollmentToken)))) {
+    throw '安装 Agent 需要 ServerUrl、DeviceId 和一次性接入令牌；旧自动化仍可通过 XINGCHEN_AGENT_KEY 提供长期密钥。'
 }
 if (@($RepositoryUrl | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
     throw 'Agent 源码仓库地址不能为空。'
@@ -147,6 +150,24 @@ function Resolve-ServerUrl {
         return [pscustomobject]@{ Url = $httpCandidate; AllowInsecure = (-not $isLocal) }
     }
     throw "无法访问 $raw 的 HTTPS 或 HTTP 健康检查。请检查 DNS、端口和服务状态。"
+}
+
+function Get-AgentEnrollmentCredential {
+    if (-not [string]::IsNullOrWhiteSpace($agentKey)) { return }
+    $body = @{ deviceId = $DeviceId; token = $enrollmentToken } | ConvertTo-Json -Compress
+    try {
+        $credential = Invoke-RestMethod -Uri ($ServerUrl.TrimEnd('/') + '/api/agent/v1/enroll') -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 30 -MaximumRedirection 0
+    }
+    catch {
+        throw 'Agent 接入令牌交换失败；请确认令牌未过期或重新签发。'
+    }
+    $receivedKey = [string] $credential.agentKey
+    if ($receivedKey -notmatch '^[A-Za-z0-9_-]{32,128}$') {
+        throw '总控返回的 Agent 长期凭据格式无效。'
+    }
+    $script:agentKey = $receivedKey
+    $script:enrollmentToken = $null
+    Remove-Item Env:XINGCHEN_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
 }
 
 function Normalize-ReleaseVersion([string] $Value) {
@@ -529,6 +550,7 @@ try {
     }
 
     $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
+    Get-AgentEnrollmentCredential
     New-Item -ItemType Directory -Force -Path $installDir, $dataDir, (Join-Path $dataDir 'spool') | Out-Null
     $targetBinary = Join-Path $installDir $binaryName
 
@@ -584,6 +606,9 @@ try {
 }
 finally {
     Remove-Item Env:XINGCHEN_AGENT_KEY -ErrorAction SilentlyContinue
+    Remove-Item Env:XINGCHEN_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
+    $agentKey = $null
+    $enrollmentToken = $null
     if ($temporaryBinary -and (Test-Path -LiteralPath $temporaryBinary)) {
         Remove-Item -LiteralPath $temporaryBinary -Force
     }

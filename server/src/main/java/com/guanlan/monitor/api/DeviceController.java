@@ -7,6 +7,8 @@ import com.guanlan.monitor.service.DeviceAccessService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -40,13 +42,14 @@ public class DeviceController {
     }
 
     @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
-    DeviceDtos.Credential create(Authentication authentication, @Valid @RequestBody DeviceDtos.CreateRequest request) {
+    ResponseEntity<DeviceDtos.Credential> create(Authentication authentication, @Valid @RequestBody DeviceDtos.CreateRequest request) {
         if (authentication != null && authentication.getPrincipal() instanceof com.guanlan.monitor.security.ApiTokenPrincipal principal && !principal.serverIds().isEmpty()) {
             throw new com.guanlan.monitor.api.ApiException(HttpStatus.FORBIDDEN, "带服务器白名单的 API Token 不能创建设备");
         }
-        return devices.create(request, authentication);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .cacheControl(CacheControl.noStore())
+                .body(devices.create(request, authentication));
     }
 
     @PutMapping("/{id}")
@@ -58,9 +61,20 @@ public class DeviceController {
 
     @PostMapping("/{id}/rotate-key")
     @PreAuthorize("hasRole('ADMIN')")
-    DeviceDtos.Credential rotateKey(Authentication authentication, @PathVariable String id) {
+    ResponseEntity<DeviceDtos.Credential> rotateKey(Authentication authentication, @PathVariable String id) {
         access.requireManage(authentication, id);
-        return devices.regenerateKey(id);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(devices.regenerateKey(id));
+    }
+
+    @PostMapping("/{id}/enrollment-token")
+    @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
+    ResponseEntity<DeviceDtos.EnrollmentToken> issueEnrollmentToken(Authentication authentication, @PathVariable String id) {
+        access.requireManage(authentication, id);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(devices.issueEnrollmentToken(id));
     }
 
     @DeleteMapping("/{id}")

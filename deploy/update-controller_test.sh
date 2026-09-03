@@ -105,8 +105,8 @@ run_update() {
 
 : > "${log_file}"
 run_update --check
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.11' "${log_file}" >/dev/null
-grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.11' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.12' "${log_file}" >/dev/null
+grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.12' "${log_file}" >/dev/null
 if grep -Eq 'ghcr\.(m\.daocloud\.io|1ms\.run|nju\.edu\.cn)' "${log_file}"; then
   echo 'Default update path still uses an unconfigured public mirror.' >&2
   exit 1
@@ -150,15 +150,15 @@ printf '%s\n' \
   'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS="11"' > "${timeout_root}/.env"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" bash "${timeout_root}/deploy/update-controller.sh" --check
-grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.11' "${log_file}" >/dev/null
-grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.11' "${log_file}" >/dev/null
+grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.12' "${log_file}" >/dev/null
+grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.12' "${log_file}" >/dev/null
 
 : > "${log_file}"
 TEST_SOURCE_REPOSITORIES='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git' \
   TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
 grep -E 'docker build --pull --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://gitee.com/starchen520/monitor-for-server.git#main:setup' "${log_file}" >/dev/null
 grep -E 'docker build --pull --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://github.com/Pstarchen/monitor-for-server.git#main:setup' "${log_file}" >/dev/null
-grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.11' "${log_file}" >/dev/null
+grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.12' "${log_file}" >/dev/null
 
 : > "${log_file}"
 if TEST_FAIL_ALL_PULLS=true run_update --check --no-source-fallback; then
@@ -172,7 +172,7 @@ fi
 
 : > "${log_file}"
 run_update --apply --no-mirror
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.11' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.12' "${log_file}" >/dev/null
 grep -q 'docker compose .* up -d --force-recreate --wait --wait-timeout 300 --remove-orphans' "${log_file}"
 if grep -q 'controller-agent' "${log_file}"; then
   echo 'Update unexpectedly enabled controller Agent.' >&2
@@ -197,7 +197,7 @@ if TEST_FAIL_COMPOSE_MODE=once TEST_COMPOSE_STATE="${temp_dir}/compose-state" ru
   echo 'Update reported success even though the candidate health check failed.' >&2
   exit 1
 fi
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.11' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.12' "${log_file}" >/dev/null
 if [[ "$(grep -c '^docker compose .* up -d --force-recreate --wait' "${log_file}")" -ne 2 ]]; then
   echo 'Rollback did not perform a second Compose health check.' >&2
   exit 1
@@ -241,19 +241,19 @@ grep -E 'docker build --pull --build-arg VERSION=v1.20.5 --tag xingchen-controll
 offline_root="${temp_dir}/offline-project"
 mkdir -p "${offline_root}/deploy"
 cp "${updater}" "${offline_root}/deploy/update-controller.sh"
-printf '%s\n' 'POSTGRES_PASSWORD="test-only"' 'XINGCHEN_TARGET_VERSION="v1.20.11"' > "${offline_root}/.env"
+printf '%s\n' 'POSTGRES_PASSWORD="test-only"' 'XINGCHEN_TARGET_VERSION="v1.20.12"' > "${offline_root}/.env"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" \
-  "TEST_FAIL_ALL_PULLS=true" "TEST_IMAGE_VERSION=v1.20.11" bash "${offline_root}/deploy/update-controller.sh" --check --offline
+  "TEST_FAIL_ALL_PULLS=true" "TEST_IMAGE_VERSION=v1.20.12" bash "${offline_root}/deploy/update-controller.sh" --check --offline
 if grep -Eq '^docker (pull|build) ' "${log_file}"; then
   echo 'Offline check attempted a registry pull or remote build.' >&2
   exit 1
 fi
-grep -F 'docker image inspect ghcr.io/pstarchen/monitor-for-server-server:v1.20.11' "${log_file}" >/dev/null
+grep -F 'docker image inspect ghcr.io/pstarchen/monitor-for-server-server:v1.20.12' "${log_file}" >/dev/null
 
 : > "${log_file}"
 if env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" \
-  "TEST_MISSING_LOCAL_IMAGE=true" "TEST_IMAGE_VERSION=v1.20.11" bash "${offline_root}/deploy/update-controller.sh" --check --offline; then
+  "TEST_MISSING_LOCAL_IMAGE=true" "TEST_IMAGE_VERSION=v1.20.12" bash "${offline_root}/deploy/update-controller.sh" --check --offline; then
   echo 'Offline check succeeded with missing local images.' >&2
   exit 1
 fi
@@ -264,7 +264,7 @@ fi
 
 : > "${log_file}"
 if env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" \
-  "TEST_MISSING_LOCAL_IMAGE_MATCH=postgres:16-alpine" "TEST_IMAGE_VERSION=v1.20.11" bash "${offline_root}/deploy/update-controller.sh" --check --offline; then
+  "TEST_MISSING_LOCAL_IMAGE_MATCH=postgres:16-alpine" "TEST_IMAGE_VERSION=v1.20.12" bash "${offline_root}/deploy/update-controller.sh" --check --offline; then
   echo 'Offline check succeeded without the PostgreSQL image.' >&2
   exit 1
 fi
@@ -277,7 +277,7 @@ cp "${updater}" "${downgrade_root}/deploy/update-controller.sh"
 printf '%s\n' 'POSTGRES_PASSWORD="test-only"' 'XINGCHEN_TARGET_VERSION="v1.20.10"' > "${downgrade_root}/.env"
 : > "${log_file}"
 if env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" \
-  "TEST_RUNNING_VERSION=v1.20.11" bash "${downgrade_root}/deploy/update-controller.sh" --check --no-mirror; then
+  "TEST_RUNNING_VERSION=v1.20.12" bash "${downgrade_root}/deploy/update-controller.sh" --check --no-mirror; then
   echo 'Controller downgrade was not rejected.' >&2
   exit 1
 fi
@@ -289,10 +289,10 @@ fi
 same_root="${temp_dir}/same-version-project"
 mkdir -p "${same_root}/deploy"
 cp "${updater}" "${same_root}/deploy/update-controller.sh"
-printf '%s\n' 'POSTGRES_PASSWORD="test-only"' 'XINGCHEN_TARGET_VERSION="v1.20.11"' > "${same_root}/.env"
+printf '%s\n' 'POSTGRES_PASSWORD="test-only"' 'XINGCHEN_TARGET_VERSION="v1.20.12"' > "${same_root}/.env"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" \
-  "TEST_RUNNING_VERSION=v1.20.11" bash "${same_root}/deploy/update-controller.sh" --apply --no-mirror
+  "TEST_RUNNING_VERSION=v1.20.12" bash "${same_root}/deploy/update-controller.sh" --apply --no-mirror
 if grep -Eq '^docker (pull|build) |^docker compose .* up ' "${log_file}"; then
   echo 'Same-version apply pulled images or restarted services.' >&2
   exit 1

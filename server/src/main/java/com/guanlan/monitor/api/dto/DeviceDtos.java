@@ -77,4 +77,13 @@ public final class DeviceDtos {
     ) {}
 
     public record Credential(View device, String agentKey) {}
+
+    public record EnrollmentToken(String token, Instant expiresAt) {}
+
+    public record EnrollmentRequest(
+            @NotBlank @Size(max = 64) String deviceId,
+            @NotBlank @Size(max = 128) String token
+    ) {}
+
+    public record EnrollmentCredential(String agentKey) {}
 }

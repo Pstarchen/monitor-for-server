@@ -51,7 +51,7 @@ const categoryOptions = ['全部', '监控入门', '告警响应', '自动化运
 
 const quickStart: QuickStartStep[] = [
   { title: '登记第一台设备', description: '在设备管理中创建节点，填写名称、分组和资产信息。', route: '/devices', roles: ['ADMIN', 'OPERATOR'] },
-  { title: '完成 Agent 接入', description: '单独保存只显示一次的长期密钥，再在目标服务器运行安装命令并等待首次上报。', route: '/devices', roles: ['ADMIN', 'OPERATOR'] },
+  { title: '完成 Agent 接入', description: '复制只显示一次的短期接入令牌，再在目标服务器运行安装命令并等待首次上报。', route: '/devices', roles: ['ADMIN', 'OPERATOR'] },
   { title: '补充服务与告警', description: '创建服务探测和资源告警规则，确认阈值与失败次数符合值班要求。', route: '/services', roles: ['ADMIN', 'OPERATOR'] },
   { title: '配置通知与恢复点', description: '管理员测试通知通道并创建数据库备份，形成完整的响应闭环。', route: '/settings', roles: ['ADMIN'] },
 ]
@@ -83,19 +83,19 @@ const topics: GuideTopic[] = [
     summary: '登记服务器、维护资产归属，并生成 Agent 接入凭据。',
     steps: [
       '点击“添加设备”，填写设备名称、分组、位置以及需要维护的资产字段。',
-      '创建设备后立即保存 Agent 密钥或复制安装命令；密钥关闭弹窗后不会再次显示。',
+      '创建设备后复制一次性接入令牌和安装命令；令牌在 15 分钟内只能使用一次。',
       'Agent 完成首次上报后，设备会从等待接入变为在线，并开始累积资源历史。',
     ],
-    note: '轮换密钥会让旧密钥立即失效。执行前先准备好更新目标服务器配置并重启 Agent。',
+    note: '接入令牌过期或已使用时可以重新签发；安装命令不会包含令牌或长期 Agent 密钥。',
     checks: [
       '目标设备从“待接入”变为“在线”，并显示主机名与最新上报时间。',
       '设备详情的趋势与主机页出现 CPU、内存和磁盘数据。',
     ],
     troubleshooting: [
       '仍是“待接入”：在目标机执行 Agent status/logs，并测试访问总控 `/healthz`。',
-      '轮换密钥后离线：重新复制安装命令，确认设备 ID、总控地址和新密钥没有混用。',
+      '接入失败：重新签发令牌，确认设备 ID、总控地址与目标设备一致。',
     ],
-    keywords: ['添加设备', '安装命令', '密钥', '节点', '服务器'],
+    keywords: ['添加设备', '安装命令', '接入令牌', '节点', '服务器'],
   },
   {
     id: 'device-detail', category: '监控入门', title: '设备详情、资产与记录', icon: ListChecks, route: '/devices', entry: '设备管理 → 点击设备名称',

@@ -241,6 +241,11 @@ export interface DeviceCredential {
   agentKey: string
 }
 
+export interface DeviceEnrollmentToken {
+  token: string
+  expiresAt: string
+}
+
 export interface AlertRule {
   id: number
   name: string

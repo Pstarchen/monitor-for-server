@@ -1,6 +1,6 @@
 # 受监控服务器搭建材料
 
-受监控服务器只安装一个 Agent。每台机器在星辰监控总控的“设备管理”中创建一条设备记录，拿到设备 ID 和只显示一次的长期 Agent 密钥后，再在目标主机安装。该密钥当前不是单次消费的 enrollment token；不要把它放入命令行、URL、工单或日志。
+受监控服务器只安装一个 Agent。每台机器在星辰监控总控的“设备管理”中创建一条设备记录，拿到设备 ID 和只显示一次的接入令牌后，再在目标主机安装。令牌 15 分钟后过期且只能消费一次；安装器用它向总控交换长期 Agent 密钥，管理员不需要复制或保存长期密钥。
 
 第一次接入设备可先阅读[新手使用指南的“接入第一台服务器”](user-guide.md#7-接入第一台服务器)。控制台自动生成的命令应优先于手工拼接；本页用于查阅完整 Agent 参数和高级采集配置。
 
@@ -8,21 +8,13 @@
 
 在线安装器默认识别操作系统和 CPU 架构，从总控同源的 release/artifact 接口下载预编译 Agent，校验 manifest 声明的大小和 SHA256 后安装 systemd 服务。只有显式配置制品基址、GitHub API或源码仓库时才使用相应回退。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
 
-控制台默认使用总控同域入口，目标服务器无需访问代码托管平台；也可在命令上方明确切换到 Gitee 或 GitHub。复制按钮输出的是纯文本命令，不包含 Markdown 链接、历史版本号或多级下载回退。
+控制台只使用总控同域入口，目标服务器无需访问 GitHub、Gitee 或公共 CDN。复制按钮输出的是纯文本命令，不包含接入令牌、长期密钥、Markdown 链接、历史版本号或多级下载回退；脚本与 SHA256 分别下载，校验匹配后才会执行。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && ./xingchen-agent.sh --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s
+installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && (trap 'rm -f "$installer"' EXIT && curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o "$installer" && expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256') && actual_sha=$(sha256sum "$installer" | awk '{print $1}') && test "$actual_sha" = "$expected_sha" && chmod 700 "$installer" && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' "$installer" --interval 3s)
 ```
 
-Gitee 源只替换安装脚本下载地址，安装参数和密钥注入方式保持一致：
-
-```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
-  'https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh' \
-  -o xingchen-agent.sh
-```
-
-GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`，控制台选择后会自动生成完整命令。
+不要将安装器 URL 改成代码托管平台的 `main` 分支。需要外部回退时，在总控侧配置受信上游或内部镜像，由总控完成版本固定、缓存和制品校验。
 
 `XINGCHEN_SERVER` 可以填写域名、`域名:端口` 或完整 `http(s)://` 地址。安装器优先访问 HTTPS，远程 HTTP 只有传入 `--allow-insecure-http` 才会启用；本地回环地址仍可用于开发。生产环境必须配置 HTTPS。原生模式会把配置写到 `/etc/xingchen-agent/agent.json`，离线上报缓冲写入 `/var/lib/xingchen-agent/spool`，程序安装到 `/usr/local/bin/xingchen-agent`。
 
@@ -53,7 +45,7 @@ GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-
 /opt/xingchen/agent/agent.sh uninstall
 ```
 
-默认卸载会保留配置和离线缓存；彻底删除时使用 `uninstall --purge`。管理脚本会记录安装模式和 Release 源，不会记录 Agent 密钥。
+默认卸载会保留配置和离线缓存；彻底删除时使用 `uninstall --purge`。管理脚本会记录安装模式和 Release 源，不会记录接入令牌或 Agent 密钥。
 
 内网可用 `--image registry.example.com/xingchen-agent:vX.Y.Z` 或 `XINGCHEN_AGENT_IMAGE` 指定固定版本 OCI 镜像。Docker 镜像不可用时，只有已通过 `--source-url` 或 `XINGCHEN_REPOSITORY_URLS` 明确配置的仓库才参与源码构建。Docker 不可用时可传 `--binary /path/to/xingchen-agent` 使用本机 systemd 服务；正常原生安装优先从总控取得制品，不需要 Go、git、Gitee 或 GitHub。
 
@@ -81,10 +73,9 @@ journalctl -u xingchen-agent -n 100 --no-pager
 
 ## Windows
 
-请用管理员 PowerShell 运行。控制台会根据所选安装源下载脚本，临时注入 Agent 密钥，并在完成后删除脚本和环境变量。安装器会识别 Windows x64/ARM64，从 Release 下载并校验 `xingchen-agent_<版本>_windows_<架构>.zip`：
+请用管理员 PowerShell 运行。控制台会从总控同域下载脚本、比较 SHA256 后执行；脚本准备好目标制品后通过隐藏输入读取一次性接入令牌，并在完成后清除凭据变量。安装器会识别 Windows x64/ARM64，从 Release 下载并校验 `xingchen-agent_<版本>_windows_<架构>.zip`：
 
 ```powershell
-$env:XINGCHEN_AGENT_KEY = '<Agent密钥>'
 & .\deploy\install-agent.ps1 `
   -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `
@@ -94,6 +85,8 @@ $env:XINGCHEN_AGENT_KEY = '<Agent密钥>'
   -IntegrityPath 'C:\inetpub\wwwroot' `
   -MonitoredService 'W3SVC','MSSQLSERVER'
 ```
+
+非交互自动化可在受控进程环境中临时提供 `XINGCHEN_ENROLLMENT_TOKEN`；不要把令牌写入命令参数、URL、工单或日志。`XINGCHEN_AGENT_KEY` 仅为旧自动化保留。
 
 安装器会创建自动启动的 `XingchenAgent` 服务，并将配置写入 `%ProgramData%\XingchenMonitor\agent.json`，仅 SYSTEM 与 Administrators 可读。检查：
 

@@ -1,6 +1,7 @@
 package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.api.dto.AgentReportRequest;
+import com.guanlan.monitor.api.dto.DeviceDtos;
 import com.guanlan.monitor.api.dto.MetricView;
 import com.guanlan.monitor.service.MetricService;
 import com.guanlan.monitor.service.SettingService;
@@ -9,6 +10,7 @@ import com.guanlan.monitor.service.DeviceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.InetAddress;
@@ -22,6 +24,13 @@ public class AgentController {
     private final SettingService settings;
     private final DdnsService ddns;
     private final DeviceService devices;
+
+    @PostMapping("/enroll")
+    ResponseEntity<DeviceDtos.EnrollmentCredential> enroll(@Valid @RequestBody DeviceDtos.EnrollmentRequest request) {
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(devices.enroll(request));
+    }
 
     @PostMapping("/reports")
     ResponseEntity<MetricView> report(

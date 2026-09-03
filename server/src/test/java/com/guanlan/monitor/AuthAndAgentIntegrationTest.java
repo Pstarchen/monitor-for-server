@@ -2,6 +2,7 @@ package com.guanlan.monitor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guanlan.monitor.api.dto.DeviceDtos;
+import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.api.dto.ApiTokenDtos;
 import com.guanlan.monitor.domain.AlertEvent;
 import com.guanlan.monitor.domain.AgentTask;
@@ -37,6 +38,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -119,6 +123,153 @@ class AuthAndAgentIntegrationTest {
                 .andExpect(jsonPath("$.reasonCode").value("NOT_CONNECTED"))
                 .andExpect(jsonPath("$.lastSeenAgeSeconds").doesNotExist())
                 .andExpect(jsonPath("$.checks").isArray());
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void managedOperatorCanIssueAndConsumeOneTimeEnrollmentToken() throws Exception {
+        DeviceDtos.Credential original = devices.create(new DeviceDtos.CreateRequest("enrollment-node", "lab", "tests", "127.0.0.51"));
+        grantAccess("operator", UserAccount.Role.OPERATOR, original.device().id(), true, false, false);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/devices/" + original.device().id() + "/enrollment-token"))
+                .andExpect(status().isForbidden());
+
+        var issued = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/devices/" + original.device().id() + "/enrollment-token")
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(jsonPath("$.expiresAt").isNotEmpty())
+                .andReturn();
+        String token = mapper.readTree(issued.getResponse().getContentAsString()).get("token").asText();
+        Device stored = deviceRepository.findById(original.device().id()).orElseThrow();
+        assertThat(stored.getAgentEnrollmentTokenHash()).hasSize(64).isNotEqualTo(token);
+
+        String enrollmentBody = mapper.writeValueAsString(Map.of("deviceId", original.device().id(), "token", token));
+        var enrolled = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/agent/v1/enroll")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(enrollmentBody))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.agentKey").isNotEmpty())
+                .andReturn();
+        String enrolledKey = mapper.readTree(enrolled.getResponse().getContentAsString()).get("agentKey").asText();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/agent/v1/enroll")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(enrollmentBody))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", original.device().id())
+                        .header("X-Agent-Key", original.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sampleReport()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", original.device().id())
+                        .header("X-Agent-Key", enrolledKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sampleReport()))
+                .andExpect(status().isAccepted());
+
+        Device consumed = deviceRepository.findById(original.device().id()).orElseThrow();
+        assertThat(consumed.getAgentEnrollmentTokenHash()).isNull();
+        assertThat(consumed.getAgentEnrollmentTokenExpiresAt()).isNull();
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void longLivedDeviceCredentialResponsesAreNotCached() throws Exception {
+        var created = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/devices")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"no-store-credential\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.agentKey").isNotEmpty())
+                .andReturn();
+        String deviceId = mapper.readTree(created.getResponse().getContentAsString()).get("device").get("id").asText();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/devices/" + deviceId + "/rotate-key")
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.agentKey").isNotEmpty());
+    }
+
+    @Test
+    @WithMockUser(username = "operator", roles = "OPERATOR")
+    void operatorWithoutDeviceManagementCannotIssueEnrollmentToken() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("restricted-enrollment", "lab", "tests", "127.0.0.52"));
+        grantAccess("operator", UserAccount.Role.OPERATOR, credential.device().id(), false, false, false);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/devices/" + credential.device().id() + "/enrollment-token")
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void expiredInvalidAndControllerManagedEnrollmentTokensAreRejected() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("expired-enrollment", "lab", "tests", "127.0.0.53"));
+        DeviceDtos.EnrollmentToken token = devices.issueEnrollmentToken(credential.device().id());
+        Device stored = deviceRepository.findById(credential.device().id()).orElseThrow();
+        stored.setAgentEnrollmentTokenExpiresAt(Instant.now().minusSeconds(1));
+        deviceRepository.saveAndFlush(stored);
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/enroll")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("deviceId", credential.device().id(), "token", token.token()))))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/enroll")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(Map.of("deviceId", credential.device().id(), "token", "wrong-token"))))
+                .andExpect(status().isUnauthorized());
+
+        devices.regenerateKey(credential.device().id());
+        stored = deviceRepository.findById(credential.device().id()).orElseThrow();
+        assertThat(stored.getAgentEnrollmentTokenHash()).isNull();
+        assertThat(stored.getAgentEnrollmentTokenExpiresAt()).isNull();
+        stored.setControllerManaged(true);
+        deviceRepository.saveAndFlush(stored);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/devices/" + credential.device().id() + "/enrollment-token")
+                        .with(csrf()))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void enrollmentTokenCanOnlyBeConsumedByOneConcurrentRequest() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("concurrent-enrollment", "lab", "tests", "127.0.0.54"));
+        DeviceDtos.EnrollmentToken token = devices.issueEnrollmentToken(credential.device().id());
+        DeviceDtos.EnrollmentRequest request = new DeviceDtos.EnrollmentRequest(credential.device().id(), token.token());
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var attempts = java.util.stream.IntStream.range(0, 2).mapToObj(index -> executor.submit(() -> {
+                ready.countDown();
+                start.await(10, TimeUnit.SECONDS);
+                try {
+                    devices.enroll(request);
+                    return true;
+                } catch (ApiException exception) {
+                    return false;
+                }
+            })).toList();
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            int successes = 0;
+            for (var attempt : attempts) {
+                if (attempt.get(20, TimeUnit.SECONDS)) successes++;
+            }
+            assertThat(successes).isEqualTo(1);
+        }
     }
 
     @Test

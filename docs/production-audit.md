@@ -25,12 +25,12 @@
 - `production` profile 不再允许回退到 H2 默认库；缺少安装向导写入的 PostgreSQL 凭据或 `SETTINGS_ENCRYPTION_KEY` 时，服务应直接失败并要求补齐配置。
 - 外层 TLS 网关正确转发 `/api/`、`/ws/`、Cookie 和 `X-Forwarded-*`；生产设置 `SESSION_COOKIE_SECURE=true` 与精确的 `ALLOWED_ORIGINS`。
 - PostgreSQL 仅在 Compose 内网可达，Redis 不发布到公网；按 `docs/controller-server.md` 做备份、升级和恢复演练。
-- Linux/Windows 受监控主机默认只从总控同源接口取得对应架构的预编译 Agent，并校验 manifest、大小和 SHA256；外部制品或源码仓库只有显式配置后才参与。密钥轮换后必须在目标机重新部署配置。
+- Linux/Windows 受监控主机默认只从总控同源接口取得安装器和对应架构的预编译 Agent，并校验安装器 SHA256、manifest、制品大小与摘要；首次接入使用 15 分钟一次性令牌，外部制品或源码仓库只有显式配置后才参与。手工轮换长期密钥后仍须在目标机同步配置。
 - Agent 上报接口使用独立设备密钥；鸿蒙 App 使用用户会话，不能复用 Agent 密钥。
 - PostgreSQL、Redis 和服务端仅通过 Compose 内网通信，数据库端口不发布到宿主机。
 - 控制端安装器默认不做破坏性清理，显式传入 `--cleanup` 才会移除本项目旧容器和镜像；PostgreSQL/Redis 数据卷以及其他项目资源始终保留。
 - Linux 总终端的 `controller-agent` 仅使用本机 Web 入口、只读宿主机文件系统与独立缓冲卷；Windows Docker Desktop 安装默认不启用它，以免采集到 Linux 虚拟机而非 Windows 宿主机。
-- Agent 安装命令支持从总控或仓库脚本直接执行；Linux 原生模式使用 systemd、原子更新和版本备份，Docker 模式仍使用只读宿主机挂载、host PID/network 与独立缓冲卷。Windows 保持原生服务，避免 Docker Desktop 虚拟机指标替代宿主机指标。
+- 控制台生成的 Agent 安装命令只从总控同源接口下载，不执行代码仓库 `main` 分支脚本；Linux 原生模式使用 systemd、原子更新和版本备份，Docker 模式仍使用只读宿主机挂载、host PID/network 与独立缓冲卷。Windows 保持原生服务，避免 Docker Desktop 虚拟机指标替代宿主机指标。
 - 使用 GHCR 时相关包必须可由发布流程读取；无法访问 GHCR 的生产环境应把同版本镜像同步到受信内部 Registry，或使用包含六个镜像与全部 Agent 制品的离线 bundle。目标服务器不应依赖公共镜像加速器。
 
 ## 验证记录

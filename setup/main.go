@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,6 +120,11 @@ func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "安装器平台必须是 linux 或 windows")
 		return
 	}
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format != "" && format != "sha256" {
+		writeError(w, http.StatusBadRequest, "安装器格式必须为空或 sha256")
+		return
+	}
 	path := filepath.Join(workspace, "deploy", filename)
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -135,6 +142,13 @@ func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if format == "sha256" {
+		digest := sha256.Sum256(content)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename+".sha256"))
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, hex.EncodeToString(digest[:])+"\n")
+		return
+	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)

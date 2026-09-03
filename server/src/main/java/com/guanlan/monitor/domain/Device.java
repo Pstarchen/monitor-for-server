@@ -93,6 +93,12 @@ public class Device {
     @Column(name = "agent_key_prefix", nullable = false, length = 12)
     private String agentKeyPrefix;
 
+    @Column(name = "agent_enrollment_token_hash", length = 64)
+    private String agentEnrollmentTokenHash;
+
+    @Column(name = "agent_enrollment_token_expires_at")
+    private Instant agentEnrollmentTokenExpiresAt;
+
     @Column(name = "controller_managed", nullable = false)
     private boolean controllerManaged;
 

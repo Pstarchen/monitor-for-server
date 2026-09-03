@@ -64,7 +64,9 @@
 | GET | `/api/devices/{id}/health` | 登录 | Agent 接入健康诊断：连接状态、最近上报年龄、失联阈值、指标年龄和检查结果 |
 | POST | `/api/devices` | ADMIN / OPERATOR | 创建设备并一次性返回 Agent 密钥 |
 | PUT | `/api/devices/{id}` | ADMIN / OPERATOR | 更新名称、位置、分组、主 IP、资产信息和公开设置 |
+| POST | `/api/devices/{id}/enrollment-token` | ADMIN / OPERATOR + 设备管理权限 | 签发 15 分钟有效、只能消费一次的 Agent 接入令牌 |
 | POST | `/api/devices/{id}/rotate-key` | ADMIN | 轮换并一次性返回新密钥 |
+| POST | `/api/agent/v1/enroll` | 接入令牌 | 原子消费接入令牌并一次性返回长期 Agent 密钥 |
 | DELETE | `/api/devices/{id}` | ADMIN | 删除设备及关联数据 |
 | GET | `/api/devices/{id}/metrics/latest` | 登录 | 最新指标 |
 | GET | `/api/devices/{id}/metrics/history` | 登录 | `from` 到 `to` 的历史指标，最大 31 天；每个快照包含当时的容器与进程列表，控制台可据此绘制单容器/单进程历史趋势 |
@@ -98,7 +100,7 @@
 
 设备资产字段均为可选；`environment` 可使用 `production`、`staging`、`testing`、`development` 或 `disaster-recovery`，日期使用 `YYYY-MM-DD`。设备状态从待接入变为在线、从在线变为离线或恢复在线时，系统会自动生成状态历史事件。
 
-创建和轮换密钥的响应包含 `{ "device": { ... }, "agentKey": "..." }`。`agentKey` 不会再次返回。
+创建和轮换密钥的响应为兼容旧客户端，仍包含 `{ "device": { ... }, "agentKey": "..." }`。新控制台不会展示或写入安装命令，而是调用 enrollment-token 接口；响应为 `{ "token": "...", "expiresAt": "..." }`。安装器随后向 `/api/agent/v1/enroll` 发送 `{ "deviceId": "...", "token": "..." }`，成功后令牌原子失效并返回 `{ "agentKey": "..." }`。服务端只保存接入令牌的 SHA-256；错误、过期和已消费令牌统一返回 `401`。
 
 设备列表和详情中的 `health` 字段与上述诊断接口一致。`state` 为 `HEALTHY`、`PENDING`、`OFFLINE` 或 `DEGRADED`：
 
@@ -133,7 +135,7 @@
 }
 ```
 
-结果只包含主机可达或至少一个端口可连接的地址；控制台可复制地址或带入设备登记表单，后续仍需配置 Agent 密钥并完成首次上报。
+结果只包含主机可达或至少一个端口可连接的地址；控制台可复制地址或带入设备登记表单，后续仍需签发一次性接入令牌并完成首次上报。
 
 ## 公开品牌
 

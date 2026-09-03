@@ -16,7 +16,7 @@ import { bytes, dateTime, percent, rate, rateScale, relativeTime } from '@/lib/f
 import { matchesRealtimeEvent } from '@/lib/realtime'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import { useAuthStore } from '@/stores/auth'
-import type { ContainerMetric, Device, DeviceCredential, DeviceNote, DeviceStatusEvent, Metric, ProcessMetric } from '@/types'
+import type { ContainerMetric, Device, DeviceCredential, DeviceEnrollmentToken, DeviceNote, DeviceStatusEvent, Metric, ProcessMetric } from '@/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -29,6 +29,8 @@ const error = ref('')
 const rangeHours = ref(1)
 const activeTab = ref('overview')
 const credential = ref<DeviceCredential | null>(null)
+const enrollmentToken = ref<DeviceEnrollmentToken | null>(null)
+const issuingEnrollmentToken = ref(false)
 const notes = ref<DeviceNote[]>([])
 const statusEvents = ref<DeviceStatusEvent[]>([])
 const noteContent = ref('')
@@ -312,6 +314,28 @@ async function rotateKey() {
   }
 }
 
+async function issueEnrollmentToken() {
+  if (!device.value || issuingEnrollmentToken.value) return
+  issuingEnrollmentToken.value = true
+  try {
+    enrollmentToken.value = (await api.post<DeviceEnrollmentToken>(`/devices/${deviceId.value}/enrollment-token`)).data
+  } catch (cause) {
+    ElMessage.error(errorMessage(cause))
+  } finally {
+    issuingEnrollmentToken.value = false
+  }
+}
+
+async function copyEnrollmentToken() {
+  if (!enrollmentToken.value) return
+  try {
+    await copyText(enrollmentToken.value.token)
+    ElMessage.success('接入令牌已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择接入令牌')
+  }
+}
+
 async function copyKey() {
   if (!credential.value) return
   try {
@@ -349,7 +373,8 @@ onBeforeUnmount(() => {
         <template #actions>
           <StatusBadge :status="device.status" />
           <el-button :loading="refreshing" @click="load(true)"><RefreshCw :size="16" />刷新</el-button>
-          <el-button v-if="auth.user?.role === 'ADMIN'" @click="rotateKey"><KeyRound :size="16" />轮换密钥</el-button>
+          <el-button v-if="canOperate && !device.controllerManaged" :loading="issuingEnrollmentToken" @click="issueEnrollmentToken"><KeyRound :size="16" />签发接入令牌</el-button>
+          <el-button v-if="auth.user?.role === 'ADMIN' && !device.controllerManaged" @click="rotateKey"><KeyRound :size="16" />轮换密钥</el-button>
         </template>
       </PageHeader>
 
@@ -594,6 +619,11 @@ onBeforeUnmount(() => {
       <el-dialog :model-value="Boolean(credential)" title="保存新的 Agent 密钥" width="min(580px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) credential = null }">
         <div v-if="credential" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>旧密钥已失效</strong><span>请立即更新目标服务器的 Agent 配置并重启服务。</span></p></div><dl><div><dt>设备 ID</dt><dd>{{ credential.device.id }}</dd></div><div><dt>Agent 密钥</dt><dd>{{ credential.agentKey }}</dd></div></dl></div>
         <template #footer><el-button @click="credential = null">我已保存</el-button><el-button type="primary" @click="copyKey"><Copy :size="16" />复制密钥</el-button></template>
+      </el-dialog>
+
+      <el-dialog :model-value="Boolean(enrollmentToken)" title="Agent 接入令牌" width="min(580px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) enrollmentToken = null }">
+        <div v-if="enrollmentToken" class="credential-panel"><div class="credential-warning"><KeyRound :size="18" /><p><strong>接入令牌仅显示这一次</strong><span>令牌在 15 分钟内有效且只能使用一次。</span></p></div><dl><div><dt>设备 ID</dt><dd>{{ deviceId }}</dd></div><div><dt>接入令牌</dt><dd>{{ enrollmentToken.token }}</dd></div><div><dt>失效时间</dt><dd>{{ dateTime(enrollmentToken.expiresAt) }}</dd></div></dl></div>
+        <template #footer><el-button @click="enrollmentToken = null">完成</el-button><el-button type="primary" @click="copyEnrollmentToken"><Copy :size="16" />复制令牌</el-button></template>
       </el-dialog>
     </template>
   </section>

@@ -92,6 +92,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/v2/devices/")) return method.equals("GET") ? "nezha:server:read" : DENY_SCOPE;
         if (path.startsWith("/api/devices/")) {
             if (path.endsWith("/rotate-key")) return method.equals("POST") ? "nezha:server:write" : DENY_SCOPE;
+            if (path.endsWith("/enrollment-token")) return method.equals("POST") ? "nezha:server:write" : DENY_SCOPE;
             if (path.contains("/metrics/")) return method.equals("GET") ? "nezha:server:read" : DENY_SCOPE;
             if (path.contains("/notes")) return switch (method) {
                 case "GET" -> "nezha:server:read";

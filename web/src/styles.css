@@ -669,6 +669,16 @@ p, h1, h2, h3 { margin: 0; }
 .install-command code { overflow-wrap: anywhere; color: #ededed; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; line-height: 1.65; white-space: pre-wrap; }
 .install-command button { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 1px solid #3c3c3c; border-radius: 6px; color: #ededed; background: #242424; cursor: pointer; }
 .install-command button:hover { background: #333; }
+.el-dialog.agent-enrollment-dialog { max-height: calc(100dvh - 28px); display: flex; flex-direction: column; margin: 14px auto; }
+.agent-enrollment-dialog .el-dialog__header, .agent-enrollment-dialog .el-dialog__footer { flex: 0 0 auto; }
+.agent-enrollment-dialog .el-dialog__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.agent-enrollment-dialog .el-dialog__footer { padding-top: 16px; border-top: 1px solid var(--border); background: var(--surface-raised); }
+@media (max-width: 560px) {
+  .el-dialog.agent-enrollment-dialog { max-height: calc(100dvh - 16px); margin: 8px auto; }
+  .agent-enrollment-dialog .el-dialog__footer { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .agent-enrollment-dialog .el-dialog__footer .el-button { width: 100%; margin-left: 0; }
+  .agent-enrollment-dialog .el-dialog__footer .el-button:last-child { grid-column: 1 / -1; }
+}
 
 .back-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 12px; cursor: pointer; }
 .back-link:hover { color: var(--foreground); }
