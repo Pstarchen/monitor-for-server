@@ -1,5 +1,7 @@
 import QRCode from 'qrcode'
 
+export const XINGCHENYUNXUN_APP_GALLERY_URL = 'https://appgallery.huawei.com/app/detail?id=cn.xciy.xcyx&channelId=SHARE&source=appshare'
+
 const CONTROLLER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$/
 const CAPABILITY_PATTERN = /^[a-z][a-z0-9-]*-v[0-9]+$/
 

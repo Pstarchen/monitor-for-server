@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { QrCode, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-vue-next'
+import { Download, ExternalLink, QrCode, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-vue-next'
 import { api, errorMessage } from '@/lib/api'
 import {
   createMobileBindingQrCodeV2,
   mobileBindingMetadataFromBootstrap,
   resolveMobileBindingBaseUrl,
+  XINGCHENYUNXUN_APP_GALLERY_URL,
 } from '@/lib/mobile-binding'
 import type { ClientBootstrap } from '@/lib/mobile-binding'
 
@@ -98,6 +99,19 @@ onBeforeUnmount(() => {
         <span v-else class="mobile-binding-qr-caption"><QrCode :size="14" />鸿蒙 App</span>
       </div>
       <div class="mobile-binding-details">
+        <div class="mobile-binding-app-download">
+          <span><Download :size="17" /></span>
+          <div>
+            <small>还没有鸿蒙客户端？</small>
+            <strong>先安装星辰云巡，再扫描二维码</strong>
+          </div>
+          <a
+            :href="XINGCHENYUNXUN_APP_GALLERY_URL"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="在华为应用市场下载星辰云巡（新窗口打开）"
+          >华为应用市场<ExternalLink :size="14" /></a>
+        </div>
         <div class="mobile-binding-scope">
           <span><ShieldCheck :size="17" /></span>
           <div><small>当前授权范围</small><strong>{{ scopeCount }} 项权限</strong></div>

@@ -625,6 +625,16 @@ p, h1, h2, h3 { margin: 0; }
 .mobile-binding-loading strong { color: var(--foreground); font-size: 12px; }
 .mobile-binding-loading p { max-width: 140px; font-size: 10px; line-height: 1.55; }
 .mobile-binding-details { min-width: 0; display: grid; align-content: center; gap: 18px; padding: 22px 24px; }
+.mobile-binding-app-download { min-width: 0; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.mobile-binding-app-download > span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; color: var(--accent); background: var(--accent-soft); }
+.mobile-binding-app-download > div { min-width: 0; }
+.mobile-binding-app-download small, .mobile-binding-app-download strong { display: block; }
+.mobile-binding-app-download small { color: var(--muted); font-size: 10px; font-weight: 600; }
+.mobile-binding-app-download strong { margin-top: 3px; color: var(--foreground); font-size: 12px; line-height: 1.45; }
+.mobile-binding-app-download > a { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border)); border-radius: 7px; color: var(--accent); background: var(--accent-soft); font-size: 11px; font-weight: 700; line-height: 1.35; text-decoration: none; white-space: nowrap; transition: color 160ms ease, border-color 160ms ease, background 160ms ease, transform 120ms ease; }
+.mobile-binding-app-download > a:hover { border-color: var(--accent); color: var(--surface); background: var(--accent); }
+.mobile-binding-app-download > a:active { transform: translateY(1px); }
+.mobile-binding-app-download > a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mobile-binding-scope { display: flex; align-items: center; gap: 10px; }
 .mobile-binding-scope > span { width: 34px; height: 34px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 7px; color: var(--info); background: var(--info-bg); }
 .mobile-binding-scope small, .mobile-binding-scope strong { display: block; }
@@ -1528,6 +1538,8 @@ p, h1, h2, h3 { margin: 0; }
   .mobile-binding-stage { grid-template-columns: 1fr; }
   .mobile-binding-qr-column { min-height: 220px; padding: 18px 16px; border-right: 0; border-bottom: 1px solid var(--border); }
   .mobile-binding-details { gap: 16px; padding: 18px 16px 20px; }
+  .mobile-binding-app-download { grid-template-columns: 34px minmax(0, 1fr); }
+  .mobile-binding-app-download > a { grid-column: 1 / -1; width: 100%; }
   .token-expiry-control { align-items: flex-start; flex-direction: column; }
   .update-settings { padding-top: 18px; }
   .update-state { grid-template-columns: 36px minmax(0, 1fr); }

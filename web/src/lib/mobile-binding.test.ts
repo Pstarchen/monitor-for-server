@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  XINGCHENYUNXUN_APP_GALLERY_URL,
   createMobileBindingPayload,
   createMobileBindingPayloadV2,
   mobileBindingMetadataFromBootstrap,
@@ -30,6 +31,12 @@ const bootstrap: ClientBootstrap = {
 }
 
 describe('mobile binding payload', () => {
+  it('uses the official AppGallery listing for the HarmonyOS client', () => {
+    expect(XINGCHENYUNXUN_APP_GALLERY_URL).toBe(
+      'https://appgallery.huawei.com/app/detail?id=cn.xciy.xcyx&channelId=SHARE&source=appshare',
+    )
+  })
+
   it('keeps the v1 helper compatible for older clients', () => {
     const payload = JSON.parse(createMobileBindingPayload(
       'https://monitor.example.com',
