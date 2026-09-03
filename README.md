@@ -69,7 +69,7 @@ bash ./deploy/install-controller.sh
 bash ./deploy/install-controller.sh --build
 ```
 
-目标服务器无法访问 GitHub/GHCR 时，将 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE`、`XINGCHEN_AGENT_IMAGE`、`XINGCHEN_POSTGRES_IMAGE` 和 `XINGCHEN_REDIS_IMAGE` 指向内部 Registry，并通过 `XINGCHEN_RELEASE_MANIFEST_URLS`、`XINGCHEN_AGENT_RELEASE_BASE_URLS` 指向内部 HTTPS 制品服务。Agent 默认从总控同域取得受校验制品，manifest 的最低 Controller 版本门禁可阻止不兼容下发。完全断网环境在联网发布机取得 `xingchen-monitor-offline-vX.Y.Z-<架构>.tar.gz`，校验外层 `.sha256` 后传入目标机，解压并执行包内 `install-offline.sh` 或 `install-offline.ps1`。联网 CI 仅在全部镜像、Agent 制品和离线包验证成功后才把 draft Release 公开。
+目标服务器无法访问 GitHub/GHCR 时，将 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE`、`XINGCHEN_AGENT_IMAGE`、`XINGCHEN_POSTGRES_IMAGE` 和 `XINGCHEN_REDIS_IMAGE` 指向内部 Registry，并通过 `XINGCHEN_RELEASE_MANIFEST_URLS`、`XINGCHEN_AGENT_RELEASE_BASE_URLS` 指向内部 HTTPS 制品服务。稳定版 Setup 镜像还内置同版本的四个平台 Agent 制品作为末级本地基线；Agent 默认从总控同域取得受校验制品，manifest 的最低 Controller 版本门禁可阻止不兼容下发。内部 manifest 用于持续发现后续版本，不能由镜像内基线代替。完全断网环境在联网发布机取得 `xingchen-monitor-offline-vX.Y.Z-<架构>.tar.gz`，校验外层 `.sha256` 后传入目标机，解压并执行包内 `install-offline.sh` 或 `install-offline.ps1`。联网 CI 仅在全部镜像、Agent 制品和离线包验证成功后才把 draft Release 公开。
 
 安装器会自动生成 PostgreSQL 数据库凭据并等待 Web 健康检查，然后打开 `http://<服务器IP>:18080/setup`。向导只收集站点名称、公网入口、允许来源、时区和首个管理员；端口与绑定地址在总终端启动时确定。提交后页面进入公开状态页，完成服务启动后再从状态页进入登录控制台。
 

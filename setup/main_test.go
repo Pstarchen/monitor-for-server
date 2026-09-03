@@ -40,9 +40,12 @@ func TestValidateSetupRequest(t *testing.T) {
 }
 
 func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
-	originalWorkspace := workspace
+	originalWorkspace, originalPackagedInstallerDir := workspace, packagedInstallerDir
 	workspace = t.TempDir()
-	t.Cleanup(func() { workspace = originalWorkspace })
+	packagedInstallerDir = filepath.Join(t.TempDir(), "not-installed")
+	t.Cleanup(func() {
+		workspace, packagedInstallerDir = originalWorkspace, originalPackagedInstallerDir
+	})
 	if err := os.MkdirAll(filepath.Join(workspace, "deploy"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +103,31 @@ func TestAgentInstallerOnlyServesAllowlistedPlatforms(t *testing.T) {
 	service.agentInstaller(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid installer format returned %d, want 400", response.Code)
+	}
+}
+
+func TestAgentInstallerPrefersPackagedVersionOverWorkspace(t *testing.T) {
+	originalWorkspace, originalPackagedInstallerDir := workspace, packagedInstallerDir
+	workspace = t.TempDir()
+	packagedInstallerDir = t.TempDir()
+	t.Cleanup(func() {
+		workspace, packagedInstallerDir = originalWorkspace, originalPackagedInstallerDir
+	})
+	if err := os.MkdirAll(filepath.Join(workspace, "deploy"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.sh"), []byte("#!/bin/sh\necho stale-workspace\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packagedInstallerDir, "install-agent.sh"), []byte("#!/bin/sh\necho packaged-version\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/setup/agent-installer?platform=linux", nil)
+	response := httptest.NewRecorder()
+	(&setupService{}).agentInstaller(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "packaged-version") || strings.Contains(response.Body.String(), "stale-workspace") {
+		t.Fatalf("installer response = %d %q", response.Code, response.Body.String())
 	}
 }
 

@@ -171,10 +171,12 @@ fi
 compose_project_root="${XINGCHEN_HOST_PROJECT_ROOT:-${project_root}}"
 compose_args+=(-f "${project_root}/docker-compose.yml" --project-directory "${compose_project_root}" --env-file "${project_root}/.env")
 services=(setup server web)
-source_contexts=(setup server web)
+source_contexts=(. server web)
+source_dockerfiles=(setup/Dockerfile '' '')
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   services+=(controller-agent)
   source_contexts+=(agent)
+  source_dockerfiles+=('')
 fi
 
 image_value() {
@@ -188,13 +190,13 @@ image_value() {
 
 image_keys=(XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE)
 source_images=(
-  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.13)"
-  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.13)"
-  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.13)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.14)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.14)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.14)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   image_keys+=(XINGCHEN_AGENT_IMAGE)
-  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14)")
 fi
 dependency_images=(
   "$(image_value XINGCHEN_POSTGRES_IMAGE postgres:16-alpine)"
@@ -335,10 +337,10 @@ remove_source_build_images() {
 }
 
 build_images_from_repositories() {
-  local repository context temporary_image
+  local repository context dockerfile temporary_image
   local index success
   local build_prefix="xingchen-controller-source-$$-${RANDOM}"
-  local temporary_images=()
+  local temporary_images=() build_command=()
   for image in "${candidate_images[@]}"; do
     if [[ "${image}" == *@* ]]; then
       echo "固定摘要镜像无法使用源码构建回退：${image}" >&2
@@ -350,11 +352,18 @@ build_images_from_repositories() {
     success=true
     echo "正在尝试总控源码仓库：${repository} (${source_ref})"
     for ((index = 0; index < ${#source_contexts[@]}; index++)); do
-      context="${repository}#${source_ref}:${source_contexts[index]}"
+      if [[ "${source_contexts[index]}" == . ]]; then
+        context="${repository}#${source_ref}"
+      else
+        context="${repository}#${source_ref}:${source_contexts[index]}"
+      fi
+      dockerfile="${source_dockerfiles[index]}"
       temporary_image="${build_prefix}-${index}:candidate"
       temporary_images+=("${temporary_image}")
-      if ! run_with_timeout "${source_build_timeout_seconds}" docker build --pull --build-arg "VERSION=${target_version:-dev}" --tag "${temporary_image}" "${context}" \
-        || ! verify_image_version "${temporary_image}"; then
+      build_command=(docker build --pull)
+      [[ -n "${dockerfile}" ]] && build_command+=(--file "${dockerfile}")
+      build_command+=(--build-arg "VERSION=${target_version:-dev}" --tag "${temporary_image}" "${context}")
+      if ! run_with_timeout "${source_build_timeout_seconds}" "${build_command[@]}" || ! verify_image_version "${temporary_image}"; then
         success=false
         break
       fi

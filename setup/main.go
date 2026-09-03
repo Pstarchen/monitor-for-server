@@ -31,6 +31,7 @@ var hostWorkspace = workspace
 var envPath = "/workspace/.env"
 var completionMarkerPath = "/workspace/.setup-complete"
 var controllerUpdateStatePath = "/workspace/.controller-update-state.json"
+var packagedInstallerDir = "/usr/local/share/xingchen/installers"
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
 
@@ -107,8 +108,9 @@ func main() {
 	}
 }
 
-// agentInstaller serves the installer from the mounted controller workspace so
-// monitored hosts do not need direct access to GitHub or another CDN.
+// agentInstaller serves the versioned copy packaged with the Setup image. The
+// workspace fallback keeps local development compatible without allowing an
+// old host checkout to override installers shipped by a newer image.
 func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
@@ -125,8 +127,7 @@ func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "安装器格式必须为空或 sha256")
 		return
 	}
-	path := filepath.Join(workspace, "deploy", filename)
-	content, err := os.ReadFile(path)
+	content, err := readAgentInstaller(filename)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "当前总控版本未提供该平台的 Agent 安装器")
@@ -152,6 +153,15 @@ func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
+}
+
+func readAgentInstaller(filename string) ([]byte, error) {
+	if info, err := os.Stat(packagedInstallerDir); err == nil && info.IsDir() {
+		return os.ReadFile(filepath.Join(packagedInstallerDir, filename))
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(workspace, "deploy", filename))
 }
 
 func (s *setupService) status(w http.ResponseWriter, _ *http.Request) {

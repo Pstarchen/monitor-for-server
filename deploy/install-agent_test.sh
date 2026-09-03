@@ -2,7 +2,22 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd -- "${script_dir}/.." && pwd)"
 installer="${script_dir}/install-agent.sh"
+grep -F 'COPY deploy/install-agent.sh deploy/install-agent.ps1 /usr/local/share/xingchen/installers/' "${project_root}/setup/Dockerfile" >/dev/null
+grep -F '      context: .' "${project_root}/docker-compose.yml" >/dev/null
+grep -F '      dockerfile: setup/Dockerfile' "${project_root}/docker-compose.yml" >/dev/null
+grep -F '            context: .' "${project_root}/.github/workflows/controller-images.yml" >/dev/null
+grep -F 'COPY --from=agent-release /out/release /usr/local/share/xingchen/release/' "${project_root}/setup/Dockerfile" >/dev/null
+grep -F '!setup/Dockerfile' "${project_root}/.dockerignore" >/dev/null
+grep -F '!setup/cmd/release-manifest/**' "${project_root}/.dockerignore" >/dev/null
+grep -F '!agent/cmd/**' "${project_root}/.dockerignore" >/dev/null
+grep -F '!agent/internal/**' "${project_root}/.dockerignore" >/dev/null
+grep -F '!deploy/install-agent.sh' "${project_root}/.dockerignore" >/dev/null
+grep -F '!deploy/install-agent.ps1' "${project_root}/.dockerignore" >/dev/null
+grep -F 'source_contexts=(. server web)' "${script_dir}/update-controller.sh" >/dev/null
+grep -F '$sourceContexts = @(' "${script_dir}/update-controller.ps1" >/dev/null
+grep -F '$sourceDockerfiles = @(' "${script_dir}/update-controller.ps1" >/dev/null
 grep -F 'XINGCHEN_AGENT_IMAGE_MIRRORS:-}' "${installer}" >/dev/null
 grep -F '/api/setup/agent-release?os=${release_os}&arch=${release_arch}' "${installer}" >/dev/null
 grep -F 'XINGCHEN_AGENT_ALLOW_GITHUB_API:-false' "${installer}" >/dev/null
@@ -98,13 +113,13 @@ mkdir -p "${rendered_dir}/systemd"
   systemd_dir="${rendered_dir}/systemd"
   agent_update_service_name=xingchen-agent-update.service
   agent_update_timer_name=xingchen-agent-update.timer
-  agent_image=registry.internal.example/xingchen-agent:v1.20.13
+  agent_image=registry.internal.example/xingchen-agent:v1.20.14
   container_name=xingchen-agent
   agent_config_path="${rendered_dir}/agent.json"
   agent_spool_path="${rendered_dir}/spool"
   mirror_pull_timeout=45
   agent_pull_timeout=120
-  source_ref=v1.20.13
+  source_ref=v1.20.14
   source_build_timeout=1800
   release_repo=Pstarchen/monitor-for-server
   release_manifest_urls='https://releases.example.com/manifest.json'
@@ -149,7 +164,7 @@ elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
   [[ "${TEST_CONTAINER_EXISTS:-0}" == "1" ]]
 elif [[ "${1:-}" == "image" && "${2:-}" == "inspect" && "${3:-}" == "--format" ]]; then
   if [[ "${4:-}" == *'org.opencontainers.image.version'* ]]; then
-    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.13}"
+    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.14}"
   else
     printf 'new-agent-image\n'
   fi
@@ -183,7 +198,7 @@ for ((index=0; index<${#arguments[@]}; index++)); do
   fi
 done
 if [[ "${TEST_CONTROLLER_RELEASE:-0}" == 1 && "${url}" == *'/api/setup/agent-release?'* ]]; then
-  printf '{"version":"%s","file":"%s","sha256":"%s","size":%s}\n' "${TEST_RELEASE_VERSION:-v1.20.13}" "${TEST_RELEASE_FILE}" "${TEST_RELEASE_SHA256}" "${TEST_RELEASE_SIZE}"
+  printf '{"version":"%s","file":"%s","sha256":"%s","size":%s}\n' "${TEST_RELEASE_VERSION:-v1.20.14}" "${TEST_RELEASE_FILE}" "${TEST_RELEASE_SHA256}" "${TEST_RELEASE_SIZE}"
   exit 0
 fi
 if [[ "${TEST_CONTROLLER_RELEASE:-0}" == 1 && "${url}" == *'/api/setup/agent-artifact?'* ]]; then
@@ -323,8 +338,8 @@ run_installer_stdin() {
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13' "${log_file}" >/dev/null
-grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
 grep -F 'docker run -d --name xingchen-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
@@ -372,7 +387,7 @@ if [[ "${EUID}" -eq 0 ]]; then
 else
   sudo env "${manager_environment[@]}" bash "${installer}" update
 fi
-grep -F 'docker image inspect --format {{.Id}} ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13' "${log_file}" >/dev/null
+grep -F 'docker image inspect --format {{.Id}} ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
 grep -F 'docker inspect --format {{.Image}} xingchen-agent' "${log_file}" >/dev/null
 grep -F 'docker rename xingchen-agent xingchen-agent.previous' "${log_file}" >/dev/null
 grep -F 'docker rename xingchen-agent.update xingchen-agent' "${log_file}" >/dev/null
@@ -383,8 +398,8 @@ TEST_FAIL_AGENT_PULLS=1
 TEST_FAIL_GITEE_BUILD=1
 TEST_REPOSITORY_URLS='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git'
 run_installer 1
-grep -F 'docker build --pull --build-arg VERSION=v1.20.13 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13 https://gitee.com/starchen520/monitor-for-server.git#v1.20.13:agent' "${log_file}" >/dev/null
-grep -F 'docker build --pull --build-arg VERSION=v1.20.13 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13 https://github.com/Pstarchen/monitor-for-server.git#v1.20.13:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.14 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14 https://gitee.com/starchen520/monitor-for-server.git#v1.20.14:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.14 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14 https://github.com/Pstarchen/monitor-for-server.git#v1.20.14:agent' "${log_file}" >/dev/null
 TEST_FAIL_AGENT_PULLS=0
 TEST_FAIL_GITEE_BUILD=0
 TEST_REPOSITORY_URLS=''
@@ -432,7 +447,7 @@ release_fixture="${temp_dir}/release-fixture"
 mkdir -p "${release_fixture}/content"
 printf '#!/usr/bin/env bash\nexit 0\n' > "${release_fixture}/content/xingchen-agent"
 chmod +x "${release_fixture}/content/xingchen-agent"
-TEST_RELEASE_FILE=xingchen-agent_1.20.13_linux_amd64.tar.gz
+TEST_RELEASE_FILE=xingchen-agent_1.20.14_linux_amd64.tar.gz
 TEST_RELEASE_ARCHIVE="${release_fixture}/${TEST_RELEASE_FILE}"
 tar -czf "${TEST_RELEASE_ARCHIVE}" -C "${release_fixture}/content" xingchen-agent
 TEST_RELEASE_SHA256="$(sha256sum "${TEST_RELEASE_ARCHIVE}" | awk '{print $1}')"
@@ -441,7 +456,7 @@ TEST_CONTROLLER_RELEASE=1
 server_url=https://monitor.example.com
 run_installer 0 --native
 grep -F 'api/setup/agent-release?os=linux&arch=amd64' "${log_file}" >/dev/null
-grep -F 'api/setup/agent-artifact?os=linux&arch=amd64&version=v1.20.13' "${log_file}" >/dev/null
+grep -F 'api/setup/agent-artifact?os=linux&arch=amd64&version=v1.20.14' "${log_file}" >/dev/null
 if grep -F 'api.github.com' "${log_file}" >/dev/null || grep -q '^go ' "${log_file}"; then
   echo 'Controller-served native install unexpectedly used GitHub API or a source build.' >&2
   exit 1
@@ -477,7 +492,7 @@ fi
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1 --binary "${binary_path}"
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
@@ -492,7 +507,7 @@ grep -F '"allow_file_operations": true' "${config_file}" >/dev/null
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer_stdin 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.13' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 
 : > "${log_file}"
@@ -540,7 +555,7 @@ run_as_root env \
   "TEST_RELEASE_FILE=${TEST_RELEASE_FILE}" \
   "TEST_RELEASE_SHA256=${TEST_RELEASE_SHA256}" \
   "TEST_RELEASE_SIZE=${TEST_RELEASE_SIZE}" \
-  "TEST_RUNNING_AGENT_VERSION=v1.20.13" \
+  "TEST_RUNNING_AGENT_VERSION=v1.20.14" \
   bash "${temp_dir}/manager/update-agent.sh" --automatic
 if grep -Eq '^docker (pull|build|run) ' "${log_file}"; then
   echo 'Agent automatic update crossed a major version.' >&2

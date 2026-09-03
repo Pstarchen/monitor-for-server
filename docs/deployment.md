@@ -90,7 +90,7 @@ sudo bash ./deploy/update-controller.sh --auto
 
 ### 内部源与完全离线安装
 
-内部 Registry 应同步 setup、server、web、agent、PostgreSQL 和 Redis 六个镜像；内部 HTTPS 制品服务应同步 `manifest.json`、四个平台 Agent 压缩包和校验文件。目标机在 `.env` 中配置对应的 `XINGCHEN_*_IMAGE`、`XINGCHEN_RELEASE_MANIFEST_URLS` 和 `XINGCHEN_AGENT_RELEASE_BASE_URLS` 后，可添加 `--no-source-fallback` 确保不会访问代码托管平台。
+内部 Registry 应同步 setup、server、web、agent、PostgreSQL 和 Redis 六个镜像；内部 HTTPS 制品服务应同步 `manifest.json`、四个平台 Agent 压缩包和校验文件。稳定版 Setup 镜像内置同版本的四个平台 Agent 制品，在内部服务暂不可用且没有缓存时可作为末级本地基线；配置的内部 manifest 和 last-known-good 缓存仍优先，以便发现后续版本。目标机在 `.env` 中配置对应的 `XINGCHEN_*_IMAGE`、`XINGCHEN_RELEASE_MANIFEST_URLS` 和 `XINGCHEN_AGENT_RELEASE_BASE_URLS` 后，可添加 `--no-source-fallback` 确保不会访问代码托管平台。
 
 完全断网时，在联网发布机下载并校验 `xingchen-monitor-offline-vX.Y.Z-amd64.tar.gz` 或 `-arm64.tar.gz` 及同名 `.sha256`，通过受控介质传入目标机后执行：
 
@@ -158,7 +158,7 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 安装器默认通过总控查询 manifest 并下载对应架构的预编译程序，不要求目标机安装 Go。控制台生成的命令不包含接入令牌或 Agent 密钥；安装器完成提权、准备好目标制品后在交互终端静默询问一次性令牌，再通过 `/api/agent/v1/enroll` 的 JSON body 交换长期密钥。非交互自动化可临时使用 `XINGCHEN_ENROLLMENT_TOKEN`，旧自动化的 `XINGCHEN_AGENT_KEY` 入口继续兼容；两者都会在安装器退出时清除。
 
-控制台只通过总控同域入口下发安装器及其 SHA256；目标服务器无需直接访问代码托管平台，也不会执行 Gitee 或 GitHub `main` 分支上的未固定脚本。
+控制台只通过总控同域入口下发安装器及其 SHA256；安装器随 Setup 镜像固化并优先于宿主机工作目录中的副本，更新镜像后不会继续下发旧脚本。目标服务器无需直接访问代码托管平台，也不会执行 Gitee 或 GitHub `main` 分支上的未固定脚本。
 
 ```bash
 installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && (trap 'rm -f "$installer"' EXIT && curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o "$installer" && expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256') && actual_sha=$(sha256sum "$installer" | awk '{print $1}') && test "$actual_sha" = "$expected_sha" && chmod 700 "$installer" && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' "$installer" --interval 3s --disk / --disk /data)

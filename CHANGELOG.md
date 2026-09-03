@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.20.14
+
+- 修复 Controller 镜像升级后仍从宿主机旧工作目录下发过期 Agent 安装器的问题；Setup 镜像现在固化版本匹配的 Linux/Windows 安装脚本。
+- 稳定版 Setup 镜像内置 Linux/Windows amd64/arm64 Agent 制品、manifest 和校验文件，在 GitHub、GHCR 与内部制品源均不可用时仍可提供同版本安装和恢复基线。
+- 统一本地、CI 与 Gitee/GitHub 源码回退的 Setup 根构建上下文，并使用严格 `.dockerignore` 排除 `.env`、仓库历史和无关构建内容。
+
 ## v1.20.13
 
 - 修复 Linux Agent 安装器行为测试对零重定向健康探测参数的过时断言，恢复 Controller 与 Agent 发布工作流。

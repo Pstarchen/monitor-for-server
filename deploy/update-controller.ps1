@@ -133,11 +133,12 @@ try {
     $services = @('setup', 'server', 'web')
     $imageKeys = @('XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE')
     $imageDefaults = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.13',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.13',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.13'
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.14',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.14',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.14'
     )
-    $sourceContexts = @('setup', 'server', 'web')
+    $sourceContexts = @('.', 'server', 'web')
+    $sourceDockerfiles = @('setup/Dockerfile', '', '')
     $targetVersion = Read-UpdateSetting 'XINGCHEN_TARGET_VERSION'
     if ($targetVersion) {
         if ($targetVersion -notmatch '^v?(\d+)\.(\d+)\.(\d+)$') { throw 'XINGCHEN_TARGET_VERSION 必须是稳定语义版本，例如 v1.20.5。' }
@@ -266,8 +267,11 @@ try {
             for ($index = 0; $index -lt $sourceContexts.Count; $index++) {
                 $temporaryImage = "$buildPrefix-$index`:candidate"
                 $temporaryImages += $temporaryImage
-                $context = "${repository}#${sourceRef}:$($sourceContexts[$index])"
-                & docker build --pull --build-arg "VERSION=$buildVersion" --tag $temporaryImage $context
+                $context = if ($sourceContexts[$index] -eq '.') { "${repository}#${sourceRef}" } else { "${repository}#${sourceRef}:$($sourceContexts[$index])" }
+                $buildArguments = @('build', '--pull')
+                if ($sourceDockerfiles[$index]) { $buildArguments += @('--file', $sourceDockerfiles[$index]) }
+                $buildArguments += @('--build-arg', "VERSION=$buildVersion", '--tag', $temporaryImage, $context)
+                & docker @buildArguments
                 if ($LASTEXITCODE -ne 0 -or -not (Test-ImageVersion $temporaryImage)) { $success = $false; break }
             }
             if ($success) {

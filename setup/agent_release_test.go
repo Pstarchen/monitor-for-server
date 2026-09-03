@@ -57,6 +57,58 @@ func TestAgentReleaseUsesOfflineManifest(t *testing.T) {
 	}
 }
 
+func TestAgentReleaseUsesPackagedFallback(t *testing.T) {
+	content := []byte("packaged-agent")
+	root := t.TempDir()
+	packagedRoot := filepath.Join(root, "packaged")
+	packagedAssets := filepath.Join(packagedRoot, "assets")
+	if err := os.MkdirAll(packagedAssets, 0700); err != nil {
+		t.Fatal(err)
+	}
+	asset := testAgentAsset("linux", "amd64", "xingchen-agent_linux_amd64.tar.gz", content)
+	writeTestManifest(t, filepath.Join(packagedRoot, "manifest.json"), asset)
+	if err := os.WriteFile(filepath.Join(packagedAssets, asset.File), content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := &agentReleaseService{
+		client:               http.DefaultClient,
+		manifestPath:         filepath.Join(root, "workspace", "manifest.json"),
+		packagedManifestPath: filepath.Join(packagedRoot, "manifest.json"),
+		offlineDir:           filepath.Join(root, "workspace", "assets"),
+		packagedOfflineDir:   packagedAssets,
+		cacheDir:             filepath.Join(root, "cache"),
+	}
+
+	releaseResponse := requestAgentRelease(t, service, "/api/setup/agent-release?os=linux&arch=amd64")
+	if releaseResponse.Code != http.StatusOK {
+		t.Fatalf("release response = %d %s", releaseResponse.Code, releaseResponse.Body.String())
+	}
+	artifactResponse := requestAgentArtifact(t, service, "/api/setup/agent-artifact?os=linux&arch=amd64&version=v1.20.11")
+	if artifactResponse.Code != http.StatusOK || artifactResponse.Body.String() != string(content) {
+		t.Fatalf("artifact response = %d %q", artifactResponse.Code, artifactResponse.Body.String())
+	}
+}
+
+func TestAgentReleaseDoesNotBypassRequiredManifestWithPackagedFallback(t *testing.T) {
+	root := t.TempDir()
+	packagedManifest := filepath.Join(root, "packaged", "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(packagedManifest), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestManifest(t, packagedManifest, testAgentAsset("linux", "amd64", "agent.tar.gz", []byte("agent")))
+	service := &agentReleaseService{
+		manifestPath:         filepath.Join(root, "required", "manifest.json"),
+		manifestPathRequired: true,
+		packagedManifestPath: packagedManifest,
+		cacheDir:             filepath.Join(root, "cache"),
+	}
+
+	response := requestAgentRelease(t, service, "/api/setup/agent-release?os=linux&arch=amd64")
+	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), "读取本地清单") {
+		t.Fatalf("required manifest response = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAgentReleaseRejectsIncompatibleController(t *testing.T) {
 	content := []byte("offline-agent")
 	root := t.TempDir()
@@ -130,13 +182,18 @@ func TestAgentReleaseFallsBackToLastKnownGoodManifest(t *testing.T) {
 	}))
 	defer server.Close()
 	root := t.TempDir()
+	packagedManifest := filepath.Join(root, "packaged.json")
+	if err := os.WriteFile(packagedManifest, []byte("not-the-configured-manifest"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	service := &agentReleaseService{
-		client:         server.Client(),
-		manifestPath:   filepath.Join(root, "missing.json"),
-		manifestURLs:   []string{server.URL + "/manifest.json"},
-		offlineDir:     filepath.Join(root, "offline"),
-		cacheDir:       filepath.Join(root, "cache"),
-		manifestSHA256: hex.EncodeToString(manifestDigest[:]),
+		client:               server.Client(),
+		manifestPath:         filepath.Join(root, "missing.json"),
+		packagedManifestPath: packagedManifest,
+		manifestURLs:         []string{server.URL + "/manifest.json"},
+		offlineDir:           filepath.Join(root, "offline"),
+		cacheDir:             filepath.Join(root, "cache"),
+		manifestSHA256:       hex.EncodeToString(manifestDigest[:]),
 	}
 
 	first := requestAgentRelease(t, service, "/api/setup/agent-release?os=windows&arch=arm64")

@@ -77,9 +77,11 @@ type agentReleaseService struct {
 	controllerVersion    func() string
 	manifestPath         string
 	manifestPathRequired bool
+	packagedManifestPath string
 	manifestURLs         []string
 	artifactBaseURLs     []string
 	offlineDir           string
+	packagedOfflineDir   string
 	cacheDir             string
 	manifestSHA256       string
 }
@@ -90,22 +92,27 @@ func newAgentReleaseService() *agentReleaseService {
 	if manifestPath == "" {
 		manifestPath = filepath.Join(workspace, "release", "manifest.json")
 	}
+	packagedReleaseDir := "/usr/local/share/xingchen/release"
 	cacheDir := strings.TrimSpace(os.Getenv("XINGCHEN_AGENT_CACHE_DIR"))
 	if cacheDir == "" {
 		cacheDir = filepath.Join(workspace, ".cache", "agent-release")
 	}
 	offlineDir := strings.TrimSpace(os.Getenv("XINGCHEN_AGENT_OFFLINE_DIR"))
+	packagedOfflineDir := ""
 	if offlineDir == "" {
 		offlineDir = filepath.Join(workspace, "release", "assets")
+		packagedOfflineDir = filepath.Join(packagedReleaseDir, "assets")
 	}
 	return &agentReleaseService{
 		client:               &http.Client{Timeout: agentReleaseRequestTimeout},
 		controllerVersion:    currentControllerVersion,
 		manifestPath:         filepath.Clean(manifestPath),
 		manifestPathRequired: configuredManifestPath != "",
+		packagedManifestPath: filepath.Join(packagedReleaseDir, "manifest.json"),
 		manifestURLs:         splitReleaseSources(os.Getenv("XINGCHEN_RELEASE_MANIFEST_URLS")),
 		artifactBaseURLs:     splitReleaseSources(os.Getenv("XINGCHEN_AGENT_RELEASE_BASE_URLS")),
 		offlineDir:           filepath.Clean(offlineDir),
+		packagedOfflineDir:   packagedOfflineDir,
 		cacheDir:             filepath.Clean(cacheDir),
 		manifestSHA256:       strings.ToLower(strings.TrimSpace(os.Getenv("XINGCHEN_RELEASE_MANIFEST_SHA256"))),
 	}
@@ -282,7 +289,6 @@ func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseMan
 	} else if s.manifestPathRequired || !errors.Is(err, os.ErrNotExist) {
 		return agentReleaseManifest{}, "", false, fmt.Errorf("读取本地清单: %w", err)
 	}
-
 	var failures []string
 	for _, sourceURL := range s.manifestURLs {
 		if err := validateHTTPSURL(sourceURL); err != nil {
@@ -309,6 +315,17 @@ func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseMan
 	cached, err := s.readManifestCache()
 	if err == nil {
 		return cached.decoded, cached.Source, true, nil
+	}
+	if s.packagedManifestPath != "" {
+		if content, packagedErr := os.ReadFile(s.packagedManifestPath); packagedErr == nil {
+			manifest, validationErr := s.decodeManifest(content)
+			if validationErr != nil {
+				return agentReleaseManifest{}, "", false, fmt.Errorf("镜像内清单无效: %w", validationErr)
+			}
+			return manifest, "local", false, nil
+		} else if !errors.Is(packagedErr, os.ErrNotExist) {
+			return agentReleaseManifest{}, "", false, fmt.Errorf("读取镜像内清单: %w", packagedErr)
+		}
 	}
 	if len(failures) == 0 {
 		return agentReleaseManifest{}, "", false, errors.New("未配置可用清单源，且没有最后已知可用缓存")
@@ -412,6 +429,12 @@ func (s *agentReleaseService) resolveArtifact(ctx context.Context, manifest agen
 	localPath := filepath.Join(s.offlineDir, asset.File)
 	if fileMatchesAsset(localPath, asset) {
 		return localPath, "local", false, nil
+	}
+	if s.packagedOfflineDir != "" {
+		packagedPath := filepath.Join(s.packagedOfflineDir, asset.File)
+		if fileMatchesAsset(packagedPath, asset) {
+			return packagedPath, "local", false, nil
+		}
 	}
 	cachePath := filepath.Join(s.cacheDir, "artifacts", manifest.Version, asset.File)
 	if fileMatchesAsset(cachePath, asset) {
