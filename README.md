@@ -41,32 +41,34 @@
 
 ## 快速启动
 
-总终端只需要 Docker Engine 和 Compose v2。安装器默认先从国内镜像源拉取预构建的总控 `setup`、`server` 和 `web` 镜像，再回退官方 GHCR；镜像仓库均不可用时，会依次尝试 Gitee、GitHub 源码并在本机构建 Docker 镜像。运行方式始终保持 Docker，并自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis；数据库端口不会暴露到公网。
+总终端只需要 Docker Engine 和 Compose v2。安装器优先使用管理员配置的受信内部镜像仓库，不默认启用来源不明的公共加速器；未配置内部镜像时才使用镜像自身地址。镜像不可用时，源码构建默认只尝试 Gitee，只有显式加入 `XINGCHEN_SOURCE_REPOSITORIES` 才会访问 GitHub。运行方式始终保持 Docker，并自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis；数据库端口不会暴露到公网。
 
 第一次部署建议先阅读[新手使用指南](docs/user-guide.md)。它从 Docker 准备、首次 `/setup`、Agent 接入一直讲到告警、通知、备份、更新和常见问题排查。
 
-GitHub 安装：
-```bash
-git clone https://github.com/Pstarchen/monitor-for-server.git
-cd monitor-for-server
-bash ./deploy/install-controller.sh
-```
-
 Gitee 安装：
-
 ```bash
-git clone https://gitee.com/starchen520/monitor-for-server.git
-cd monitor-for-server
+git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
+cd xingchen-monitor
 bash ./deploy/install-controller.sh
 ```
 
-需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；更新器按镜像代理、GHCR、Gitee 源码、GitHub 源码的顺序回退。网络环境可以访问官方源时可添加 `--no-mirror`，需要直接跳过镜像仓库时可添加 `--source-build`。
+能够访问 GitHub 时也可使用：
+
+```bash
+git clone https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
+cd xingchen-monitor
+bash ./deploy/install-controller.sh
+```
+
+需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时，跨主版本或熔断期间仍可人工评估后手动执行。更新器先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 和镜像自身地址，再按 `XINGCHEN_SOURCE_REPOSITORIES` 顺序回退源码；GitHub 不在默认运行时路径中。
 
 使用本地源码构建总控镜像：
 
 ```bash
 bash ./deploy/install-controller.sh --build
 ```
+
+目标服务器无法访问 GitHub/GHCR 时，将 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE`、`XINGCHEN_AGENT_IMAGE`、`XINGCHEN_POSTGRES_IMAGE` 和 `XINGCHEN_REDIS_IMAGE` 指向内部 Registry，并通过 `XINGCHEN_RELEASE_MANIFEST_URLS`、`XINGCHEN_AGENT_RELEASE_BASE_URLS` 指向内部 HTTPS 制品服务。Agent 默认从总控同域取得受校验制品，manifest 的最低 Controller 版本门禁可阻止不兼容下发。完全断网环境在联网发布机取得 `xingchen-monitor-offline-vX.Y.Z-<架构>.tar.gz`，校验外层 `.sha256` 后传入目标机，解压并执行包内 `install-offline.sh` 或 `install-offline.ps1`。联网 CI 仅在全部镜像、Agent 制品和离线包验证成功后才把 draft Release 公开。
 
 安装器会自动生成 PostgreSQL 数据库凭据并等待 Web 健康检查，然后打开 `http://<服务器IP>:18080/setup`。向导只收集站点名称、公网入口、允许来源、时区和首个管理员；端口与绑定地址在总终端启动时确定。提交后页面进入公开状态页，完成服务启动后再从状态页进入登录控制台。
 
@@ -106,6 +108,8 @@ docker compose build setup server web postgres
 
 ## 项目文档
 
+- [项目官网与在线 Wiki](docs/index.md)
+- [5 分钟快速安装](docs/quick-start.md)
 - [新手使用指南：从安装到日常使用](docs/user-guide.md)
 - [系统架构与安全边界](docs/architecture.md)
 - [HTTP 与 WebSocket API](docs/api.md)
@@ -114,3 +118,16 @@ docker compose build setup server web postgres
 - [总终端服务器搭建材料](docs/controller-server.md)
 - [受监控服务器搭建材料](docs/monitored-agent.md)
 - [生产审计与使用检查](docs/production-audit.md)
+
+### 本地运行官网与 Wiki
+
+```powershell
+pnpm --dir docs install
+pnpm --dir docs dev
+```
+
+生产构建：
+
+```powershell
+pnpm --dir docs build
+```

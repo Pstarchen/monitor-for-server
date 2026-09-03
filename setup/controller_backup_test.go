@@ -1,16 +1,57 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCreateControllerBackupUsesSharedDumpPath(t *testing.T) {
+	originalWorkspace, originalEnvPath := workspace, envPath
+	originalExec := execCommandContext
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	t.Cleanup(func() {
+		workspace, envPath = originalWorkspace, originalEnvPath
+		execCommandContext = originalExec
+	})
+	if err := os.WriteFile(envPath, []byte("POSTGRES_DB=xingchen_monitor\nPOSTGRES_USER=xingchen\nPOSTGRES_PASSWORD=test-only\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	execCommandContext = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestControllerBackupCommandHelper$", "--", "controller-backup-helper")
+	}
+	name := "xingchen-monitor-20260904T010203Z.sql"
+	path, err := createControllerBackup(context.Background(), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "backup-data" {
+		t.Fatalf("backup content = %q", content)
+	}
+}
+
+func TestControllerBackupCommandHelper(t *testing.T) {
+	for _, argument := range os.Args {
+		if argument == "controller-backup-helper" {
+			_, _ = fmt.Fprint(os.Stdout, "backup-data")
+			os.Exit(0)
+		}
+	}
+}
 
 func TestControllerBackupRejectsPathTraversalAndUnknownFiles(t *testing.T) {
 	originalWorkspace, originalStatePath := workspace, controllerBackupStatePath

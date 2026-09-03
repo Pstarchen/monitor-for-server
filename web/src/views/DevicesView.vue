@@ -111,7 +111,6 @@ const installCommand = computed(() => {
     source: agentInstallSource.value,
     serverUrl: url,
     deviceId: credential.value.device.id,
-    agentKey: credential.value.agentKey,
     collectionSeconds: collectionSeconds.value,
     diskMountpoints: disks,
     lightweight: lightweight.value,
@@ -370,7 +369,7 @@ onBeforeUnmount(() => {
 
     <el-dialog :model-value="Boolean(credential)" title="Agent 接入" width="min(720px, calc(100vw - 28px))" :close-on-click-modal="false" @update:model-value="(value: boolean) => { if (!value) credential = null }">
       <div v-if="credential" class="credential-panel">
-        <div class="credential-warning"><KeyRound :size="18" /><p><strong>密钥仅显示这一次</strong><span>关闭窗口后无法再次查看。请立即写入目标服务器的 Agent 配置。</span></p></div>
+        <div class="credential-warning"><KeyRound :size="18" /><p><strong>密钥仅显示这一次</strong><span>安装器会在终端中静默询问密钥；关闭窗口后无法再次查看。</span></p></div>
         <dl><div><dt>设备 ID</dt><dd>{{ credential.device.id }}</dd></div><div><dt>Agent 密钥</dt><dd ref="agentKeyElement">{{ credential.agentKey }}</dd></div></dl>
         <div class="agent-install-options">
           <el-form label-position="top">

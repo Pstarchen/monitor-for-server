@@ -4,16 +4,21 @@
 Thumbs.db
 
 .env
+.env.controller-update.*
 .setup-complete
 .controller-update-state.json
 .controller-update.lock
 *.log
 
 agent/bin/
+agent/dist/
 agent/coverage.out
 server/target/
 server/data/
 web/node_modules/
 web/dist/
 web/coverage/
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
 *.tsbuildinfo

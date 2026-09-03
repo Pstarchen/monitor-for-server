@@ -51,7 +51,7 @@ const categoryOptions = ['全部', '监控入门', '告警响应', '自动化运
 
 const quickStart: QuickStartStep[] = [
   { title: '登记第一台设备', description: '在设备管理中创建节点，填写名称、分组和资产信息。', route: '/devices', roles: ['ADMIN', 'OPERATOR'] },
-  { title: '完成 Agent 接入', description: '立即保存一次性密钥或安装命令，在目标服务器运行并等待首次上报。', route: '/devices', roles: ['ADMIN', 'OPERATOR'] },
+  { title: '完成 Agent 接入', description: '单独保存只显示一次的长期密钥，再在目标服务器运行安装命令并等待首次上报。', route: '/devices', roles: ['ADMIN', 'OPERATOR'] },
   { title: '补充服务与告警', description: '创建服务探测和资源告警规则，确认阈值与失败次数符合值班要求。', route: '/services', roles: ['ADMIN', 'OPERATOR'] },
   { title: '配置通知与恢复点', description: '管理员测试通知通道并创建数据库备份，形成完整的响应闭环。', route: '/settings', roles: ['ADMIN'] },
 ]

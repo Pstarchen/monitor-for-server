@@ -5,14 +5,13 @@ param(
     [string] $DeviceId,
     [ValidateSet('1s', '3s', '10s', '30s', '60s')] [string] $Interval = '3s',
     [string] $BinaryPath,
-    [string[]] $RepositoryUrl = @(
-        'https://gitee.com/starchen520/monitor-for-server.git',
-        'https://github.com/Pstarchen/monitor-for-server.git'
-    ),
+    [string[]] $RepositoryUrl = @(),
     [string] $SourceRef = 'main',
     [string] $Version,
     [ValidatePattern('^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$')] [string] $ReleaseRepo = 'Pstarchen/monitor-for-server',
-    [string[]] $ReleaseBaseUrl = @('https://github.com/Pstarchen/monitor-for-server/releases/download'),
+    [string[]] $ReleaseBaseUrl = @(),
+    [string[]] $ReleaseManifestUrl = @(),
+    [switch] $AllowGitHubApi,
     [string[]] $MonitoredService = @(),
     [string[]] $MonitoredProcess = @(),
     [string[]] $DiskMountpoint = @(),
@@ -52,11 +51,25 @@ if ((Get-Service -Name $serviceName -ErrorAction SilentlyContinue) -eq $null -an
     $configPath = $legacyConfigPath
     $binaryName = 'guanlan-agent.exe'
 }
+if (-not $PSBoundParameters.ContainsKey('ReleaseBaseUrl') -and -not [string]::IsNullOrWhiteSpace($env:XINGCHEN_AGENT_RELEASE_BASE_URLS)) {
+    $ReleaseBaseUrl = @($env:XINGCHEN_AGENT_RELEASE_BASE_URLS.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+if (-not $PSBoundParameters.ContainsKey('RepositoryUrl')) {
+    if (-not [string]::IsNullOrWhiteSpace($env:XINGCHEN_REPOSITORY_URL)) {
+        $RepositoryUrl = @($env:XINGCHEN_REPOSITORY_URL)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($env:XINGCHEN_REPOSITORY_URLS)) {
+        $RepositoryUrl = @($env:XINGCHEN_REPOSITORY_URLS.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+}
+if (-not $PSBoundParameters.ContainsKey('ReleaseManifestUrl') -and -not [string]::IsNullOrWhiteSpace($env:XINGCHEN_RELEASE_MANIFEST_URLS)) {
+    $ReleaseManifestUrl = @($env:XINGCHEN_RELEASE_MANIFEST_URLS.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+if (-not $PSBoundParameters.ContainsKey('AllowGitHubApi') -and $env:XINGCHEN_AGENT_ALLOW_GITHUB_API -eq 'true') {
+    $AllowGitHubApi = $true
+}
 $agentKey = $env:XINGCHEN_AGENT_KEY
 
-if ($Action -eq 'install' -and ([string]::IsNullOrWhiteSpace($ServerUrl) -or [string]::IsNullOrWhiteSpace($DeviceId) -or [string]::IsNullOrWhiteSpace($agentKey))) {
-    throw '安装 Agent 需要 ServerUrl、DeviceId 和 XINGCHEN_AGENT_KEY。'
-}
 if ($Action -ne 'install' -and -not (Test-Path -LiteralPath $configPath)) {
     throw "Agent 尚未安装：$configPath"
 }
@@ -66,10 +79,16 @@ $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw '请以管理员身份运行此安装脚本。'
 }
-if ($Action -eq 'install' -and [string]::IsNullOrWhiteSpace($agentKey)) {
-    throw '请通过 XINGCHEN_AGENT_KEY 环境变量提供一次性 Agent 密钥。'
+if ($Action -eq 'install' -and [string]::IsNullOrWhiteSpace($agentKey) -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+    $secureAgentKey = Read-Host '请输入 Agent 密钥（输入不会回显）' -AsSecureString
+    $agentKeyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureAgentKey)
+    try { $agentKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($agentKeyPointer) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($agentKeyPointer) }
 }
-if ($RepositoryUrl.Count -eq 0 -or @($RepositoryUrl | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+if ($Action -eq 'install' -and ([string]::IsNullOrWhiteSpace($ServerUrl) -or [string]::IsNullOrWhiteSpace($DeviceId) -or [string]::IsNullOrWhiteSpace($agentKey))) {
+    throw '安装 Agent 需要 ServerUrl、DeviceId 和 Agent 密钥；非交互安装请通过 XINGCHEN_AGENT_KEY 环境变量提供。'
+}
+if (@($RepositoryUrl | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
     throw 'Agent 源码仓库地址不能为空。'
 }
 if ($SourceRef -notmatch '^[a-zA-Z0-9._/-]+$' -or $SourceRef.StartsWith('-') -or $SourceRef.Contains('..')) {
@@ -103,6 +122,7 @@ function Resolve-ServerUrl {
         }
         $isLocal = Test-LocalHost $parsed.Authority
         if ($parsed.Scheme -eq 'http' -and -not $isLocal) {
+            if (-not $AllowInsecureHttp) { throw '远程 HTTP 连接未获授权；请配置 HTTPS，或确认风险后显式传入 -AllowInsecureHttp。' }
             Write-Warning "Agent 将通过未加密的 HTTP 连接 $raw。生产环境建议配置 HTTPS。"
         }
         return [pscustomobject]@{ Url = $raw; AllowInsecure = ($parsed.Scheme -eq 'http' -and -not $isLocal) }
@@ -117,6 +137,9 @@ function Resolve-ServerUrl {
         return [pscustomobject]@{ Url = $httpsCandidate; AllowInsecure = $false }
     }
     $httpCandidate = "http://$raw"
+    if (-not $isLocal -and -not $AllowInsecureHttp) {
+        throw '未检测到可用 HTTPS；不会自动尝试远程 HTTP。确认风险后可传入 -AllowInsecureHttp。'
+    }
     if (Test-ServerEndpoint $httpCandidate) {
         if (-not $isLocal) {
             Write-Warning "未检测到可用 HTTPS，已回退到未加密 HTTP：$httpCandidate"
@@ -132,39 +155,102 @@ function Normalize-ReleaseVersion([string] $Value) {
     return "v$normalized"
 }
 
+function Test-TrustedHttpsSource([string] $Value, [switch] $AllowQuery) {
+    $parsed = $null
+    if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref] $parsed) -or $parsed.Scheme -ne 'https' -or $parsed.UserInfo -or $parsed.Fragment) { return $false }
+    return $AllowQuery -or [string]::IsNullOrWhiteSpace($parsed.Query)
+}
+
+function Get-ControllerReleaseMetadata([string] $Arch) {
+    if ([string]::IsNullOrWhiteSpace($ServerUrl)) { return $null }
+    try {
+        $metadata = Invoke-RestMethod -Uri ($ServerUrl.TrimEnd('/') + "/api/setup/agent-release?os=windows&arch=$Arch") -TimeoutSec 30 -MaximumRedirection 0
+        $metadata.version = Normalize-ReleaseVersion ([string] $metadata.version)
+        if ([string] $metadata.file -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.zip$' -or [string] $metadata.sha256 -notmatch '^[a-fA-F0-9]{64}$' -or [long] $metadata.size -le 0 -or [long] $metadata.size -gt 536870912) {
+            throw '总控返回的 Agent 制品元数据无效。'
+        }
+        return $metadata
+    }
+    catch { return $null }
+}
+
+function Expand-SafeZip([string] $Archive, [string] $Destination, [string[]] $ExpectedNames) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $destinationRoot = [IO.Path]::GetFullPath($Destination).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
+    try {
+        if ($zip.Entries.Count -ne 1) { throw 'Agent ZIP 必须只包含一个二进制文件。' }
+        $entry = $zip.Entries[0]
+        if ($entry.FullName -ne $entry.Name -or $ExpectedNames -notcontains $entry.Name) { throw 'Agent ZIP 包含非预期条目。' }
+        $unixType = (($entry.ExternalAttributes -shr 16) -band 0xF000)
+        if (($entry.ExternalAttributes -band 0x10) -ne 0 -or ($unixType -ne 0 -and $unixType -ne 0x8000)) { throw 'Agent ZIP 条目不是普通文件。' }
+        $entryPath = [IO.Path]::GetFullPath((Join-Path $Destination $entry.Name))
+        if (-not $entryPath.StartsWith($destinationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Agent ZIP 包含不安全路径。' }
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $entryPath, $true)
+    }
+    finally { $zip.Dispose() }
+}
+
 function Get-ReleaseVersion([string] $Requested) {
     if (-not [string]::IsNullOrWhiteSpace($Requested)) { return Normalize-ReleaseVersion $Requested }
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30
-    return Normalize-ReleaseVersion ([string] $release.tag_name)
+    foreach ($manifestUrl in $ReleaseManifestUrl) {
+        if (-not (Test-TrustedHttpsSource $manifestUrl -AllowQuery)) { continue }
+        try {
+            $manifest = Invoke-RestMethod -Uri $manifestUrl -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30 -MaximumRedirection 0
+            return Normalize-ReleaseVersion ([string] $manifest.version)
+        }
+        catch { }
+    }
+    if ($AllowGitHubApi) {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30 -MaximumRedirection 0
+        return Normalize-ReleaseVersion ([string] $release.tag_name)
+    }
+    throw '无法从总控或配置的 manifest 获取 Agent 版本；GitHub API 默认未启用。'
 }
 
 function Get-ReleaseBinary([string] $Requested, [string] $Destination) {
-    $version = Get-ReleaseVersion $Requested
     $arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
         'X64' { 'amd64' }
         'Arm64' { 'arm64' }
         default { throw '当前 Windows CPU 架构不支持预编译 Agent。' }
     }
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    $controllerMetadata = Get-ControllerReleaseMetadata $arch
+    if ($null -ne $controllerMetadata -and ([string]::IsNullOrWhiteSpace($Requested) -or (Normalize-ReleaseVersion $Requested) -eq $controllerMetadata.version)) {
+        $archive = Join-Path $Destination ([string] $controllerMetadata.file)
+        try {
+            $artifactUrl = $ServerUrl.TrimEnd('/') + "/api/setup/agent-artifact?os=windows&arch=$arch&version=$($controllerMetadata.version)"
+            Invoke-WebRequest -UseBasicParsing -Uri $artifactUrl -OutFile $archive -TimeoutSec 300 -MaximumRedirection 0
+            if ((Get-Item -LiteralPath $archive).Length -ne [long] $controllerMetadata.size) { throw '总控返回的 Agent 制品大小不符。' }
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+            if ($actual -ne ([string] $controllerMetadata.sha256).ToLowerInvariant()) { throw '总控返回的 Agent 制品 SHA256 校验失败。' }
+            Expand-SafeZip $archive $Destination @('xingchen-agent.exe', 'guanlan-agent.exe')
+            $binary = @((Join-Path $Destination 'xingchen-agent.exe'), (Join-Path $Destination 'guanlan-agent.exe')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            if ([string]::IsNullOrWhiteSpace($binary)) { throw 'Agent 压缩包中未找到可执行文件。' }
+            return [pscustomobject]@{ Path = $binary; Version = $controllerMetadata.version; Source = 'controller'; Verification = 'sha256' }
+        }
+        catch { Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue }
+    }
+    $version = Get-ReleaseVersion $Requested
     foreach ($base in $ReleaseBaseUrl) {
-        if ($base -notmatch '^https://(github\.com|gitee\.com)/[^/]+/[^/]+/releases/download$') { continue }
+        if (-not (Test-TrustedHttpsSource $base)) { continue }
         foreach ($prefix in @('xingchen-agent', 'guanlan-agent')) {
             $asset = "${prefix}_$($version.TrimStart('v'))_windows_$arch.zip"
             $archive = Join-Path $Destination $asset
             $checksums = Join-Path $Destination 'checksums.txt'
             try {
-                Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/$asset" -OutFile $archive -TimeoutSec 300
-                Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/checksums.txt" -OutFile $checksums -TimeoutSec 60
+                Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/$asset" -OutFile $archive -TimeoutSec 300 -MaximumRedirection 0
+                Invoke-WebRequest -UseBasicParsing -Uri "$base/$version/checksums.txt" -OutFile $checksums -TimeoutSec 60 -MaximumRedirection 0
                 $expected = (Get-Content -LiteralPath $checksums | ForEach-Object { $parts = $_ -split '\s+'; if ($parts.Count -ge 2 -and ($parts[1] -eq $asset -or $parts[1].TrimStart('*') -eq $asset)) { $parts[0]; break } })
                 $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
                 if ([string]::IsNullOrWhiteSpace($expected) -or $expected.ToLowerInvariant() -ne $actual) { throw 'Agent Release SHA256 校验失败。' }
-                Expand-Archive -LiteralPath $archive -DestinationPath $Destination -Force
+                Expand-SafeZip $archive $Destination @("$prefix.exe")
                 $binary = Join-Path $Destination $binaryName
                 if (-not (Test-Path -LiteralPath $binary)) {
                     $binary = Join-Path $Destination ($(if ($prefix -eq 'xingchen-agent') { 'xingchen-agent.exe' } else { 'guanlan-agent.exe' }))
                 }
                 if (-not (Test-Path -LiteralPath $binary)) { throw 'Agent 压缩包中未找到可执行文件。' }
-                return [pscustomobject]@{ Path = $binary; Version = $version }
+                return [pscustomobject]@{ Path = $binary; Version = $version; Source = ([Uri] $base).Host; Verification = 'sha256' }
             }
             catch {
                 Remove-Item -LiteralPath $archive, $checksums -Force -ErrorAction SilentlyContinue
@@ -179,31 +265,123 @@ function Install-AgentUpdater {
     $updaterPath = Join-Path $dataDir 'update-agent.ps1'
     $taskName = if ($usingLegacyInstallation) { 'GuanlanAgentUpdate' } else { 'XingchenAgentUpdate' }
     $releaseBaseList = ($ReleaseBaseUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
+    $releaseManifestList = ($ReleaseManifestUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
+    $controllerUrlLiteral = $ServerUrl.TrimEnd('/').Replace("'", "''")
+    $updateStateDirLiteral = $dataDir.Replace("'", "''")
+    $allowGitHubApiLiteral = if ($AllowGitHubApi) { '$true' } else { '$false' }
     $script = @"
+param([string] `$Command = 'update', [string] `$RequestedVersion, [switch] `$Automatic)
 `$ErrorActionPreference = 'Stop'
 `$releaseRepo = '$ReleaseRepo'
 `$releaseBases = @($releaseBaseList)
+`$releaseManifests = @($releaseManifestList)
+`$controllerUrl = '$controllerUrlLiteral'
+`$allowGitHubApi = $allowGitHubApiLiteral
+`$updateStateDir = '$updateStateDirLiteral'
+`$failureFile = Join-Path `$updateStateDir 'update-failures'
+`$pauseFile = Join-Path `$updateStateDir 'update-paused-until'
+`$failureThreshold = 5
+`$pauseSeconds = 86400
+`$pausedUntil = 0L
+if (`$Automatic -and (Test-Path -LiteralPath `$pauseFile) -and [long]::TryParse(([string](Get-Content -Raw -LiteralPath `$pauseFile)).Trim(), [ref] `$pausedUntil) -and `$pausedUntil -gt [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) {
+    Write-Host "Agent 自动更新已暂停到 Unix 时间 `$pausedUntil；可手动执行 update 重试。"
+    exit 0
+}
 `$temp = Join-Path ([IO.Path]::GetTempPath()) ('xingchen-agent-update-' + [Guid]::NewGuid().ToString('N'))
+`$mutex = [Threading.Mutex]::new(`$false, 'Global\XingchenAgentUpdate')
+if (-not `$mutex.WaitOne(0)) { throw 'Agent 更新任务正在执行。' }
+function Write-UpdateState([string] `$Path, [string] `$Value) {
+    `$temporary = "`$Path.`$PID.tmp"
+    [IO.File]::WriteAllText(`$temporary, `$Value + [Environment]::NewLine, [Text.UTF8Encoding]::new(`$false))
+    Move-Item -LiteralPath `$temporary -Destination `$Path -Force
+}
+function Normalize-Version([string] `$Value) {
+    `$normalized = `$Value.Trim().TrimStart('v')
+    if (`$normalized -notmatch '^\d+\.\d+\.\d+$') { throw '无效的 Agent Release 版本。' }
+    return "v`$normalized"
+}
+function Compare-Version([string] `$Left, [string] `$Right) {
+    return ([Version]`$Left.TrimStart('v')).CompareTo([Version]`$Right.TrimStart('v'))
+}
+function Test-SameMajor([string] `$Left, [string] `$Right) {
+    return ([Version]`$Left.TrimStart('v')).Major -eq ([Version]`$Right.TrimStart('v')).Major
+}
+function Trusted-Https([string] `$Value, [switch] `$AllowQuery) {
+    `$parsed = `$null
+    if (-not [Uri]::TryCreate(`$Value, [UriKind]::Absolute, [ref] `$parsed) -or `$parsed.Scheme -ne 'https' -or `$parsed.UserInfo -or `$parsed.Fragment) { return `$false }
+    return `$AllowQuery -or [string]::IsNullOrWhiteSpace(`$parsed.Query)
+}
+function Controller-Metadata([string] `$Arch) {
+    try {
+        `$metadata = Invoke-RestMethod -Uri "`$controllerUrl/api/setup/agent-release?os=windows&arch=`$Arch" -TimeoutSec 30 -MaximumRedirection 0
+        `$metadata.version = Normalize-Version ([string] `$metadata.version)
+        if ([string] `$metadata.file -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.zip$' -or [string] `$metadata.sha256 -notmatch '^[a-fA-F0-9]{64}$' -or [long] `$metadata.size -le 0 -or [long] `$metadata.size -gt 536870912) { throw '总控返回的 Agent 制品元数据无效。' }
+        return `$metadata
+    } catch { return `$null }
+}
+function Expand-Safe([string] `$Archive, [string] `$Destination, [string[]] `$ExpectedNames) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    `$root = [IO.Path]::GetFullPath(`$Destination).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    `$zip = [IO.Compression.ZipFile]::OpenRead(`$Archive)
+    try {
+        if (`$zip.Entries.Count -ne 1) { throw 'Agent ZIP 必须只包含一个二进制文件。' }
+        `$entry = `$zip.Entries[0]
+        if (`$entry.FullName -ne `$entry.Name -or `$ExpectedNames -notcontains `$entry.Name) { throw 'Agent ZIP 包含非预期条目。' }
+        `$unixType = ((`$entry.ExternalAttributes -shr 16) -band 0xF000)
+        if ((`$entry.ExternalAttributes -band 0x10) -ne 0 -or (`$unixType -ne 0 -and `$unixType -ne 0x8000)) { throw 'Agent ZIP 条目不是普通文件。' }
+        `$path = [IO.Path]::GetFullPath((Join-Path `$Destination `$entry.Name))
+        if (-not `$path.StartsWith(`$root, [StringComparison]::OrdinalIgnoreCase)) { throw 'Agent ZIP 包含不安全路径。' }
+        [IO.Compression.ZipFileExtensions]::ExtractToFile(`$entry, `$path, `$true)
+    }
+    finally { `$zip.Dispose() }
+}
+`$updateSucceeded = `$false
 try {
-    `$requested = `$args[0]
-    if ([string]::IsNullOrWhiteSpace(`$requested)) { `$release = Invoke-RestMethod -Uri "https://api.github.com/repos/`$releaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-updater' } -TimeoutSec 30; `$requested = [string]`$release.tag_name }
-    `$version = (`$requested.TrimStart('v'))
-    if (`$version -notmatch '^\d+\.\d+\.\d+$') { throw '无效的 Agent Release 版本。' }
-    `$version = "v`$version"
+    `$command = `$Command
+    `$requested = `$RequestedVersion
     `$arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq 'Arm64') { 'arm64' } else { 'amd64' }
+    `$metadata = Controller-Metadata `$arch
+    if ([string]::IsNullOrWhiteSpace(`$requested) -and `$null -ne `$metadata) { `$requested = [string] `$metadata.version }
+    if ([string]::IsNullOrWhiteSpace(`$requested)) {
+        foreach (`$manifestUrl in `$releaseManifests) {
+            if (-not (Trusted-Https `$manifestUrl -AllowQuery)) { continue }
+            try { `$manifest = Invoke-RestMethod -Uri `$manifestUrl -Headers @{ 'User-Agent' = 'xingchen-agent-updater' } -TimeoutSec 30 -MaximumRedirection 0; `$requested = [string] `$manifest.version; break } catch { }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace(`$requested) -and `$allowGitHubApi) { `$release = Invoke-RestMethod -Uri "https://api.github.com/repos/`$releaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-updater' } -TimeoutSec 30 -MaximumRedirection 0; `$requested = [string]`$release.tag_name }
+    if ([string]::IsNullOrWhiteSpace(`$requested)) { throw '无法从总控或配置的 manifest 获取 Agent 版本。' }
+    `$version = Normalize-Version `$requested
+    `$currentOutput = try { [string](& '$targetBinary' --version 2>`$null | Select-Object -First 1) } catch { '' }
+    `$currentVersion = if (`$currentOutput -match 'v\d+\.\d+\.\d+') { Normalize-Version `$Matches[0] } else { '' }
+    if (`$currentVersion -eq `$version) { `$updateSucceeded = `$true; Write-Host "Agent 已是 `$version。"; exit 0 }
+    if (`$Automatic -and `$command -ne 'rollback' -and `$currentVersion -and -not (Test-SameMajor `$currentVersion `$version)) { `$updateSucceeded = `$true; Write-Host "Agent 自动更新不会跨主版本：当前 `$currentVersion，目标 `$version；请人工评估后手动更新。"; exit 0 }
+    if (`$command -ne 'rollback' -and `$currentVersion -and (Compare-Version `$version `$currentVersion) -lt 0) { throw "拒绝从 `$currentVersion 降级到 `$version；请显式使用 rollback。" }
     New-Item -ItemType Directory -Force -Path `$temp | Out-Null
     `$downloaded = `$false
+    if (`$null -ne `$metadata -and `$metadata.version -eq `$version) {
+        try {
+            `$archive = Join-Path `$temp ([string] `$metadata.file)
+            Invoke-WebRequest -UseBasicParsing -Uri "`$controllerUrl/api/setup/agent-artifact?os=windows&arch=`$arch&version=`$version" -OutFile `$archive -TimeoutSec 300 -MaximumRedirection 0
+            if ((Get-Item -LiteralPath `$archive).Length -ne [long] `$metadata.size) { throw '总控返回的 Agent 制品大小不符。' }
+            `$actual = (Get-FileHash -Algorithm SHA256 -LiteralPath `$archive).Hash.ToLowerInvariant()
+            if (`$actual -ne ([string] `$metadata.sha256).ToLowerInvariant()) { throw '总控返回的 Agent 制品 SHA256 校验失败。' }
+            Expand-Safe `$archive `$temp @('xingchen-agent.exe', 'guanlan-agent.exe')
+            `$downloaded = `$true
+        } catch { `$downloaded = `$false }
+    }
     foreach (`$base in `$releaseBases) {
+        if (`$downloaded) { break }
+        if (-not (Trusted-Https `$base)) { continue }
         foreach (`$prefix in @('xingchen-agent', 'guanlan-agent')) {
             try {
                 `$asset = "`${prefix}_`$(`$version.TrimStart('v'))_windows_`$arch.zip"
                 `$archive = Join-Path `$temp `$asset; `$checksums = Join-Path `$temp 'checksums.txt'
-                Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/`$asset" -OutFile `$archive -TimeoutSec 300
-                Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/checksums.txt" -OutFile `$checksums -TimeoutSec 60
+                Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/`$asset" -OutFile `$archive -TimeoutSec 300 -MaximumRedirection 0
+                Invoke-WebRequest -UseBasicParsing -Uri "`$base/`$version/checksums.txt" -OutFile `$checksums -TimeoutSec 60 -MaximumRedirection 0
                 `$expected = (Get-Content `$checksums | ForEach-Object { `$parts = `$_ -split '\s+'; if (`$parts.Count -ge 2 -and (`$parts[1] -eq `$asset -or `$parts[1].TrimStart('*') -eq `$asset)) { `$parts[0]; break } })
                 `$actual = (Get-FileHash -Algorithm SHA256 -LiteralPath `$archive).Hash.ToLowerInvariant()
                 if ([string]::IsNullOrWhiteSpace(`$expected) -or `$expected.ToLowerInvariant() -ne `$actual) { throw 'Agent Release SHA256 校验失败。' }
-                Expand-Archive -LiteralPath `$archive -DestinationPath `$temp -Force
+                Expand-Safe `$archive `$temp @("`$prefix.exe")
                 `$downloaded = `$true; break
             } catch { }
         }
@@ -212,15 +390,43 @@ try {
     if (-not `$downloaded) { throw 'Agent Release 下载或校验失败。' }
     `$newBinary = if (Test-Path -LiteralPath (Join-Path `$temp 'xingchen-agent.exe')) { Join-Path `$temp 'xingchen-agent.exe' } else { Join-Path `$temp 'guanlan-agent.exe' }
     `$backup = '$targetBinary.backup'
+    `$staged = '$targetBinary.new'
     Stop-Service -Name '$serviceName' -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath '$targetBinary') { Copy-Item -LiteralPath '$targetBinary' -Destination `$backup -Force }
-    try { Copy-Item -LiteralPath `$newBinary -Destination '$targetBinary' -Force; Start-Service -Name '$serviceName'; (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20)); Remove-Item -LiteralPath `$backup -Force -ErrorAction SilentlyContinue }
-    catch { if (Test-Path -LiteralPath `$backup) { Copy-Item -LiteralPath `$backup -Destination '$targetBinary' -Force }; Start-Service -Name '$serviceName' -ErrorAction SilentlyContinue; throw }
-} finally { if (Test-Path -LiteralPath `$temp) { Remove-Item -LiteralPath `$temp -Recurse -Force -ErrorAction SilentlyContinue } }
+    try { Copy-Item -LiteralPath `$newBinary -Destination `$staged -Force; Move-Item -LiteralPath `$staged -Destination '$targetBinary' -Force; Start-Service -Name '$serviceName'; (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20)); Remove-Item -LiteralPath `$backup -Force -ErrorAction SilentlyContinue }
+    catch {
+        Remove-Item -LiteralPath `$staged -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath `$backup) { Copy-Item -LiteralPath `$backup -Destination '$targetBinary' -Force }
+        Start-Service -Name '$serviceName' -ErrorAction SilentlyContinue
+        try { (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20)) } catch { throw 'Agent 更新失败，且旧版本恢复后仍未存活。' }
+        throw 'Agent 更新失败，已恢复旧版本。'
+    }
+    `$updateSucceeded = `$true
+} finally {
+    try {
+        if (`$updateSucceeded) {
+            Remove-Item -LiteralPath `$failureFile, `$pauseFile -Force -ErrorAction SilentlyContinue
+        }
+        elseif (`$Automatic) {
+            `$failureCount = 0
+            if (Test-Path -LiteralPath `$failureFile) { [void] [int]::TryParse(([string](Get-Content -Raw -LiteralPath `$failureFile)).Trim(), [ref] `$failureCount) }
+            `$failureCount++
+            Write-UpdateState `$failureFile ([string] `$failureCount)
+            if (`$failureCount -ge `$failureThreshold) {
+                `$newPause = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + `$pauseSeconds
+                Write-UpdateState `$pauseFile ([string] `$newPause)
+                Write-Warning "Agent 自动更新连续失败 `$failureCount 次，已暂停 24 小时。"
+            }
+        }
+    } catch { Write-Warning "Agent 更新状态写入失败：`$(`$_.Exception.Message)" }
+    `$mutex.ReleaseMutex()
+    `$mutex.Dispose()
+    if (Test-Path -LiteralPath `$temp) { Remove-Item -LiteralPath `$temp -Recurse -Force -ErrorAction SilentlyContinue }
+}
 "@
     [IO.File]::WriteAllText($updaterPath, $script, [Text.UTF8Encoding]::new($false))
-    $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updaterPath`""
-    $trigger = New-ScheduledTaskTrigger -Daily -At 4:15am
+    $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updaterPath`" -Automatic"
+    $trigger = New-ScheduledTaskTrigger -Daily -At 4:15am -RandomDelay (New-TimeSpan -Minutes 30)
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -RunLevel Highest -Force | Out-Null
 }
 
@@ -241,8 +447,25 @@ if ($Action -ne 'install') {
     switch ($Action) {
         'status' { Get-Service -Name $serviceName -ErrorAction SilentlyContinue | Format-Table -AutoSize; exit 0 }
         'list-versions' {
-            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30
-            $release | ForEach-Object { $_.tag_name }
+            if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
+                try { $ServerUrl = [string] ((Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json).server_url) } catch { }
+            }
+            $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq 'Arm64') { 'arm64' } else { 'amd64' }
+            $seen = @{}
+            $metadata = Get-ControllerReleaseMetadata $arch
+            if ($null -ne $metadata) { $seen[[string] $metadata.version] = $true; [string] $metadata.version }
+            foreach ($manifestUrl in $ReleaseManifestUrl) {
+                if (-not (Test-TrustedHttpsSource $manifestUrl -AllowQuery)) { continue }
+                try {
+                    $manifestVersion = Normalize-ReleaseVersion ([string] (Invoke-RestMethod -Uri $manifestUrl -TimeoutSec 30 -MaximumRedirection 0).version)
+                    if (-not $seen.ContainsKey($manifestVersion)) { $seen[$manifestVersion] = $true; $manifestVersion }
+                } catch { }
+            }
+            if ($AllowGitHubApi) {
+                $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30 -MaximumRedirection 0
+                $release | ForEach-Object { $_.tag_name } | Where-Object { -not $seen.ContainsKey($_) }
+            }
+            if ($seen.Count -eq 0 -and -not $AllowGitHubApi) { throw '无法从总控或配置的 manifest 获取 Agent 版本。' }
             exit 0
         }
         'update' { $requestedVersion = $Version }
@@ -259,7 +482,7 @@ if ($Action -ne 'install') {
     if ($Action -in @('update', 'rollback')) {
         $updaterPath = Join-Path $dataDir 'update-agent.ps1'
         if (-not (Test-Path -LiteralPath $updaterPath)) { throw '当前安装缺少更新器，请重新运行安装命令。' }
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updaterPath $requestedVersion
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updaterPath $Action $requestedVersion
         exit $LASTEXITCODE
     }
 }
@@ -285,9 +508,10 @@ try {
             Write-Warning '预编译 Agent Release 不可用，回退到源码构建。'
             $sourceRoot = $projectRoot
             if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
+                if ($RepositoryUrl.Count -eq 0) { throw '总控制品不可用，且未配置外部 Agent 源码仓库；请恢复总控、配置 -RepositoryUrl，或通过 -BinaryPath 提供已校验程序。' }
                 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw '未找到 Agent 源码。请安装 git，或通过 -BinaryPath 提供预编译 Agent。' }
                 $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("xingchen-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
-                if (-not (Get-AgentSource $temporarySource)) { throw 'GitHub 与 Gitee Agent 源码均不可用。' }
+                if (-not (Get-AgentSource $temporarySource)) { throw '配置的 Agent 源码仓库均不可用。' }
                 $sourceRoot = $temporarySource
             }
             if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw '未提供 -BinaryPath 时需要 Go 1.24+；也可以指定预编译 Agent。' }

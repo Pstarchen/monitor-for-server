@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-controller.sh [--cleanup] [--build|--source-build] [--auto-update] [--no-mirror] [--no-source-fallback]
+Usage: install-controller.sh [--cleanup] [--build|--source-build] [--offline] [--auto-update] [--no-mirror] [--no-source-fallback]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -13,6 +13,7 @@ browser guide at /setup.
              PostgreSQL/Redis volumes are preserved.
   --build    build controller images locally instead of pulling them from GHCR.
   --source-build  build Docker images from Gitee/GitHub source repositories.
+  --offline  use only images already loaded into the local Docker engine.
   --auto-update  enable the controller's daily 04:00 automatic update.
   --no-mirror  skip mainland-China mirror registries and use official GHCR.
   --no-source-fallback  do not build from source when all image registries fail.
@@ -25,11 +26,13 @@ source_build=false
 auto_update=false
 no_mirror=false
 source_fallback=true
+offline=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cleanup) cleanup=true; shift ;;
     --build) build=true; shift ;;
     --source-build) source_build=true; shift ;;
+    --offline) offline=true; shift ;;
     --auto-update) auto_update=true; shift ;;
     --no-mirror) no_mirror=true; shift ;;
     --no-source-fallback) source_fallback=false; shift ;;
@@ -37,6 +40,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ "${offline}" == true && ( "${build}" == true || "${source_build}" == true || "${auto_update}" == true ) ]]; then
+  echo "--offline 不能与 --build、--source-build 或 --auto-update 同时使用。" >&2
+  exit 2
+fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
@@ -142,6 +150,40 @@ elif ! grep -Eq '^POSTGRES_PASSWORD=("[^"]+"|[^[:space:]]+)$' .env; then
 fi
 ensure_compose_project_name
 
+persist_installer_settings() {
+  local key value
+  local keys=(
+    XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE
+    XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE XINGCHEN_AGENT_IMAGE
+    XINGCHEN_TARGET_VERSION XINGCHEN_RELEASE_MANIFEST_PATH XINGCHEN_RELEASE_MANIFEST_URLS XINGCHEN_RELEASE_MANIFEST_SHA256
+    XINGCHEN_AGENT_RELEASE_BASE_URLS XINGCHEN_AGENT_CACHE_DIR XINGCHEN_AGENT_OFFLINE_DIR
+    XINGCHEN_CONTROLLER_ALLOW_GITHUB_API XINGCHEN_CONTROLLER_IMAGE_MIRRORS XINGCHEN_AGENT_IMAGE_MIRRORS
+    XINGCHEN_SOURCE_REPOSITORIES XINGCHEN_SOURCE_REF XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS
+    XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS XINGCHEN_UPDATE_MIN_FREE_BYTES
+  )
+  for key in "${keys[@]}"; do
+    value="${!key:-}"
+    [[ -n "${value}" ]] || continue
+    if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
+      echo "${key} 不能包含换行符。" >&2
+      exit 2
+    fi
+    write_env_value "${key}" "${value}"
+  done
+}
+
+persist_installer_settings
+if [[ "${offline}" == true ]]; then
+  manifest_path="${XINGCHEN_RELEASE_MANIFEST_PATH:-$(read_env_value XINGCHEN_RELEASE_MANIFEST_PATH)}"
+  offline_dir="${XINGCHEN_AGENT_OFFLINE_DIR:-$(read_env_value XINGCHEN_AGENT_OFFLINE_DIR)}"
+  manifest_host_path="${manifest_path}"
+  offline_host_dir="${offline_dir}"
+  [[ "${manifest_host_path}" == /workspace/* ]] && manifest_host_path="${project_root}/${manifest_host_path#/workspace/}"
+  [[ "${offline_host_dir}" == /workspace/* ]] && offline_host_dir="${project_root}/${offline_host_dir#/workspace/}"
+  [[ -f "${manifest_host_path}" ]] || { echo "离线 Release manifest 不存在：${manifest_path:-未配置}" >&2; exit 1; }
+  [[ -d "${offline_host_dir}" ]] || { echo "离线 Agent 制品目录不存在：${offline_dir:-未配置}" >&2; exit 1; }
+fi
+
 profile_args=()
 if [[ "$(uname -s)" == "Linux" ]]; then
   ensure_controller_agent_env
@@ -177,6 +219,9 @@ elif [[ "${build}" == true ]]; then
 else
   echo "正在拉取总控预构建镜像（优先使用国内镜像源）..."
   update_args=(--check)
+  if [[ "${offline}" == true ]]; then
+    update_args+=(--offline)
+  fi
   if [[ "${source_build}" == true ]]; then
     update_args+=(--source-build)
   fi

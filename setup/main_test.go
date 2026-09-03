@@ -167,7 +167,7 @@ func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
 	t.Setenv("CONTROLLER_AGENT_ENABLED", "true")
 	t.Setenv("CONTROLLER_AGENT_DEVICE_ID", "controller-device-id")
 	t.Setenv("CONTROLLER_AGENT_KEY", "controller-agent-key")
-	if err := os.WriteFile(envPath, []byte("CONTROLLER_AUTO_UPDATE=\"true\"\n"), 0600); err != nil {
+	if err := os.WriteFile(envPath, []byte("CONTROLLER_AUTO_UPDATE=\"true\"\nXINGCHEN_POSTGRES_IMAGE=\"registry.internal.example/postgres:16\"\nXINGCHEN_REDIS_IMAGE=\"registry.internal.example/redis:7.4\"\nXINGCHEN_SETUP_IMAGE=\"registry.internal.example/setup:v1.20.11\"\nXINGCHEN_RELEASE_MANIFEST_PATH=\"/workspace/release/manifest.json\"\nXINGCHEN_UPDATE_MIN_FREE_BYTES=\"2147483648\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -186,6 +186,12 @@ func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
 	}
 	if values["CONTROLLER_AUTO_UPDATE"] != "true" {
 		t.Fatal("controller automatic update setting was not preserved")
+	}
+	if values["XINGCHEN_SETUP_IMAGE"] != "registry.internal.example/setup:v1.20.11" || values["XINGCHEN_RELEASE_MANIFEST_PATH"] != "/workspace/release/manifest.json" {
+		t.Fatal("controller release and image settings were not preserved")
+	}
+	if values["XINGCHEN_POSTGRES_IMAGE"] != "registry.internal.example/postgres:16" || values["XINGCHEN_REDIS_IMAGE"] != "registry.internal.example/redis:7.4" || values["XINGCHEN_UPDATE_MIN_FREE_BYTES"] != "2147483648" {
+		t.Fatal("offline dependency image and update preflight settings were not preserved")
 	}
 	if values["COMPOSE_PROJECT_NAME"] != "xingchen-monitor" {
 		t.Fatalf("default Compose project name = %q, want xingchen-monitor", values["COMPOSE_PROJECT_NAME"])

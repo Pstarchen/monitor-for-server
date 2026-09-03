@@ -20,11 +20,13 @@ const (
 )
 
 type controllerRelease struct {
-	TagName     string `json:"tag_name"`
-	Name        string `json:"name"`
-	Body        string `json:"body"`
-	PublishedAt string `json:"published_at"`
-	HTMLURL     string `json:"html_url"`
+	TagName      string `json:"tag_name"`
+	Name         string `json:"name"`
+	Body         string `json:"body"`
+	PublishedAt  string `json:"published_at"`
+	HTMLURL      string `json:"html_url"`
+	Source       string `json:"-"`
+	Verification string `json:"-"`
 }
 
 type controllerRepositoryTag struct {
@@ -51,6 +53,8 @@ func (s *controllerUpdateService) refreshReleaseState(ctx context.Context, state
 	state.ReleasePublishedAt = strings.TrimSpace(release.PublishedAt)
 	state.ReleaseCached = cached
 	state.ReleaseWarning = warning
+	state.ReleaseSource = release.Source
+	state.ReleaseVerification = release.Verification
 	if !cached {
 		state.ReleaseFetchedAt = s.currentTime().UTC().Format(time.RFC3339)
 	}
@@ -75,15 +79,44 @@ func (s *controllerUpdateService) latestRelease(ctx context.Context, state contr
 	if !force && s.releaseCacheFresh(state) {
 		return releaseFromState(state), true, "", nil
 	}
-	var release controllerRelease
-	if err := s.githubJSON(ctx, "/releases/latest", &release); err != nil {
-		cached := releaseFromState(state)
-		if normalizeControllerVersion(cached.TagName) != "" {
-			return cached, true, "GitHub Release 暂时不可用，当前显示缓存结果", nil
+	var sourceErrors []string
+	if s.releases != nil {
+		s.releases.mu.Lock()
+		manifest, source, cached, err := s.releases.loadManifest(ctx)
+		s.releases.mu.Unlock()
+		if err == nil {
+			warning := ""
+			if cached {
+				warning = "版本清单源暂时不可用，当前使用最后已知可用清单"
+			}
+			verification := "sha256"
+			if s.releases.manifestSHA256 != "" {
+				verification = "manifest-sha256"
+			}
+			return controllerRelease{
+				TagName: manifest.Version, Name: manifest.Version, PublishedAt: manifest.PublishedAt,
+				Source: source, Verification: verification,
+			}, cached, warning, nil
 		}
-		return controllerRelease{}, false, "", err
+		sourceErrors = append(sourceErrors, "版本清单不可用")
 	}
-	return release, false, "", nil
+	if s.githubReleaseEnabled() {
+		var release controllerRelease
+		if err := s.githubJSON(ctx, "/releases/latest", &release); err == nil {
+			release.Source = "github.com"
+			release.Verification = "github-api"
+			return release, false, "", nil
+		}
+		sourceErrors = append(sourceErrors, "GitHub API 不可用")
+	}
+	cached := releaseFromState(state)
+	if normalizeControllerVersion(cached.TagName) != "" {
+		return cached, true, "发布源暂时不可用，当前显示缓存结果", nil
+	}
+	if len(sourceErrors) == 0 {
+		return controllerRelease{}, false, "", errors.New("未配置版本清单源，且 GitHub API 回退未启用")
+	}
+	return controllerRelease{}, false, "", errors.New(strings.Join(sourceErrors, "；"))
 }
 
 func (s *controllerUpdateService) releaseCacheFresh(state controllerUpdateState) bool {
@@ -100,15 +133,20 @@ func (s *controllerUpdateService) releaseCacheFresh(state controllerUpdateState)
 
 func releaseFromState(state controllerUpdateState) controllerRelease {
 	return controllerRelease{
-		TagName:     state.LatestVersion,
-		Name:        state.ReleaseName,
-		Body:        state.ReleaseNotes,
-		PublishedAt: state.ReleasePublishedAt,
-		HTMLURL:     state.ReleaseURL,
+		TagName:      state.LatestVersion,
+		Name:         state.ReleaseName,
+		Body:         state.ReleaseNotes,
+		PublishedAt:  state.ReleasePublishedAt,
+		HTMLURL:      state.ReleaseURL,
+		Source:       state.ReleaseSource,
+		Verification: state.ReleaseVerification,
 	}
 }
 
 func (s *controllerUpdateService) versionForRevision(ctx context.Context, revision string) (string, error) {
+	if !s.githubReleaseEnabled() {
+		return "", errors.New("GitHub API 回退未启用")
+	}
 	var tags []controllerRepositoryTag
 	if err := s.githubJSON(ctx, "/tags?per_page=100", &tags); err != nil {
 		return "", err
@@ -129,6 +167,10 @@ func (s *controllerUpdateService) versionForRevision(ctx context.Context, revisi
 	return matched, nil
 }
 
+func (s *controllerUpdateService) githubReleaseEnabled() bool {
+	return s.allowGitHubAPI || (strings.TrimSpace(s.apiBase) != "" && strings.TrimRight(s.apiBase, "/") != controllerGitHubAPIBase)
+}
+
 func (s *controllerUpdateService) githubJSON(ctx context.Context, path string, destination any) error {
 	apiBase := strings.TrimRight(s.apiBase, "/")
 	if apiBase == "" {
@@ -140,11 +182,7 @@ func (s *controllerUpdateService) githubJSON(ctx context.Context, path string, d
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("User-Agent", "xingchen-monitor-controller-updater")
-	client := s.client
-	if client == nil {
-		client = &http.Client{Timeout: controllerReleaseCheckTimeout}
-	}
-	response, err := client.Do(request)
+	response, err := s.doGitHubRequest(request)
 	if err != nil {
 		return err
 	}
@@ -164,6 +202,30 @@ func (s *controllerUpdateService) githubJSON(ctx context.Context, path string, d
 		return fmt.Errorf("decode GitHub API response: %w", err)
 	}
 	return nil
+}
+
+func (s *controllerUpdateService) doGitHubRequest(request *http.Request) (*http.Response, error) {
+	baseClient := s.client
+	if baseClient == nil {
+		baseClient = &http.Client{Timeout: controllerReleaseCheckTimeout}
+	}
+	client := *baseClient
+	configuredRedirect := baseClient.CheckRedirect
+	originScheme := request.URL.Scheme
+	originHost := request.URL.Host
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("GitHub API redirect limit exceeded")
+		}
+		if next.URL.User != nil || !strings.EqualFold(next.URL.Scheme, originScheme) || !strings.EqualFold(next.URL.Host, originHost) {
+			return errors.New("GitHub API redirect target is outside the configured origin")
+		}
+		if configuredRedirect != nil {
+			return configuredRedirect(next, via)
+		}
+		return nil
+	}
+	return client.Do(request)
 }
 
 func normalizeControllerVersion(value string) string {

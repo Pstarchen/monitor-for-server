@@ -1,0 +1,21 @@
+{
+  "name": "xingchen-monitor-docs",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@11.19.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress --host 0.0.0.0",
+    "build": "vitepress build",
+    "preview": "vitepress preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "lucide-vue-next": "^0.468.0",
+    "three": "^0.180.0",
+    "vue": "^3.5.18"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0",
+    "vitepress": "^1.6.4"
+  }
+}

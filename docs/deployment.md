@@ -12,7 +12,7 @@
 
 ## Docker Compose 部署
 
-Linux 生产环境应使用总终端安装器启动。它默认按国内镜像代理、GHCR、Gitee 源码、GitHub 源码的顺序准备总控 `setup`、`server`、`web` Docker 镜像，并自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境应使用总终端安装器启动。它先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置的受信内部 Registry，再尝试镜像自身地址；镜像不可用时按 `XINGCHEN_SOURCE_REPOSITORIES` 回退源码，默认列表只有 Gitee，GitHub 必须显式加入。安装器会自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
 bash ./deploy/install-controller.sh
@@ -25,7 +25,7 @@ docker compose --profile host-monitoring ps
 bash ./deploy/install-controller.sh --build
 ```
 
-需要跳过镜像仓库并直接从 Gitee/GitHub 构建 Docker 镜像时：
+需要跳过镜像仓库并直接从已配置源码仓库构建 Docker 镜像时：
 
 ```bash
 bash ./deploy/install-controller.sh --source-build
@@ -82,11 +82,26 @@ sudo bash ./deploy/update-controller.sh --apply
 sudo bash ./deploy/update-controller.sh --auto
 ```
 
-更新器默认给予单个国内镜像代理 45 秒快速失败时间，官方 GHCR 单个镜像最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS`、`XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；外层任务上限覆盖完整回退链，不会在单个来源仍正常工作时提前标记中断。更新失败不会删除数据库卷。
+更新器默认给予单个内部镜像前缀 45 秒快速失败时间，镜像自身地址最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS`、`XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；`XINGCHEN_UPDATE_MIN_FREE_BYTES` 默认要求至少 1 GiB 可用空间。外层任务上限覆盖完整回退链，更新失败不会删除数据库卷。
 
-稳定发布以 `vX.Y.Z` GitHub Release 为入口。CI 先构建同一版本的 setup、server、web 和 Agent 镜像，全部成功后才把版本镜像提升为 `latest`，最后发布 Release；主分支提交只保留 `sha-*` 镜像，不再推进稳定更新通道。控制台缓存 Release 检查结果 20 分钟，并显示发布说明。
+稳定发布使用 `vX.Y.Z`，但目标服务器的版本发现不依赖 GitHub API。总控优先读取本地或 `XINGCHEN_RELEASE_MANIFEST_URLS` 配置的 HTTPS manifest，并保存 last-known-good 缓存；只有显式设置 `XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=true` 才允许 GitHub API 回退。联网 CI 先创建 draft Release，等待四个项目镜像、四个平台 Agent 制品、manifest、校验文件和两个架构离线包全部验证完成后才公开发布，避免目标机看见半成品版本。
 
-更新器默认依次尝试 `ghcr.1ms.run`、`ghcr.nju.edu.cn` 和官方 GHCR；控制台发起更新时会直接拉取不可变的 `vX.Y.Z` 镜像并校验 OCI 版本标签，避免镜像代理缓存的旧 `latest` 混入同一次升级。这些 OCI 镜像源全部失败后，再依次使用 Gitee、GitHub Git 仓库的目标版本标签作为 Docker 远程构建上下文。Gitee Git 仓库本身不是 OCI 镜像仓库。可通过 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置镜像前缀，通过 `XINGCHEN_SOURCE_REPOSITORIES` 配置逗号分隔的源码仓库，通过 `XINGCHEN_SOURCE_REF` 固定普通命令行构建的分支或标签。`--source-build` 会直接走双源码构建，`--no-source-fallback` 会在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
+更新器不内置公共镜像加速器。控制台发起更新时拉取固定的 `vX.Y.Z` 或管理员配置的 OCI digest，并校验 OCI 版本标签，避免旧 `latest` 混入升级。自动更新只允许同一主版本内前进，跨主版本必须由管理员评估后手动执行。镜像源全部失败后，再按 `XINGCHEN_SOURCE_REPOSITORIES` 顺序使用目标版本标签作为 Docker 远程构建上下文；GitHub 只有显式配置时才会参与。`--source-build` 直接走配置的源码列表，`--no-source-fallback` 在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
+
+### 内部源与完全离线安装
+
+内部 Registry 应同步 setup、server、web、agent、PostgreSQL 和 Redis 六个镜像；内部 HTTPS 制品服务应同步 `manifest.json`、四个平台 Agent 压缩包和校验文件。目标机在 `.env` 中配置对应的 `XINGCHEN_*_IMAGE`、`XINGCHEN_RELEASE_MANIFEST_URLS` 和 `XINGCHEN_AGENT_RELEASE_BASE_URLS` 后，可添加 `--no-source-fallback` 确保不会访问代码托管平台。
+
+完全断网时，在联网发布机下载并校验 `xingchen-monitor-offline-vX.Y.Z-amd64.tar.gz` 或 `-arm64.tar.gz` 及同名 `.sha256`，通过受控介质传入目标机后执行：
+
+```bash
+sha256sum -c xingchen-monitor-offline-vX.Y.Z-amd64.tar.gz.sha256
+tar -xzf xingchen-monitor-offline-vX.Y.Z-amd64.tar.gz
+cd xingchen-monitor-offline-vX.Y.Z-amd64
+sudo ./install-offline.sh
+```
+
+包内安装器会再次校验全部文件、导入六个镜像、固定目标版本，并以 `--offline --no-source-fallback` 启动；缺少任何镜像或 Agent 制品都会在启动前失败。
 
 ### 数据库备份与恢复
 
@@ -101,7 +116,7 @@ CONTROLLER_BACKUP_RETENTION=7
 
 自动任务按 `APP_TIMEZONE` 每天 03:00 执行。备份文件和 `.env` 含有数据库及站点机密，必须限制项目目录访问并纳入离线备份策略。
 
-更新器不会在健康检查失败后自动切回旧镜像。Flyway 迁移是前向执行的，旧应用镜像不一定兼容已经升级的数据库结构；生产降级必须先确认版本兼容性，必要时同时恢复升级前的 PostgreSQL 备份和对应版本镜像。
+更新器在健康检查失败后会尝试恢复更新前的应用镜像并再次执行健康检查；原配置使用 OCI digest 时，会先给旧 image ID 创建仅供本机使用的回滚别名，避免重新启动失败的新 digest。更新器不会自动回退数据库。Flyway 迁移是前向执行的，旧应用镜像不一定兼容已经升级的数据库结构；控制台会将数据库兼容性标记为需要人工确认，生产降级必要时必须同时恢复升级前的 PostgreSQL 备份和对应版本镜像。
 
 升级前只清理本项目旧容器和本地镜像（保留 PostgreSQL/Redis 数据卷）时使用 `--cleanup`；不带该参数不会做破坏性清理。镜像默认从 GHCR 拉取，可通过 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE` 和 `XINGCHEN_AGENT_IMAGE` 指向内部仓库或固定版本。若 `.env` 缺少有效的 PostgreSQL 密码，安装器会重新生成 bootstrap 配置，不会复用旧数据库配置。
 
@@ -136,17 +151,17 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 ## 创建设备
 
 1. 登录 Web 控制台并打开“设备管理”。
-2. 添加设备并立即保存设备 ID 与一次性 Agent 密钥。
-3. 密钥关闭后无法找回；遗失时由管理员轮换密钥。
+2. 添加设备并立即保存设备 ID 与只显示一次的长期 Agent 密钥。
+3. 密钥关闭后无法找回；遗失时由管理员轮换密钥。当前密钥并非单次消费的 enrollment token。
 
 ## Linux Agent
 
-安装器默认从 Release 下载对应架构的预编译程序并注册 systemd 服务，不要求目标机安装 Go；Release 不可用时才回退源码。控制台生成的命令只把密钥注入安装进程，不会用 `export` 留在当前 Shell；复制的命令仍包含密钥，执行后应按服务器安全策略清理终端历史。
+安装器默认通过总控查询 manifest 并下载对应架构的预编译程序，不要求目标机安装 Go。控制台生成的命令不包含 Agent 密钥；安装器完成提权后会在交互终端静默询问，输入不回显也不进入命令历史。非交互自动化仍可通过临时 `XINGCHEN_AGENT_KEY` 环境变量提供，但应在进程启动后立即清除。
 
 总控同域入口是默认安装源，目标服务器无需直接访问代码托管平台；控制台也可以明确切换到 Gitee 或 GitHub 安装脚本。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' XINGCHEN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh --interval 3s --disk / --disk /data
+curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && ./xingchen-agent.sh --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s --disk / --disk /data
 ```
 
 Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main/deploy/install-agent.sh`，GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`。控制台切换安装源后会自动生成完整命令，无需手工替换。
@@ -155,7 +170,7 @@ Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main
 
 需要个性化指标时，在 Agent 配置的 `custom_metrics` 数组中添加最多 32 个参数化程序。程序不经过 Shell，每项最多运行 3 秒，`kind` 支持 `number`、`text`、`exit_code`；服务端设备详情会展示结果，告警规则可对数值项设置阈值。详见 `docs/monitored-agent.md` 中的 JSON 示例。Linux 还可添加 `--system-logs` 采集存在的标准系统日志文件（最多展示每个文件最近 20 行）。
 
-`XINGCHEN_SERVER` 可以填写域名或 `域名:端口`，安装器会先探测 `https://主机/healthz`；若 HTTPS 不可用但 HTTP 健康检查可用，会自动回退到 `http://主机` 并在 Agent 配置中启用明文连接。默认安装 GitHub Release 的预编译程序（支持 `linux/amd64` 与 `linux/arm64`），下载后必须通过 `checksums.txt` 的 SHA256 校验；更新失败会保留并恢复旧程序。需要 Docker 模式时显式添加 `--docker`，再使用 `--image` 或 `XINGCHEN_AGENT_IMAGE` 指向内部 OCI 仓库；Release 或镜像失败时仍可使用 `--source-url` 和 `--source-ref` 源码回退。
+`XINGCHEN_SERVER` 可以填写域名或 `域名:端口`，安装器会优先探测 `https://主机/healthz`。远程 HTTP 不会自动启用，只有明确传入 `--allow-insecure-http` 才允许明文连接；HTTPS 下载也禁止重定向降级到 HTTP。原生模式默认从总控取得 Linux/Windows amd64/arm64 制品并校验 manifest 中的大小和 SHA256；更新失败会恢复旧程序并验证服务存活。Docker 模式必须显式添加 `--docker`，并建议用 `--image` 或 `XINGCHEN_AGENT_IMAGE` 指向内部 OCI 仓库。源码回退仅使用显式配置的 `--source-url` 和 `--source-ref`。
 
 - 容器：`xingchen-agent`，重启策略为 `unless-stopped`
 - 配置：`/etc/xingchen-agent/agent.json`，只读挂载到容器
@@ -176,7 +191,7 @@ Gitee 下载地址为 `https://gitee.com/starchen520/monitor-for-server/raw/main
 
 直接运行 `/opt/xingchen/agent/agent.sh` 会打开交互菜单。默认卸载会保留配置和离线缓存，只有 `uninstall --purge` 才会一并删除。
 
-如果 Release 暂时不可用，安装器会依次尝试源码回退，因此需要 Go 1.24+、git 和 systemd；也可用 `--binary /path/to/xingchen-agent` 指定本地程序。使用 `--no-docker` 可明确保持原生模式。此模式安装结果：
+总控制品暂时不可用时，安装器不会自行访问代码托管平台；只有管理员通过 `--source-url` 或 `XINGCHEN_REPOSITORY_URLS` 显式配置受信仓库后才尝试源码构建，此时需要 Go 1.24+、git 和 systemd。也可用 `--binary /path/to/xingchen-agent` 指定本地程序。使用 `--no-docker` 可明确保持原生模式。此模式安装结果：
 
 - 程序：`/usr/local/bin/xingchen-agent`
 - 配置：`/etc/xingchen-agent/agent.json`，权限 `0600`
@@ -195,7 +210,7 @@ journalctl -u xingchen-agent -n 100 --no-pager
 以管理员 PowerShell 运行：
 
 ```powershell
-$env:XINGCHEN_AGENT_KEY = '<一次性密钥>'
+$env:XINGCHEN_AGENT_KEY = '<Agent密钥>'
 & .\deploy\install-agent.ps1 `
   -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `
@@ -253,6 +268,6 @@ Flyway 会在服务端启动时执行数据库迁移。升级前先在测试环�
 - 设备一直待接入：打开设备详情查看“Agent 接入诊断”。`等待 Agent 接入` 表示尚未收到首次上报；`Agent 已离线` 表示已超过失联阈值。然后在目标机检查 `docker logs --tail 100 xingchen-agent` 或 `journalctl -u xingchen-agent -n 100 --no-pager`，核对设备 ID、服务端 HTTPS 地址和密钥；密钥轮换后旧值立即失效。
 - Agent 日志提示延迟上报：检查 DNS、证书链和防火墙。缓冲文件会保留在 spool 目录并在恢复后补传。
 - Linux 安装器仍提示 Go 1.24+：Docker 命令不存在、守护进程不可达，或显式使用了 `--no-docker`；先运行 `docker info` 检查。要强制使用本机程序，请同时指定 `--no-docker --binary /path/to/xingchen-agent`。
-- Agent 镜像无法拉取：确认 GHCR 包已设为 Public、目标机能访问 `ghcr.io`，或用 `--image` 指向可访问的镜像仓库。
-- 总控镜像无法拉取：确认 GHCR 的 `monitor-for-server-{setup,server,web}` 包已设为 Public；也可使用 `bash ./deploy/install-controller.sh --build` 从源码构建。
+- Agent 镜像无法拉取：优先用 `--image` 或 `XINGCHEN_AGENT_IMAGE` 指向受信内部 Registry；完全断网时使用已校验的离线 bundle。只有明确采用 GHCR 时才检查其网络和包可见性。
+- 总控镜像无法拉取：优先配置四个 `XINGCHEN_*_IMAGE` 为内部 Registry 的同版本镜像，或导入包含六个镜像的离线 bundle；具备受信源码网络时也可使用 `bash ./deploy/install-controller.sh --build` 本地构建。
 - 设备离线但无告警：检查系统离线判定时间、离线规则阈值和规则是否启用。

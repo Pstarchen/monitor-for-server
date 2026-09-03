@@ -25,9 +25,9 @@ PostgreSQL、Redis 和服务端端口默认只在 Docker 内网开放。公网�
 
 每台被监控服务器安装一个 Agent。Agent 采集 CPU、内存、磁盘、网络、进程、端口和可选的容器信息，然后通过 HTTP(S) 主动连接总控。通常不需要在被监控服务器上开放入站端口。
 
-### 1.3 设备 ID 和一次性 Agent 密钥
+### 1.3 设备 ID 和长期 Agent 密钥
 
-在控制台“设备管理”中创建设备后，会得到设备 ID 和一次性 Agent 密钥。安装 Agent 时两者必须同时使用：
+在控制台“设备管理”中创建设备后，会得到设备 ID 和只显示一次的长期 Agent 密钥。安装 Agent 时两者必须同时使用：
 
 - 设备 ID 表示数据属于哪台设备。
 - Agent 密钥证明这台服务器有权上报。
@@ -61,7 +61,7 @@ PostgreSQL、Redis 和服务端端口默认只在 Docker 内网开放。公网�
 - 2 核 CPU、4 GB 内存、至少 20 GB 可用磁盘。
 - Docker Engine 24 或更高版本。
 - Docker Compose v2，命令格式是 `docker compose`，不是旧版 `docker-compose`。
-- 可访问 GitHub、Gitee 或项目镜像源中的至少一个。
+- 可访问总控所需的内部 Registry/制品服务或 Gitee；完全断网环境提前准备架构对应的离线 bundle。GitHub 不是目标服务器的必需依赖。
 - 生产环境准备一个域名和有效 HTTPS 证书。
 
 设备数量、指标保留时间和采集频率越高，磁盘使用量越大。生产环境应持续观察总控磁盘空间。
@@ -119,19 +119,19 @@ Windows 总控不会自动采集 Windows 宿主机。完成总控安装后，还
 
 ## 4. 安装总控
 
-### 4.1 Linux：从 GitHub 安装
+### 4.1 Linux：从 Gitee 安装
 
 ```bash
-git clone https://github.com/Pstarchen/monitor-for-server.git
-cd monitor-for-server
+git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
+cd xingchen-monitor
 sudo bash ./deploy/install-controller.sh
 ```
 
-### 4.2 Linux：中国大陆网络优先从 Gitee 安装
+### 4.2 Linux：能够访问 GitHub 时
 
 ```bash
-git clone https://gitee.com/starchen520/monitor-for-server.git
-cd monitor-for-server
+git clone https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
+cd xingchen-monitor
 sudo bash ./deploy/install-controller.sh
 ```
 
@@ -139,8 +139,8 @@ sudo bash ./deploy/install-controller.sh
 
 1. 检查 Docker 和 Compose。
 2. 生成随机 PostgreSQL 凭据并写入私有 `.env`。
-3. 优先从国内镜像代理和 GHCR 拉取预构建镜像。
-4. 镜像不可用时，依次尝试从 Gitee、GitHub 源码构建。
+3. 优先从配置的受信内部 Registry 拉取固定版本镜像，再尝试镜像自身地址。
+4. 镜像不可用时，按 `XINGCHEN_SOURCE_REPOSITORIES` 配置顺序构建；默认仅包含 Gitee。
 5. 启动数据库和临时安装环境。
 6. 等待 `http://127.0.0.1:18080/healthz` 健康检查通过。
 
@@ -169,7 +169,7 @@ Linux 和 Windows 选项一一对应：
 | 安装后启用每日 04:00 自动更新 | `--auto-update` | `-AutoUpdate` |
 | 使用当前目录源码构建 | `--build` | `-Build` |
 | 跳过镜像，直接从双源码仓库构建 | `--source-build` | `-SourceBuild` |
-| 跳过国内镜像代理 | `--no-mirror` | `-NoMirror` |
+| 跳过配置的镜像前缀 | `--no-mirror` | `-NoMirror` |
 | 镜像失败后不回退源码构建 | `--no-source-fallback` | `-NoSourceFallback` |
 | 清理本项目旧容器和本地镜像 | `--cleanup` | `-Cleanup` |
 
@@ -280,7 +280,7 @@ docker compose up -d --force-recreate server web
 - “轻量采集”：低配置或连接很多的服务器可启用，它会跳过进程和连接统计。
 - “完整进程”：只有确实需要完整进程清单时启用，并设置合理上限。
 
-参数选好后点击“复制安装命令”。这条命令已经包含正确的设备 ID、一次性密钥、总控地址和安装源，应优先使用它，不要手工拼接。
+参数选好后点击“复制安装命令”。这条命令包含正确的设备 ID、总控地址和安装源，但不会包含长期 Agent 密钥；安装器提权后会在终端中静默询问，应优先使用该流程，不要手工拼接。
 
 ### 7.3 Linux 安装 Agent
 
@@ -294,10 +294,8 @@ docker compose up -d --force-recreate server web
 ```bash
 curl -fL 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh \
   && chmod +x xingchen-agent.sh \
-  && env XINGCHEN_SERVER='https://monitor.example.com' \
-    XINGCHEN_DEVICE_ID='<设备ID>' \
-    XINGCHEN_AGENT_KEY='<一次性密钥>' \
-    ./xingchen-agent.sh --interval 3s
+  && ./xingchen-agent.sh --server-url 'https://monitor.example.com' \
+    --device-id '<设备ID>' --interval 3s
 ```
 
 安装器默认用预编译程序注册本机 systemd 服务；只有命令中显式添加 `--docker` 才用容器模式。检查状态和日志：
@@ -555,7 +553,7 @@ API Token 用于移动端、脚本或 MCP 客户端，不要用管理员 Cookie 
 5. 控制台重启期间耐心等待；恢复后页面会自动刷新状态。
 6. 检查总控组件版本、设备在线状态和通知投递。
 
-稳定版本使用 `vX.Y.Z` GitHub Release。发布流程只有在 setup、server、web 和 Agent 的同版本镜像全部构建完成后，才推进 `latest` 并创建 Release。控制台缓存版本检查结果 20 分钟；GitHub 临时不可用时会显示上一次成功缓存。
+稳定版本使用 `vX.Y.Z`。发布流程只有在 setup、server、web 和 Agent 的同版本镜像全部构建完成后才发布制品和离线包；目标服务器通过本地或内部 HTTPS manifest 发现版本，不依赖 GitHub API。控制台会显示 manifest 来源及 last-known-good 缓存状态。
 
 ### 9.4.1 更新页面的逐项操作和判断标准
 
@@ -771,11 +769,11 @@ curl -v https://monitor.example.com/healthz
 
 “确认告警”不会阻止后续恢复通知；维护窗口才负责按时间范围静默通知。
 
-### 11.8 检查更新显示缓存或 GitHub 不可用
+### 11.8 检查更新显示缓存或发布源不可用
 
-版本检查缓存 20 分钟是正常设计。GitHub 临时失败时会保留旧缓存并显示提示。若要判断是否真的发布成功，应同时检查 Release 是否存在，以及 setup、server、web、Agent 四个同版本镜像是否已经完成。
+版本检查缓存 20 分钟是正常设计。内部 manifest 或显式启用的外部源临时失败时会保留 last-known-good 缓存并显示提示。判断发布是否完整时，应同时检查 manifest、四个应用镜像、PostgreSQL/Redis 依赖镜像和四个平台 Agent 制品。
 
-命令行更新失败时查看输出中的具体镜像源。更新器会按国内镜像代理、官方 GHCR、Gitee/GitHub 源码顺序回退；网络较慢时可能需要等待源码构建。
+命令行更新失败时查看输出中的具体镜像源。更新器按配置的内部镜像、镜像自身地址和源码仓库顺序回退；完全断网环境应使用离线 bundle，不要等待公共源超时。
 
 ### 11.9 数据库恢复或更新后控制台暂时不可用
 
@@ -793,7 +791,7 @@ docker compose logs --tail 200 server
 
 - 生产环境使用 HTTPS，不让 Agent 通过公网明文 HTTP 上报。
 - 不公开 PostgreSQL、Redis、Docker socket 和 Spring Boot 端口。
-- `.env`、`backups/`、Agent 配置、一次性密钥和 API Token 都按凭据保护。
+- `.env`、`backups/`、Agent 配置、长期 Agent 密钥和 API Token 都按凭据保护。
 - 管理员使用独立强密码和 TOTP；普通人员按最小角色和设备权限分配。
 - API Token 使用最小 scope、设备白名单和有效期，不再使用时立即吊销。
 - 只有可信服务器才启用命令执行和文件操作能力。

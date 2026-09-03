@@ -7,6 +7,8 @@ COPY src src
 RUN mvn -B -q -DskipTests package
 
 FROM eclipse-temurin:21-jre-alpine
+ARG VERSION=dev
+LABEL org.opencontainers.image.version=$VERSION
 RUN addgroup -S monitor && adduser -S -G monitor monitor
 WORKDIR /app
 COPY --from=build /workspace/target/monitor-server-1.0.0.jar app.jar

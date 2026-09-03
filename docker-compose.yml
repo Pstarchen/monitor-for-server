@@ -2,7 +2,7 @@ name: xingchen-monitor
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${XINGCHEN_POSTGRES_IMAGE:-postgres:16-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-xingchen_monitor}
@@ -18,9 +18,11 @@ services:
     networks: [monitor]
 
   setup:
-    image: ${XINGCHEN_SETUP_IMAGE:-ghcr.io/pstarchen/monitor-for-server-setup:latest}
+    image: ${XINGCHEN_SETUP_IMAGE:-ghcr.io/pstarchen/monitor-for-server-setup:v1.20.11}
     build:
       context: ./setup
+      args:
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
     restart: unless-stopped
     environment:
       SETUP_WORKSPACE: /workspace
@@ -38,6 +40,13 @@ services:
       CONTROLLER_UPDATE_TOKEN: ${SETTINGS_ENCRYPTION_KEY-}
       CONTROLLER_BACKUP_AUTO: ${CONTROLLER_BACKUP_AUTO:-false}
       CONTROLLER_BACKUP_RETENTION: ${CONTROLLER_BACKUP_RETENTION:-7}
+      XINGCHEN_RELEASE_MANIFEST_PATH: ${XINGCHEN_RELEASE_MANIFEST_PATH:-}
+      XINGCHEN_RELEASE_MANIFEST_URLS: ${XINGCHEN_RELEASE_MANIFEST_URLS:-}
+      XINGCHEN_RELEASE_MANIFEST_SHA256: ${XINGCHEN_RELEASE_MANIFEST_SHA256:-}
+      XINGCHEN_AGENT_RELEASE_BASE_URLS: ${XINGCHEN_AGENT_RELEASE_BASE_URLS:-}
+      XINGCHEN_AGENT_CACHE_DIR: ${XINGCHEN_AGENT_CACHE_DIR:-/workspace/.cache/agent-release}
+      XINGCHEN_AGENT_OFFLINE_DIR: ${XINGCHEN_AGENT_OFFLINE_DIR:-/workspace/release/assets}
+      XINGCHEN_CONTROLLER_ALLOW_GITHUB_API: ${XINGCHEN_CONTROLLER_ALLOW_GITHUB_API:-false}
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
     volumes:
       - ./:/workspace
@@ -53,7 +62,7 @@ services:
         condition: service_healthy
 
   redis:
-    image: redis:7.4-alpine
+    image: ${XINGCHEN_REDIS_IMAGE:-redis:7.4-alpine}
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -66,9 +75,11 @@ services:
     networks: [monitor]
 
   server:
-    image: ${XINGCHEN_SERVER_IMAGE:-ghcr.io/pstarchen/monitor-for-server-server:latest}
+    image: ${XINGCHEN_SERVER_IMAGE:-ghcr.io/pstarchen/monitor-for-server-server:v1.20.11}
     build:
       context: ./server
+      args:
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-bootstrap}
@@ -139,9 +150,11 @@ services:
 
   controller-agent:
     profiles: [host-monitoring]
-    image: ${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:latest}
+    image: ${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:v1.20.11}
     build:
       context: ./agent
+      args:
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
     restart: unless-stopped
     pid: host
     network_mode: host
@@ -174,9 +187,11 @@ services:
       retries: 4
 
   web:
-    image: ${XINGCHEN_WEB_IMAGE:-ghcr.io/pstarchen/monitor-for-server-web:latest}
+    image: ${XINGCHEN_WEB_IMAGE:-ghcr.io/pstarchen/monitor-for-server-web:v1.20.11}
     build:
       context: ./web
+      args:
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.11}
     restart: unless-stopped
     ports:
       - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-18080}:80"

@@ -1,17 +1,17 @@
 # 受监控服务器搭建材料
 
-受监控服务器只安装一个 Agent。每台机器在星辰监控总控的“设备管理”中创建一条设备记录，拿到设备 ID 和一次性 Agent 密钥后，再在目标主机安装。
+受监控服务器只安装一个 Agent。每台机器在星辰监控总控的“设备管理”中创建一条设备记录，拿到设备 ID 和只显示一次的长期 Agent 密钥后，再在目标主机安装。该密钥当前不是单次消费的 enrollment token；不要把它放入命令行、URL、工单或日志。
 
 第一次接入设备可先阅读[新手使用指南的“接入第一台服务器”](user-guide.md#7-接入第一台服务器)。控制台自动生成的命令应优先于手工拼接；本页用于查阅完整 Agent 参数和高级采集配置。
 
 ## Linux
 
-在线安装器默认安装预编译 Agent，流程与 Nezha 的一键安装方式一致：识别操作系统和 CPU 架构，从 GitHub Release 下载对应压缩包，强制校验 `checksums.txt` 后安装 systemd 服务。GitHub 暂时不可用时才回退到 Gitee/GitHub 源码构建。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
+在线安装器默认识别操作系统和 CPU 架构，从总控同源的 release/artifact 接口下载预编译 Agent，校验 manifest 声明的大小和 SHA256 后安装 systemd 服务。只有显式配置制品基址、GitHub API或源码仓库时才使用相应回退。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
 
 控制台默认使用总控同域入口，目标服务器无需访问代码托管平台；也可在命令上方明确切换到 Gitee 或 GitHub。复制按钮输出的是纯文本命令，不包含 Markdown 链接、历史版本号或多级下载回退。
 
 ```bash
-curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' XINGCHEN_AGENT_KEY='<一次性密钥>' ./xingchen-agent.sh --interval 3s
+curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o xingchen-agent.sh && chmod +x xingchen-agent.sh && ./xingchen-agent.sh --server-url 'https://monitor.example.com' --device-id '<设备ID>' --interval 3s
 ```
 
 Gitee 源只替换安装脚本下载地址，安装参数和密钥注入方式保持一致：
@@ -24,7 +24,7 @@ curl -fL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 \
 
 GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-server/main/deploy/install-agent.sh`，控制台选择后会自动生成完整命令。
 
-`XINGCHEN_SERVER` 可以填写域名、`域名:端口` 或完整 `http(s)://` 地址。安装器会先访问 HTTPS 健康检查；如果 HTTPS 不可用但 HTTP 健康检查可用，会回退到 HTTP 并在配置中启用明文连接。生产环境建议配置 HTTPS；HTTP 仅适合临时或内网部署。原生模式会把配置写到 `/etc/xingchen-agent/agent.json`，离线上报缓冲写入 `/var/lib/xingchen-agent/spool`，程序安装到 `/usr/local/bin/xingchen-agent`。
+`XINGCHEN_SERVER` 可以填写域名、`域名:端口` 或完整 `http(s)://` 地址。安装器优先访问 HTTPS，远程 HTTP 只有传入 `--allow-insecure-http` 才会启用；本地回环地址仍可用于开发。生产环境必须配置 HTTPS。原生模式会把配置写到 `/etc/xingchen-agent/agent.json`，离线上报缓冲写入 `/var/lib/xingchen-agent/spool`，程序安装到 `/usr/local/bin/xingchen-agent`。
 
 需要个性化指标时，可在 `custom_metrics` 中配置最多 32 个程序。程序通过参数数组直接执行，不经过 Shell；`kind` 支持 `number`、`text`、`exit_code`，每项最多运行 3 秒并截断 4096 字符输出。例如：
 
@@ -55,9 +55,11 @@ GitHub 下载地址为 `https://raw.githubusercontent.com/Pstarchen/monitor-for-
 
 默认卸载会保留配置和离线缓存；彻底删除时使用 `uninstall --purge`。管理脚本会记录安装模式和 Release 源，不会记录 Agent 密钥。
 
-内网可用 `--image registry.example.com/xingchen-agent:版本` 或 `XINGCHEN_AGENT_IMAGE` 指定 OCI 镜像。镜像代理和 GHCR 都不可用时，Docker 安装/更新会依次从 Gitee、GitHub 源码构建镜像；Gitee Git 仓库本身不作为 OCI 镜像仓库。Docker 不可用时可传 `--binary /path/to/xingchen-agent` 使用本机 systemd 服务；未提供二进制时同样按 Gitee、GitHub 顺序拉取源码。可重复传入 `--source-url` 配置私有源码源，并用 `--source-ref` 固定分支或标签。
+内网可用 `--image registry.example.com/xingchen-agent:vX.Y.Z` 或 `XINGCHEN_AGENT_IMAGE` 指定固定版本 OCI 镜像。Docker 镜像不可用时，只有已通过 `--source-url` 或 `XINGCHEN_REPOSITORY_URLS` 明确配置的仓库才参与源码构建。Docker 不可用时可传 `--binary /path/to/xingchen-agent` 使用本机 systemd 服务；正常原生安装优先从总控取得制品，不需要 Go、git、Gitee 或 GitHub。
 
-Linux 原生模式安装后默认启用每日 Agent 自动更新。更新器使用 Release API 的最新稳定版本，下载对应架构压缩包并强制校验 SHA256；下载失败或校验失败时保留当前程序，不会替换成未验证文件。更新前会在 `/var/lib/xingchen-agent/backups` 保留最近 5 份带时间戳的备份，启动失败会自动恢复旧程序。可用 `--no-auto-update` 关闭定时更新。检查和手动执行更新：
+Docker 模式的定时更新同样优先向总控查询最新稳定版本，再把当前内部 Registry 引用切换到对应的固定 `vX.Y.Z` 标签并校验 OCI 版本标签；不会使用 `latest` 判断版本。使用 `image@sha256:...` 时保持摘要不可变且不启用定时更新，切换版本必须由管理员提供新的 digest。
+
+Linux 原生模式安装后默认启用每日 Agent 自动更新。更新器先向总控查询最新稳定版本，下载对应架构压缩包并校验大小和 SHA256；下载失败或校验失败时保留当前程序。更新前会在 `/var/lib/xingchen-agent/backups` 保留最近 5 份带时间戳的备份，启动失败会自动恢复旧程序并验证服务。连续 5 次自动更新失败会暂停 24 小时，手动更新可绕过暂停且不会增加自动失败次数；成功后清零熔断状态。更新互斥依赖 `flock`（通常由 `util-linux` 提供），缺失时会在下载前失败。可用 `--no-auto-update` 关闭定时更新。
 
 ```bash
 systemctl status xingchen-agent-update.timer
@@ -82,7 +84,7 @@ journalctl -u xingchen-agent -n 100 --no-pager
 请用管理员 PowerShell 运行。控制台会根据所选安装源下载脚本，临时注入 Agent 密钥，并在完成后删除脚本和环境变量。安装器会识别 Windows x64/ARM64，从 Release 下载并校验 `xingchen-agent_<版本>_windows_<架构>.zip`：
 
 ```powershell
-$env:XINGCHEN_AGENT_KEY = '<一次性密钥>'
+$env:XINGCHEN_AGENT_KEY = '<Agent密钥>'
 & .\deploy\install-agent.ps1 `
   -ServerUrl 'monitor.example.com' `
   -DeviceId '<设备ID>' `
@@ -111,4 +113,4 @@ Windows 管理命令：`-Action update` 更新到最新版本，`-Action rollbac
 - 轮换密钥：总终端管理员执行“轮换密钥”，旧密钥立即失效，然后在目标机重新运行安装器。
 - 更新 Agent 版本：运行 `/opt/xingchen/agent/agent.sh update`，或用 `./xingchen-agent.sh --version v1.20.6` 安装固定版本。原生更新会下载 Release、校验 SHA256、备份旧程序并在新服务启动失败时自动恢复；只有需要 Docker 采集模式时才添加 `--docker --image ghcr.io/pstarchen/monitor-for-server-agent:v1.20.6`。
 
-安装器传入域名时会优先探测 HTTPS，失败后再探测 HTTP；若最终使用 HTTP，Agent 数据将明文传输，生产环境应尽快配置证书。总控修改“Agent 上报周期”后，已安装 Agent 会在下一次成功上报时自动同步，无需重装。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。
+安装器传入域名时会优先探测 HTTPS；探测失败不会自动降级到远程 HTTP，只有明确传入 `--allow-insecure-http` 才允许明文连接。总控修改“Agent 上报周期”后，已安装 Agent 会在下一次成功上报时自动同步，无需重装。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。

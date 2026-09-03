@@ -10,6 +10,8 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /out/xingchen-agent ./cmd/agent
 
 FROM alpine:3.22 AS artifact
+ARG VERSION=dev
+LABEL org.opencontainers.image.version=$VERSION
 # smartmontools is optional at runtime: the collector reports UNKNOWN when
 # host devices or the required privileges are not exposed to the container.
 RUN apk add --no-cache ca-certificates smartmontools

@@ -5,12 +5,14 @@ param(
     [switch] $Auto,
     [switch] $Build,
     [switch] $SourceBuild,
+    [switch] $Offline,
     [switch] $NoMirror,
     [switch] $NoSourceFallback
 )
 
 $ErrorActionPreference = 'Stop'
 if ($Build -and $SourceBuild) { throw '-Build 与 -SourceBuild 不能同时使用。' }
+if ($Offline -and ($Build -or $SourceBuild -or $Auto)) { throw '-Offline 不能与 -Build、-SourceBuild 或 -Auto 同时使用。' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安装 Docker Engine。' }
 & docker compose version | Out-Null
@@ -39,35 +41,41 @@ try {
         if ($value) { return $value }
         return $DefaultValue
     }
-    if (Test-Path -LiteralPath $envFile -and -not (Select-String -LiteralPath $envFile -Pattern '^COMPOSE_PROJECT_NAME=' -Quiet)) {
-        $legacyDatabase = Read-UpdateSetting 'POSTGRES_DB'
-        $legacyVolume = (& docker volume inspect 'guanlan-monitor_postgres-data' 2>$null)
-        $projectName = if ($legacyDatabase -eq 'guanlan_monitor' -or $legacyVolume) { 'guanlan-monitor' } else { 'xingchen-monitor' }
-        $lines = [System.Collections.Generic.List[string]]::new()
-        [System.IO.File]::ReadAllLines($envFile) | ForEach-Object { [void]$lines.Add($_) }
-        [void]$lines.Add("COMPOSE_PROJECT_NAME=$projectName")
-        [System.IO.File]::WriteAllLines($envFile, $lines, [System.Text.UTF8Encoding]::new($false))
+    function Read-FileSetting([string] $Name) {
+        if (-not (Test-Path -LiteralPath $envFile)) { return '' }
+        $line = Select-String -LiteralPath $envFile -Pattern "^$Name=(.*)$" | Select-Object -First 1
+        if ($line) { return $line.Matches[0].Groups[1].Value.Trim('"') }
+        return ''
     }
-    # Registry mirrors should fail over quickly, while the official registry
-    # keeps a longer window for constrained international links.
-    $pullTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS' '180')
-    $mirrorTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS' '45')
-    $composeTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS' '900')
-    if ($pullTimeoutSeconds -lt 1 -or $mirrorTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
-    $env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
-    $env:COMPOSE_HTTP_TIMEOUT = [string]$composeTimeoutSeconds
-    if ($Auto) {
+    function Set-UpdateSettings([string[]] $Names, [string[]] $Values) {
         if (-not (Test-Path -LiteralPath $envFile)) { throw '总控 .env 不存在，请先完成安装。' }
-        $lines = [System.Collections.Generic.List[string]]::new()
-        $found = $false
-        foreach ($line in [System.IO.File]::ReadAllLines($envFile)) {
-            if ($line.StartsWith('CONTROLLER_AUTO_UPDATE=')) {
-                if (-not $found) { [void] $lines.Add('CONTROLLER_AUTO_UPDATE="true"') }
-                $found = $true
+        if ($Names.Count -eq 0 -or $Names.Count -ne $Values.Count) { throw '环境设置必须成对提供。' }
+        $settings = @{}
+        for ($index = 0; $index -lt $Names.Count; $index++) {
+            $name = $Names[$index]
+            $value = $Values[$index]
+            if ($name -notmatch '^[A-Z][A-Z0-9_]*$' -or $value.Contains("`r") -or $value.Contains("`n") -or $value.Contains('"')) {
+                throw "拒绝写入无效的环境设置：$name"
             }
-            else { [void] $lines.Add($line) }
+            $settings[$name] = $value
         }
-        if (-not $found) { [void] $lines.Add('CONTROLLER_AUTO_UPDATE="true"') }
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $found = @{}
+        foreach ($line in [System.IO.File]::ReadAllLines($envFile)) {
+            $matched = $false
+            foreach ($name in $Names) {
+                if ($line.StartsWith("$name=")) {
+                    if (-not $found.ContainsKey($name)) { [void] $lines.Add("$name=`"$($settings[$name])`"") }
+                    $found[$name] = $true
+                    $matched = $true
+                    break
+                }
+            }
+            if (-not $matched) { [void] $lines.Add($line) }
+        }
+        foreach ($name in $Names) {
+            if (-not $found.ContainsKey($name)) { [void] $lines.Add("$name=`"$($settings[$name])`"") }
+        }
         $temporary = Join-Path $projectRoot ('.env.controller-update.' + [Guid]::NewGuid().ToString('N'))
         try {
             [System.IO.File]::WriteAllLines($temporary, $lines, [System.Text.UTF8Encoding]::new($false))
@@ -76,6 +84,42 @@ try {
         finally {
             if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
         }
+    }
+    function Set-UpdateSetting([string] $Name, [string] $Value) {
+        Set-UpdateSettings @($Name) @($Value)
+    }
+    if (Test-Path -LiteralPath $envFile -and -not (Select-String -LiteralPath $envFile -Pattern '^COMPOSE_PROJECT_NAME=' -Quiet)) {
+        $legacyDatabase = Read-UpdateSetting 'POSTGRES_DB'
+        $legacyVolume = (& docker volume inspect 'guanlan-monitor_postgres-data' 2>$null)
+        $projectName = if ($legacyDatabase -eq 'guanlan_monitor' -or $legacyVolume) { 'guanlan-monitor' } else { 'xingchen-monitor' }
+        Set-UpdateSetting 'COMPOSE_PROJECT_NAME' $projectName
+    }
+    # Registry mirrors should fail over quickly, while the official registry
+    # keeps a longer window for constrained international links.
+    $pullTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS' '180')
+    $mirrorTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS' '45')
+    $composeTimeoutSeconds = [int](Read-UpdateSetting 'XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS' '900')
+    if ($pullTimeoutSeconds -lt 1 -or $mirrorTimeoutSeconds -lt 1 -or $composeTimeoutSeconds -lt 1) { throw '更新超时必须是正整数秒数。' }
+    $minimumFreeBytes = 0L
+    if (-not [long]::TryParse((Read-UpdateSetting 'XINGCHEN_UPDATE_MIN_FREE_BYTES' '1073741824'), [ref]$minimumFreeBytes) -or $minimumFreeBytes -lt 1) {
+        throw 'XINGCHEN_UPDATE_MIN_FREE_BYTES 必须是正整数。'
+    }
+    function Assert-FreeSpace([string] $Path) {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        $drive = (Get-Item -LiteralPath $Path).PSDrive
+        if ($null -eq $drive -or $null -eq $drive.Free) { throw "无法确认 $Path 的可用磁盘空间。" }
+        if ([long]$drive.Free -lt $minimumFreeBytes) {
+            throw "可用磁盘空间不足：$Path 需要至少 $minimumFreeBytes 字节，当前约 $([long]$drive.Free) 字节。"
+        }
+    }
+    Assert-FreeSpace $projectRoot
+    $dockerRoot = ([string](& docker info --format '{{.DockerRootDir}}' 2>$null | Select-Object -First 1)).Trim()
+    if ($LASTEXITCODE -eq 0 -and $dockerRoot -and (Test-Path -LiteralPath $dockerRoot)) { Assert-FreeSpace $dockerRoot }
+    $env:DOCKER_CLIENT_TIMEOUT = [string]$pullTimeoutSeconds
+    $env:COMPOSE_HTTP_TIMEOUT = [string]$composeTimeoutSeconds
+    if ($Auto) {
+        if (-not (Test-Path -LiteralPath $envFile)) { throw '总控 .env 不存在，请先完成安装。' }
+        Set-UpdateSetting 'CONTROLLER_AUTO_UPDATE' 'true'
         foreach ($taskName in @('XingchenControllerUpdate', 'GuanlanControllerUpdate')) {
             if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
                 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
@@ -87,10 +131,11 @@ try {
         exit 0
     }
     $services = @('setup', 'server', 'web')
-    $imageNames = @(
-        'XINGCHEN_SETUP_IMAGE=ghcr.io/pstarchen/monitor-for-server-setup:latest',
-        'XINGCHEN_SERVER_IMAGE=ghcr.io/pstarchen/monitor-for-server-server:latest',
-        'XINGCHEN_WEB_IMAGE=ghcr.io/pstarchen/monitor-for-server-web:latest'
+    $imageKeys = @('XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE')
+    $imageDefaults = @(
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.11',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.11',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.11'
     )
     $sourceContexts = @('setup', 'server', 'web')
     $targetVersion = Read-UpdateSetting 'XINGCHEN_TARGET_VERSION'
@@ -102,15 +147,56 @@ try {
     else {
         $sourceRef = Read-UpdateSetting 'XINGCHEN_SOURCE_REF' 'main'
     }
+    if ($Offline -and -not $targetVersion) { throw '离线模式要求通过 XINGCHEN_TARGET_VERSION 指定稳定版本。' }
     if ($sourceRef -notmatch '^[a-zA-Z0-9._/-]+$' -or $sourceRef.StartsWith('-') -or $sourceRef.Contains('..')) {
         throw '总控源码 Git ref 无效。'
     }
-    $sourceRepositories = @((Read-UpdateSetting 'XINGCHEN_SOURCE_REPOSITORIES' 'https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git').Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $sourceRepositories = @((Read-UpdateSetting 'XINGCHEN_SOURCE_REPOSITORIES' 'https://gitee.com/starchen520/monitor-for-server.git').Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($sourceRepositories.Count -eq 0) { throw '总控源码仓库地址不能为空。' }
     $resolvedImages = @()
-    foreach ($entry in $imageNames) {
-        $pair = $entry.Split('=', 2)
-        $resolvedImages += (Read-UpdateSetting $pair[0] $pair[1])
+    for ($index = 0; $index -lt $imageKeys.Count; $index++) {
+        $resolvedImages += (Read-UpdateSetting $imageKeys[$index] $imageDefaults[$index])
+    }
+
+    function ConvertTo-VersionedReference([string] $Image) {
+        if (-not $targetVersion -or $Image.Contains('@')) { return $Image }
+        $slash = $Image.LastIndexOf('/')
+        $colon = $Image.LastIndexOf(':')
+        if ($colon -gt $slash) { return $Image.Substring(0, $colon) + ":$targetVersion" }
+        return "${Image}:$targetVersion"
+    }
+    $candidateImages = @($resolvedImages | ForEach-Object { ConvertTo-VersionedReference $_ })
+    $dependencyImages = @(
+        (Read-UpdateSetting 'XINGCHEN_POSTGRES_IMAGE' 'postgres:16-alpine'),
+        (Read-UpdateSetting 'XINGCHEN_REDIS_IMAGE' 'redis:7.4-alpine')
+    )
+
+    function Get-RunningServiceVersion([string] $Service) {
+        $containerId = ([string] (& docker compose @composeArgs ps -q $Service 2>$null | Select-Object -First 1)).Trim()
+        if (-not $containerId) { return $null }
+        $actual = ([string] (& docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' $containerId 2>$null | Select-Object -First 1)).Trim().TrimStart('v')
+        if ($actual -notmatch '^\d+\.\d+\.\d+$') { return $null }
+        return "v$actual"
+    }
+
+    if ($targetVersion) {
+        $runningVersion = Get-RunningServiceVersion 'server'
+        if ($runningVersion -and ([Version] $targetVersion.TrimStart('v')) -lt ([Version] $runningVersion.TrimStart('v'))) {
+            throw "拒绝将总控从 $runningVersion 降级到 $targetVersion。"
+        }
+        if ($Apply) {
+            $allCurrent = $true
+            foreach ($service in $services) {
+                if ((Get-RunningServiceVersion $service) -ne $targetVersion) {
+                    $allCurrent = $false
+                    break
+                }
+            }
+            if ($allCurrent) {
+                Write-Host "总控所有组件已是 $targetVersion，无需重复更新。"
+                exit 0
+            }
+        }
     }
 
     function Invoke-DockerPull([string] $Image, [int] $TimeoutSeconds) {
@@ -133,14 +219,10 @@ try {
     }
 
     function Pull-Image([string] $Image) {
-        $sourceImage = $Image
-        if ($targetVersion -and $Image -match '^ghcr\.io/pstarchen/monitor-for-server-(setup|server|web|agent):latest$') {
-            $sourceImage = $Image.Substring(0, $Image.Length - ':latest'.Length) + ":$targetVersion"
-        }
-        if (-not $NoMirror -and $sourceImage.StartsWith('ghcr.io/')) {
-            $suffix = $sourceImage.Substring(7)
+        if (-not $NoMirror -and $Image.StartsWith('ghcr.io/')) {
+            $suffix = $Image.Substring(7)
             $mirrorValue = Read-UpdateSetting 'XINGCHEN_CONTROLLER_IMAGE_MIRRORS'
-            $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @('ghcr.1ms.run', 'ghcr.nju.edu.cn') }
+            $mirrors = if ($mirrorValue) { $mirrorValue.Split(',') } else { @() }
             foreach ($mirror in $mirrors) {
                 $candidate = $mirror.TrimEnd('/') + '/' + $suffix
                 Write-Host "尝试国内镜像源：$candidate"
@@ -150,12 +232,20 @@ try {
                 }
             }
         }
-        Write-Host "尝试官方镜像源：$sourceImage"
-        if (-not (Invoke-DockerPull $sourceImage $pullTimeoutSeconds)) { throw "镜像拉取失败：$sourceImage" }
-        if (-not (Test-ImageVersion $sourceImage)) { throw "镜像版本校验失败：$sourceImage" }
-        if ($sourceImage -ne $Image) {
-            & docker tag $sourceImage $Image
-            if ($LASTEXITCODE -ne 0) { throw "镜像标签写入失败：$Image" }
+        Write-Host "尝试官方镜像源：$Image"
+        if (-not (Invoke-DockerPull $Image $pullTimeoutSeconds)) { throw "镜像拉取失败：$Image" }
+        if (-not (Test-ImageVersion $Image)) { throw "镜像版本校验失败：$Image" }
+    }
+
+    function Prepare-DependencyImages {
+        foreach ($image in $dependencyImages) {
+            & docker image inspect $image *> $null
+            if ($LASTEXITCODE -eq 0) { continue }
+            if ($Offline) { throw "离线基础镜像缺失：$image" }
+            Write-Host "正在准备总控基础镜像：$image"
+            if (-not (Invoke-DockerPull $image $pullTimeoutSeconds)) {
+                throw "总控基础镜像不可用：$image；请配置内部镜像引用或使用完整离线包。"
+            }
         }
     }
 
@@ -164,9 +254,10 @@ try {
     }
 
     function Build-ImagesFromRepositories {
-        foreach ($image in $resolvedImages) {
+        foreach ($image in $candidateImages) {
             if ($image.Contains('@')) { throw "固定摘要镜像无法使用源码构建回退：$image" }
         }
+        $buildVersion = if ($targetVersion) { $targetVersion } else { 'dev' }
         $buildPrefix = "xingchen-controller-source-$PID-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
         foreach ($repository in $sourceRepositories) {
             $temporaryImages = @()
@@ -176,15 +267,15 @@ try {
                 $temporaryImage = "$buildPrefix-$index`:candidate"
                 $temporaryImages += $temporaryImage
                 $context = "${repository}#${sourceRef}:$($sourceContexts[$index])"
-                & docker build --pull --tag $temporaryImage $context
-                if ($LASTEXITCODE -ne 0) { $success = $false; break }
+                & docker build --pull --build-arg "VERSION=$buildVersion" --tag $temporaryImage $context
+                if ($LASTEXITCODE -ne 0 -or -not (Test-ImageVersion $temporaryImage)) { $success = $false; break }
             }
             if ($success) {
-                for ($index = 0; $index -lt $resolvedImages.Count; $index++) {
-                    & docker tag $temporaryImages[$index] $resolvedImages[$index]
+                for ($index = 0; $index -lt $candidateImages.Count; $index++) {
+                    & docker tag $temporaryImages[$index] $candidateImages[$index]
                     if ($LASTEXITCODE -ne 0) {
                         Remove-SourceBuildImages $temporaryImages
-                        throw "源码镜像标签写入失败：$($resolvedImages[$index])"
+                        throw "源码镜像标签写入失败：$($candidateImages[$index])"
                     }
                 }
                 Remove-SourceBuildImages $temporaryImages
@@ -192,19 +283,43 @@ try {
             }
             Remove-SourceBuildImages $temporaryImages
         }
-        throw 'GitHub 与 Gitee 总控源码均无法完成 Docker 构建。'
+        throw '已配置的总控源码仓库均无法完成 Docker 构建。'
     }
 
-    if ($Build) {
+    $previousImages = @()
+    $previousTargetSetting = Read-FileSetting 'XINGCHEN_TARGET_VERSION'
+    if ($Apply) {
+        for ($index = 0; $index -lt $services.Count; $index++) {
+            $containerId = ([string] (& docker compose @composeArgs ps -q $services[$index] 2>$null | Select-Object -First 1)).Trim()
+            $imageId = if ($containerId) { ([string] (& docker inspect --format '{{.Image}}' $containerId 2>$null | Select-Object -First 1)).Trim() } else { '' }
+            if (-not $imageId) { $imageId = ([string] (& docker image inspect --format '{{.Id}}' $resolvedImages[$index] 2>$null | Select-Object -First 1)).Trim() }
+            if (-not $imageId) { throw "无法记录 $($services[$index]) 的旧镜像，更新未开始。" }
+            $previousImages += $imageId
+        }
+    }
+
+    if ($Offline) {
+        foreach ($image in $candidateImages) {
+            & docker image inspect $image | Out-Null
+            if ($LASTEXITCODE -ne 0 -or -not (Test-ImageVersion $image)) {
+                throw "离线镜像缺失或版本不匹配：$image"
+            }
+        }
+        Prepare-DependencyImages
+    }
+    elseif ($Build) {
+        Prepare-DependencyImages
         & docker compose @composeArgs build --pull $services
         if ($LASTEXITCODE -ne 0) { throw '总控镜像构建失败。' }
     }
     elseif ($SourceBuild) {
+        Prepare-DependencyImages
         Build-ImagesFromRepositories
     }
     else {
+        Prepare-DependencyImages
         $pullFailed = $false
-        foreach ($image in $resolvedImages) {
+        foreach ($image in $candidateImages) {
             try { Pull-Image $image }
             catch {
                 $pullFailed = $true
@@ -214,13 +329,54 @@ try {
         }
         if ($pullFailed) {
             if ($NoSourceFallback) { throw '总控镜像拉取失败，且源码构建回退已关闭。' }
-            Write-Host '所有总控镜像源均不可用，开始从 Gitee/GitHub 源码构建 Docker 镜像。'
+            Write-Host '所有总控镜像源均不可用，开始从已配置的源码仓库构建 Docker 镜像。'
             Build-ImagesFromRepositories
         }
     }
+    if ($targetVersion) {
+        foreach ($image in $candidateImages) {
+            if (-not (Test-ImageVersion $image)) { throw "准备后的镜像版本校验失败：$image" }
+        }
+    }
     if ($Apply) {
+        $settingNames = @($imageKeys)
+        $settingValues = @($candidateImages)
+        if ($targetVersion) {
+            $settingNames += 'XINGCHEN_TARGET_VERSION'
+            $settingValues += $targetVersion
+        }
+        Set-UpdateSettings $settingNames $settingValues
+        for ($index = 0; $index -lt $imageKeys.Count; $index++) {
+            [Environment]::SetEnvironmentVariable($imageKeys[$index], $candidateImages[$index], 'Process')
+        }
+        if ($targetVersion) {
+            $env:XINGCHEN_TARGET_VERSION = $targetVersion
+        }
         & docker compose @composeArgs up -d --remove-orphans --wait --wait-timeout 300 $services
-        if ($LASTEXITCODE -ne 0) { throw '总控服务更新失败。' }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning '总控健康检查失败，正在恢复更新前镜像。数据库不会自动回退。'
+            $rollbackFailed = $false
+            $rollbackImages = @()
+            for ($index = 0; $index -lt $resolvedImages.Count; $index++) {
+                $rollbackImage = if ($resolvedImages[$index].Contains('@')) { "xingchen-controller-rollback-$($services[$index]):$PID" } else { $resolvedImages[$index] }
+                $rollbackImages += $rollbackImage
+                & docker tag $previousImages[$index] $rollbackImage
+                if ($LASTEXITCODE -ne 0) { $rollbackFailed = $true }
+            }
+            if (-not $rollbackFailed) {
+                $rollbackNames = @($imageKeys) + @('XINGCHEN_TARGET_VERSION')
+                $rollbackValues = @($rollbackImages) + @($previousTargetSetting)
+                Set-UpdateSettings $rollbackNames $rollbackValues
+                for ($index = 0; $index -lt $imageKeys.Count; $index++) {
+                    [Environment]::SetEnvironmentVariable($imageKeys[$index], $rollbackImages[$index], 'Process')
+                }
+                $env:XINGCHEN_TARGET_VERSION = $previousTargetSetting
+                & docker compose @composeArgs up -d --remove-orphans --wait --wait-timeout 300 $services
+                $rollbackFailed = $LASTEXITCODE -ne 0
+            }
+            if ($rollbackFailed) { throw '总控更新失败，且镜像自动恢复未通过健康检查；不要在未评估迁移兼容性前恢复数据库。' }
+            throw '总控更新失败，旧镜像已恢复；如新版本执行过数据库迁移，请人工确认兼容性。'
+        }
         Write-Host '总控服务已更新并重启。'
     }
     else {

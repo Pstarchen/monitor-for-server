@@ -32,7 +32,37 @@ jobs:
         run: bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/install-agent.sh deploy/install-controller.sh deploy/update-controller.sh && bash deploy/update-controller_test.sh
+        run: bash -n deploy/*.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
+
+      - name: Check PowerShell scripts and generated updater
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem deploy -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) {
+              $failed = $true
+              $errors | ForEach-Object { Write-Error "$($_.Extent.File): $($_.Message)" }
+            }
+          }
+          $tokens = $null
+          $errors = $null
+          $installer = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'deploy/install-agent.ps1'), [ref]$tokens, [ref]$errors)
+          $assignment = $installer.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script'
+          }, $true) | Select-Object -First 1
+          if ($null -eq $assignment) { throw 'Generated Agent updater template was not found.' }
+          $generatedTokens = $null
+          $generatedErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseInput($assignment.Right.Expression.Value, [ref]$generatedTokens, [ref]$generatedErrors) | Out-Null
+          if ($generatedErrors.Count) {
+            $failed = $true
+            $generatedErrors | ForEach-Object { Write-Error "Generated Agent updater: $($_.Message)" }
+          }
+          if ($failed) { exit 1 }
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -117,6 +147,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
@@ -128,6 +160,9 @@ jobs:
       contents: write
       packages: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -138,7 +173,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Verify and promote release images
+      - name: Verify release images
         shell: bash
         run: |
           set -euo pipefail
@@ -156,12 +191,73 @@ jobs:
               sleep 30
             done
           done
+      - name: Wait for Agent release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/agent
+          for attempt in {1..30}; do
+            rm -f dist/agent/*
+            if gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir dist/agent \
+              --pattern 'xingchen-agent_*' --pattern checksums.txt --pattern manifest.json --pattern manifest.json.sha256 >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "${attempt}" -eq 30 ]]; then
+              echo 'Agent release assets were not published in time.' >&2
+              exit 1
+            fi
+            sleep 20
+          done
+          test "$(find dist/agent -maxdepth 1 -type f -name 'xingchen-agent_*' | wc -l)" -eq 4
+          (cd dist/agent && sha256sum -c checksums.txt && sha256sum -c manifest.json.sha256)
+
+      - name: Build offline bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY,,}"
+          mkdir -p dist/offline
+          release_images=()
+          for component in setup server web agent; do
+            release_images+=("${REGISTRY}/${repository}-${component}:${GITHUB_REF_NAME}")
+          done
+          base_images=("postgres:16-alpine" "redis:7.4-alpine")
+          images=("${release_images[@]}" "${base_images[@]}")
+          for arch in amd64 arm64; do
+            for image in "${release_images[@]}"; do
+              docker pull --platform "linux/${arch}" "${image}"
+              actual_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "${image}")"
+              if [[ "${actual_version#v}" != "${GITHUB_REF_NAME#v}" ]]; then
+                echo "Release image version mismatch for ${image}: got ${actual_version:-<empty>}, want ${GITHUB_REF_NAME}" >&2
+                exit 1
+              fi
+            done
+            for image in "${base_images[@]}"; do
+              docker pull --platform "linux/${arch}" "${image}"
+            done
+            archive="dist/controller-images-${GITHUB_REF_NAME}-${arch}.tar"
+            docker save --output "${archive}" "${images[@]}"
+            bash deploy/package-offline-bundle.sh "${GITHUB_REF_NAME}" dist/agent "${archive}" dist/offline "${arch}"
+          done
+
+      - name: Upload offline bundles to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/offline/*.tar.gz dist/offline/*.sha256 --repo "${GITHUB_REPOSITORY}" --clobber
+
+      - name: Promote verified release images
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository="${GITHUB_REPOSITORY,,}"
           for component in setup server web agent; do
             image="${REGISTRY}/${repository}-${component}"
             docker buildx imagetools create --tag "${image}:latest" "${image}:${GITHUB_REF_NAME}"
           done
 
-      - name: Publish GitHub Release
+      - name: Publish complete release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes --title "星辰监控 ${GITHUB_REF_NAME}"
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false

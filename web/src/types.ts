@@ -547,10 +547,20 @@ export interface ControllerUpdateStatus {
   releasePublishedAt?: string
   releaseCached?: boolean
   releaseWarning?: string
+  releaseSource?: string
+  releaseVerification?: string
   checkedAt?: string
   updatedAt?: string
   autoUpdate: boolean
+  autoFailureCount?: number
+  autoPaused?: boolean
+  autoPausedUntil?: string
   nextAutoUpdateAt?: string
+  trigger?: 'manual' | 'automatic'
+  phase?: string
+  rollbackState?: string
+  backupName?: string
+  databaseCompatibility?: string
   services: ControllerServiceStatus[]
 }
 

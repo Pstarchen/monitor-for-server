@@ -4,6 +4,7 @@ param(
     [switch] $Cleanup,
     [switch] $Build,
     [switch] $SourceBuild,
+    [switch] $Offline,
     [switch] $AutoUpdate,
     [switch] $NoMirror,
     [switch] $NoSourceFallback
@@ -13,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 
 if ($Help) {
     @'
-Usage: install-controller.ps1 [-Cleanup] [-Build | -SourceBuild]
+Usage: install-controller.ps1 [-Cleanup] [-Build | -SourceBuild] [-Offline]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -23,6 +24,7 @@ browser guide at /setup.
          PostgreSQL and Redis volumes are preserved.
 -Build builds controller images locally instead of pulling them from GHCR.
 -SourceBuild builds Docker images from Gitee/GitHub source repositories.
+-Offline uses only images already loaded into the local Docker engine.
 -AutoUpdate enables the controller's daily 04:00 automatic update.
 -NoMirror skips mainland-China mirror registries and uses official GHCR.
 -NoSourceFallback does not build from source when all image registries fail.
@@ -32,6 +34,7 @@ browser guide at /setup.
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if ($Build -and $SourceBuild) { throw '-Build 与 -SourceBuild 不能同时使用。' }
+if ($Offline -and ($Build -or $SourceBuild -or $AutoUpdate)) { throw '-Offline 不能与 -Build、-SourceBuild 或 -AutoUpdate 同时使用。' }
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安装 Docker Engine。' }
 & docker compose version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
@@ -65,11 +68,53 @@ try {
     elseif (-not (Select-String -LiteralPath $envFile -Pattern '^POSTGRES_PASSWORD=("[^"]+"|\S+)$' -Quiet)) {
         & $writeBootstrapEnv
     }
+    function Set-InstallerSetting([string] $Name, [string] $Value) {
+        if ($Value.Contains("`r") -or $Value.Contains("`n")) { throw "$Name 不能包含换行符。" }
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $found = $false
+        foreach ($line in [System.IO.File]::ReadAllLines($envFile)) {
+            if ($line.StartsWith("$Name=")) {
+                if (-not $found) { [void] $lines.Add("$Name=`"$Value`"") }
+                $found = $true
+            }
+            else { [void] $lines.Add($line) }
+        }
+        if (-not $found) { [void] $lines.Add("$Name=`"$Value`"") }
+        $temporary = Join-Path $projectRoot ('.env.controller-install.' + [Guid]::NewGuid().ToString('N'))
+        try {
+            [System.IO.File]::WriteAllLines($temporary, $lines, $utf8NoBom)
+            Move-Item -LiteralPath $temporary -Destination $envFile -Force
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        }
+    }
     if (-not (Select-String -LiteralPath $envFile -Pattern '^COMPOSE_PROJECT_NAME=' -Quiet)) {
         $legacyDatabase = Select-String -LiteralPath $envFile -Pattern '^POSTGRES_DB=["'']?(.*?)["'']?$' | Select-Object -First 1
         $legacyVolume = (& docker volume inspect 'guanlan-monitor_postgres-data' 2>$null)
         $projectName = if (($legacyDatabase -and $legacyDatabase.Matches[0].Groups[1].Value -eq 'guanlan_monitor') -or $legacyVolume) { 'guanlan-monitor' } else { 'xingchen-monitor' }
         [System.IO.File]::AppendAllText($envFile, "COMPOSE_PROJECT_NAME=$projectName`r`n", $utf8NoBom)
+    }
+    $installerSettings = @(
+        'XINGCHEN_POSTGRES_IMAGE', 'XINGCHEN_REDIS_IMAGE',
+        'XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE', 'XINGCHEN_AGENT_IMAGE',
+        'XINGCHEN_TARGET_VERSION', 'XINGCHEN_RELEASE_MANIFEST_PATH', 'XINGCHEN_RELEASE_MANIFEST_URLS', 'XINGCHEN_RELEASE_MANIFEST_SHA256',
+        'XINGCHEN_AGENT_RELEASE_BASE_URLS', 'XINGCHEN_AGENT_CACHE_DIR', 'XINGCHEN_AGENT_OFFLINE_DIR',
+        'XINGCHEN_CONTROLLER_ALLOW_GITHUB_API', 'XINGCHEN_CONTROLLER_IMAGE_MIRRORS', 'XINGCHEN_AGENT_IMAGE_MIRRORS',
+        'XINGCHEN_SOURCE_REPOSITORIES', 'XINGCHEN_SOURCE_REF', 'XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS',
+        'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS', 'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS', 'XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS', 'XINGCHEN_UPDATE_MIN_FREE_BYTES'
+    )
+    foreach ($name in $installerSettings) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if (-not [string]::IsNullOrWhiteSpace($value)) { Set-InstallerSetting $name $value }
+    }
+    if ($Offline) {
+        $manifestPath = [Environment]::GetEnvironmentVariable('XINGCHEN_RELEASE_MANIFEST_PATH')
+        $offlineDir = [Environment]::GetEnvironmentVariable('XINGCHEN_AGENT_OFFLINE_DIR')
+        $manifestHostPath = if ($manifestPath -and $manifestPath.StartsWith('/workspace/')) { Join-Path $projectRoot $manifestPath.Substring('/workspace/'.Length).Replace('/', [IO.Path]::DirectorySeparatorChar) } else { $manifestPath }
+        $offlineHostDir = if ($offlineDir -and $offlineDir.StartsWith('/workspace/')) { Join-Path $projectRoot $offlineDir.Substring('/workspace/'.Length).Replace('/', [IO.Path]::DirectorySeparatorChar) } else { $offlineDir }
+        if (-not $manifestHostPath -or -not (Test-Path -LiteralPath $manifestHostPath -PathType Leaf)) { throw "离线 Release manifest 不存在：$manifestPath" }
+        if (-not $offlineHostDir -or -not (Test-Path -LiteralPath $offlineHostDir -PathType Container)) { throw "离线 Agent 制品目录不存在：$offlineDir" }
     }
     & docker compose config --quiet
     if ($LASTEXITCODE -ne 0) { throw 'Compose 配置校验失败。' }
@@ -96,6 +141,7 @@ try {
         Write-Host '正在拉取总控预构建镜像（优先使用国内镜像源）...'
         $updateScript = Join-Path $PSScriptRoot 'update-controller.ps1'
         $updateArgs = @('-Check')
+        if ($Offline) { $updateArgs += '-Offline' }
         if ($SourceBuild) { $updateArgs += '-SourceBuild' }
         if ($NoMirror) { $updateArgs += '-NoMirror' }
         if ($NoSourceFallback) { $updateArgs += '-NoSourceFallback' }

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.20.11
+
+- Agent 安装与更新改为总控同源 manifest/制品优先，覆盖 Linux/Windows amd64/arm64，并加入大小与 SHA256 校验、安全解压、版本降级拒绝、最低 Controller 版本门禁、失败恢复和自动更新熔断；自动更新不跨主版本，Docker 固定 digest 不自动改写。
+- 总控更新支持内部 Registry、内部 HTTPS manifest、last-known-good 缓存和完整离线 bundle；GitHub API 与公共镜像代理默认关闭，源码构建默认仅使用 Gitee。
+- 总控更新在拉取前检查磁盘空间，按固定版本或 OCI digest 暂存镜像，更新前创建数据库备份，健康检查失败时恢复旧镜像（digest 配置使用旧 image ID 的本地回滚别名），并避免同版本重复更新和自动跨主版本。
+- 控制台展示发布来源、校验方式、任务来源、自动失败次数与暂停时间；自动更新连续失败 3 次后暂停 24 小时，手动更新仍可执行。
+- 发布流程先创建 draft Release，只有四个项目镜像、四个平台 Agent 制品、manifest 与两个架构离线包全部通过版本和哈希校验后才公开。
+
 ## v1.20.10
 
 - 移除历史环境变量兼容回退，运行时配置入口统一为 `XINGCHEN_*`。

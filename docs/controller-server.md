@@ -7,7 +7,7 @@
 ## 必备材料
 
 - Docker Engine 24+ 和 Docker Compose v2。
-- 安装器默认先从国内镜像源拉取 `ghcr.io/pstarchen/monitor-for-server-{setup,server,web}:latest`，该标签只在完整版本发布后更新；失败后回退官方 GHCR，镜像仓库均不可用时再依次从 Gitee、GitHub 源码构建。需要强制双源构建时使用 `--source-build`，验证当前目录源码时使用 `--build`。
+- 安装器优先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 或 `XINGCHEN_*_IMAGE` 配置的受信内部 Registry，不内置公共加速器；更新固定 `vX.Y.Z` 或 OCI digest，不用 `latest` 作为已验证版本依据。源码构建默认只使用 Gitee，GitHub 必须显式加入 `XINGCHEN_SOURCE_REPOSITORIES`。需要强制使用配置的源码列表时使用 `--source-build`，验证当前目录源码时使用 `--build`。
 - Docker Compose 会自动拉取 PostgreSQL 16 镜像并创建私有数据卷；数据库、用户和密码由控制端安装器自动生成，端口只在 Compose 内网可见。
 - 一个生产域名及 TLS 证书。公网只暴露 Web 入口，PostgreSQL、Redis 和 Spring Boot 端口保持内网。若先用 IP 初始化，必须显式启用临时 HTTP，完成宝塔反向代理和 HTTPS 后立即关闭。
 - 安装服务需要短暂访问宿主机 Docker socket，以便向导完成后自动重建生产容器；不要把安装端口以外的 Docker API 暴露到公网。
@@ -20,12 +20,11 @@
 
 ## 首次部署
 
-从 GitHub 或 Gitee 任选一个仓库安装：
+目标服务器无法访问 GitHub 时从 Gitee 获取：
 
 ```bash
-git clone https://github.com/Pstarchen/monitor-for-server.git
-# 国内网络也可使用：git clone https://gitee.com/starchen520/monitor-for-server.git
-cd monitor-for-server
+git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
+cd xingchen-monitor
 bash ./deploy/install-controller.sh
 ```
 
@@ -35,7 +34,7 @@ bash ./deploy/install-controller.sh
 2. 设置公网入口、来源、站点名、时区和首个管理员密码。
 3. 提交后页面会自动进入登录页；生产服务就绪前登录按钮会暂时锁定，就绪后即可登录。
 
-管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、GitHub Release 发布说明并应用更新，也可启用每日 04:00 自动更新。Release 检查结果缓存 20 分钟，GitHub 临时不可用时会保留上次成功结果。命令行仍可使用 `deploy/update-controller.sh --check` 检查、`--apply` 手动更新、`--auto` 启用同一自动更新设置。更新器先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 指定的镜像前缀与官方 GHCR，并校验镜像版本标签；全部失败后从 `XINGCHEN_SOURCE_REPOSITORIES` 指定的 Gitee/GitHub 仓库按目标版本标签构建。
+管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、manifest 来源、缓存、校验、失败阶段和镜像回滚结果，也可启用每日 04:00 自动更新。总控优先读取本地或内部 HTTPS manifest，并保存 last-known-good 缓存；GitHub API 默认关闭。连续 3 次自动失败会暂停 24 小时，手动更新不受影响。命令行仍可使用 `deploy/update-controller.sh --check`、`--apply` 和 `--auto`。
 
 如果暂时没有域名，可以先用 `http://<服务器IP>:18080`；HTTPS 和宝塔反代配置完成后，再在系统设置中切换为正式域名。
 
@@ -60,7 +59,7 @@ docker compose --profile host-monitoring ps
 docker compose logs --tail 100 server
 ```
 
-首次启动从 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。Linux 总终端会自动注册为“总控服务器”并显示在“设备管理”中，无需创建设备、复制密钥或另装 Agent。其他节点仍在“设备管理”创建并保存一次性 Agent 密钥。
+首次启动从 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员；已有管理员时不会覆盖密码。Linux 总终端会自动注册为“总控服务器”并显示在“设备管理”中，无需创建设备、复制密钥或另装 Agent。其他节点仍在“设备管理”创建并保存只显示一次的长期 Agent 密钥。
 
 ## 总控宿主机监控
 
@@ -75,11 +74,11 @@ TLS 在 Caddy、Nginx、Traefik、宝塔或云负载均衡器终止，并转发�
 ## 更新与修改信息
 
 1. 先备份 PostgreSQL 和当前 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`。
-2. 拉取新版本时执行 `bash ./deploy/update-controller.sh --apply`，会按镜像代理、GHCR、Gitee 源码、GitHub 源码顺序回退；可用 `--source-build` 强制双源构建，或用 `--build` 构建当前目录源码。
+2. 拉取新版本时执行 `bash ./deploy/update-controller.sh --apply`，会按受信内部镜像、镜像自身地址和已配置源码仓库的顺序处理；可用 `--source-build` 强制源码构建，或用 `--build` 构建当前目录源码。
 3. 执行 `docker compose --profile host-monitoring up -d`，Flyway 会自动运行数据库迁移。
 4. 在“系统设置”修改站点名、入口 URL、采集周期、离线阈值和通知配置；敏感值会加密存储。
 
-更新失败不会删除数据卷，也不会自动启动旧版本镜像。原因是新版本 `server` 可能已经执行前向 Flyway 迁移，直接切回旧应用并不等于回滚数据库，反而可能扩大故障。需要降级时应先确认目标版本的数据库兼容性，并使用升级前备份恢复 PostgreSQL。
+更新失败不会删除数据卷。健康检查失败时更新器会尝试恢复旧应用镜像并再次检查，但不会自动回滚 PostgreSQL；新版本 `server` 可能已经执行前向 Flyway 迁移，因此镜像恢复后仍必须确认数据库兼容性。需要完整降级时，应使用升级前备份恢复 PostgreSQL。
 
 ```powershell
 docker compose exec -T postgres pg_dump -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2)" "$(grep '^POSTGRES_DB=' .env | cut -d= -f2)" > monitor-backup.sql

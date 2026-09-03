@@ -19,7 +19,7 @@ import { brandAssetUrl, loadBranding } from '@/lib/branding'
 import { apiTokenScopeLabel, visibleApiTokenScopeGroups } from '@/lib/api-token-scopes'
 import { createDefaultApiTokenForm, parseServerIds } from '@/lib/api-token-form'
 import { resolveMobileBindingBaseUrl } from '@/lib/mobile-binding'
-import { shortRevision, shouldPollUpdate, updateStateText } from '@/lib/controller-update'
+import { databaseCompatibilityText, releaseSourceText, rollbackStateText, shortRevision, shouldPollUpdate, updatePhaseText, updateStateText, updateTriggerText, verificationText } from '@/lib/controller-update'
 import { canTestPushKit, canValidatePushKit, pushKitForm, pushKitState } from '@/lib/push-kit-settings'
 import { useAuthStore } from '@/stores/auth'
 import type { ApiToken, ControllerServiceStatus, ControllerUpdateStatus, CreatedApiToken, NotificationDelivery, PushKitInstallation, PushKitValidationResult, Settings, WebhookSettings } from '@/types'
@@ -94,7 +94,7 @@ const controllerReleaseUrl = computed(() => {
   if (!value) return ''
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && url.hostname === 'github.com' ? url.toString() : ''
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : ''
   } catch {
     return ''
   }
@@ -421,7 +421,7 @@ function sourceText(source: WebhookSettings['source']) {
 function navState(key: SectionKey) {
   if (key === 'updates') {
     if (!controllerUpdate.value) return ''
-    return controllerUpdate.value.state === 'ERROR' || controllerUpdate.value.updateAvailable ? 'attention' : 'ready'
+    return controllerUpdate.value.state === 'ERROR' || controllerUpdate.value.updateAvailable || controllerUpdate.value.autoPaused ? 'attention' : 'ready'
   }
   if (key === 'pushkit') {
     if (!settings.value) return ''
@@ -838,7 +838,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div>
                     <dt><Download :size="15" />最新稳定版本</dt>
-                    <dd><code :title="controllerUpdate.latestVersion || controllerUpdate.latestRevision">{{ controllerUpdate.latestVersion || shortRevision(controllerUpdate.latestRevision) }}</code><span>{{ controllerUpdate.releaseCached ? '缓存结果' : (controllerUpdate.checkedAt ? 'GitHub Release' : '检查后显示') }}</span></dd>
+                    <dd><code :title="controllerUpdate.latestVersion || controllerUpdate.latestRevision">{{ controllerUpdate.latestVersion || shortRevision(controllerUpdate.latestRevision) }}</code><span>{{ releaseSourceText(controllerUpdate.releaseSource, controllerUpdate.releaseCached) }}</span></dd>
                   </div>
                 </dl>
 
@@ -851,17 +851,29 @@ onBeforeUnmount(() => {
                   <small v-if="controllerUpdate.releaseWarning">{{ controllerUpdate.releaseWarning }}</small>
                 </section>
 
+                <dl class="update-metadata-list">
+                  <div><dt>版本来源</dt><dd>{{ releaseSourceText(controllerUpdate.releaseSource, controllerUpdate.releaseCached) }}</dd></div>
+                  <div><dt>校验状态</dt><dd>{{ verificationText(controllerUpdate.releaseVerification) }}</dd></div>
+                  <div><dt>当前阶段</dt><dd>{{ updatePhaseText(controllerUpdate.phase) }}</dd></div>
+                  <div><dt>镜像回滚</dt><dd>{{ rollbackStateText(controllerUpdate.rollbackState) }}</dd></div>
+                  <div><dt>更新前备份</dt><dd :title="controllerUpdate.backupName">{{ controllerUpdate.backupName || '尚未创建' }}</dd></div>
+                  <div><dt>数据库兼容性</dt><dd>{{ databaseCompatibilityText(controllerUpdate.databaseCompatibility) }}</dd></div>
+                </dl>
+
                 <div class="setting-list">
                   <div class="setting-row update-auto-row">
-                    <div class="setting-copy"><label>每日自动更新</label><p>每天 04:00 按服务时区检查并应用新镜像；失败时保留当前数据卷。</p></div>
-                    <div class="setting-control update-switch"><Clock3 :size="16" /><span>{{ controllerUpdate.autoUpdate ? '已启用' : '已关闭' }}</span><el-switch :model-value="controllerUpdate.autoUpdate" :loading="updateAction === 'auto'" aria-label="每日自动更新" @change="setControllerAutoUpdate" /></div>
+                    <div class="setting-copy"><label>每日自动更新</label><p>每天 04:00 按服务时区检查；连续失败 3 次会暂停 24 小时，手动更新不受影响。</p></div>
+                    <div class="setting-control update-switch"><Clock3 :size="16" /><span>{{ controllerUpdate.autoPaused ? '已暂停' : controllerUpdate.autoUpdate ? '已启用' : '已关闭' }}</span><el-switch :model-value="controllerUpdate.autoUpdate" :loading="updateAction === 'auto'" aria-label="每日自动更新" @change="setControllerAutoUpdate" /></div>
                   </div>
                 </div>
 
                 <dl class="update-time-list">
                   <div><dt>最近检查</dt><dd>{{ formatUpdateTime(controllerUpdate.checkedAt) }}</dd></div>
                   <div><dt>最近更新</dt><dd>{{ formatUpdateTime(controllerUpdate.updatedAt) }}</dd></div>
-                  <div><dt>下次自动更新</dt><dd>{{ controllerUpdate.autoUpdate ? formatUpdateTime(controllerUpdate.nextAutoUpdateAt) : '自动更新未启用' }}</dd></div>
+                  <div><dt>任务来源</dt><dd>{{ updateTriggerText(controllerUpdate.trigger) }}</dd></div>
+                  <div><dt>自动失败次数</dt><dd>{{ controllerUpdate.autoFailureCount || 0 }} / 3</dd></div>
+                  <div v-if="controllerUpdate.autoPaused"><dt>自动更新暂停到</dt><dd>{{ formatUpdateTime(controllerUpdate.autoPausedUntil) }}</dd></div>
+                  <div><dt>实际下次运行</dt><dd>{{ controllerUpdate.autoUpdate ? formatUpdateTime(controllerUpdate.nextAutoUpdateAt) : '自动更新未启用' }}</dd></div>
                 </dl>
 
                 <section class="update-services" aria-labelledby="update-services-title">
@@ -878,7 +890,7 @@ onBeforeUnmount(() => {
 
                 <div v-if="updateError" class="update-inline-error" role="alert">{{ updateError }}</div>
                 <div class="settings-section-actions update-actions">
-                  <p>更新过程不会修改 PostgreSQL 和 Redis 数据卷。</p>
+                  <p>更新前会创建 PostgreSQL 备份；发生数据库迁移后，恢复旧镜像仍需人工确认兼容性。</p>
                   <div>
                     <el-button :loading="updateAction === 'check'" :disabled="shouldPollUpdate(controllerUpdate.state)" @click="checkControllerUpdate"><RefreshCw :size="15" />检查更新</el-button>
                     <el-button type="primary" :loading="updateAction === 'apply'" :disabled="!controllerUpdate.updateAvailable || shouldPollUpdate(controllerUpdate.state)" @click="applyControllerUpdate"><Download :size="15" />立即更新</el-button>

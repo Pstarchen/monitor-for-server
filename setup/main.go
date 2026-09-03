@@ -69,6 +69,7 @@ func main() {
 	updater.recoverStaleState()
 	backup := newControllerBackupService()
 	backup.recoverStaleState()
+	agentReleases := newAgentReleaseService()
 	if len(os.Args) > 1 && os.Args[1] == "update-runner" {
 		if err := updater.runUpdate(); err != nil {
 			log.Fatal(err)
@@ -84,6 +85,7 @@ func main() {
 	mux.HandleFunc("/api/setup/status", service.status)
 	mux.HandleFunc("/api/setup/complete", service.complete)
 	mux.HandleFunc("/api/setup/agent-installer", service.agentInstaller)
+	agentReleases.register(mux)
 	updater.register(mux)
 	backup.register(mux)
 	go updater.runScheduler()
@@ -313,6 +315,25 @@ func writeEnvironment(request setupRequest) error {
 		"CONTROLLER_AUTO_UPDATE=" + dotenvValue(controllerAutoUpdate),
 		"CONTROLLER_BACKUP_AUTO=" + dotenvValue(controllerBackupAuto),
 		"CONTROLLER_BACKUP_RETENTION=" + dotenvValue(controllerBackupRetention),
+	}
+	preservedSettings := []string{
+		"XINGCHEN_POSTGRES_IMAGE", "XINGCHEN_REDIS_IMAGE",
+		"XINGCHEN_SETUP_IMAGE", "XINGCHEN_SERVER_IMAGE", "XINGCHEN_WEB_IMAGE", "XINGCHEN_AGENT_IMAGE",
+		"XINGCHEN_TARGET_VERSION", "XINGCHEN_RELEASE_MANIFEST_PATH", "XINGCHEN_RELEASE_MANIFEST_URLS", "XINGCHEN_RELEASE_MANIFEST_SHA256",
+		"XINGCHEN_AGENT_RELEASE_BASE_URLS", "XINGCHEN_AGENT_CACHE_DIR", "XINGCHEN_AGENT_OFFLINE_DIR",
+		"XINGCHEN_CONTROLLER_ALLOW_GITHUB_API", "XINGCHEN_CONTROLLER_IMAGE_MIRRORS", "XINGCHEN_AGENT_IMAGE_MIRRORS",
+		"XINGCHEN_SOURCE_REPOSITORIES", "XINGCHEN_SOURCE_REF",
+		"XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS", "XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS", "XINGCHEN_UPDATE_MIN_FREE_BYTES",
+		"XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS", "XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS",
+	}
+	for _, name := range preservedSettings {
+		value := configuredEnvironmentValue(name)
+		if value == "" {
+			value = environmentValue(name, "")
+		}
+		if value != "" {
+			lines = append(lines, name+"="+dotenvValue(value))
+		}
 	}
 	content := strings.Join(lines, "\n") + "\n"
 	if existing, err := os.ReadFile(envPath); err == nil {

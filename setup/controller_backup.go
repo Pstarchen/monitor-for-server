@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -206,44 +207,12 @@ func (s *controllerBackupService) currentTime() time.Time {
 
 func (s *controllerBackupService) runCreate() {
 	defer s.finish()
-	if err := os.MkdirAll(controllerBackupDir(), 0700); err != nil {
-		s.fail("备份目录创建失败")
-		return
-	}
 	name := "xingchen-monitor-" + s.currentTime().UTC().Format("20060102T150405Z") + ".sql"
-	path := filepath.Join(controllerBackupDir(), name)
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		s.fail("备份文件创建失败")
-		return
-	}
-	defer file.Close()
-	values, _ := readEnv()
-	database := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_DB", "xingchen_monitor"))
-	user := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_USER", "xingchen"))
-	password := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_PASSWORD", ""))
-	if password == "" {
-		os.Remove(path)
-		s.fail("PostgreSQL 凭据未配置，无法创建备份")
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), controllerBackupCreateTimeout)
 	defer cancel()
-	args := postgresExecArgs("pg_dump", "--clean", "--if-exists", "--no-owner", "--no-privileges", "-U", user, "-d", database)
-	command := execCommandContext(ctx, "docker", args...)
-	command.Env = controllerUpdateEnvironment()
-	command.Stdout = file
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
-		log.Printf("controller backup failed: %v (%d bytes)", err, stderr.Len())
-		os.Remove(path)
+	if _, err := createControllerBackup(ctx, name); err != nil {
+		log.Printf("controller backup failed: %v", err)
 		s.fail("数据库备份失败，请检查 PostgreSQL 与 Docker 状态")
-		return
-	}
-	if err := file.Sync(); err != nil {
-		os.Remove(path)
-		s.fail("数据库备份写入失败")
 		return
 	}
 	state := s.readState()
@@ -258,6 +227,51 @@ func (s *controllerBackupService) runCreate() {
 	if err := writeControllerBackupState(state); err != nil {
 		log.Printf("controller backup state write failed: %v", err)
 	}
+}
+
+func createControllerBackup(ctx context.Context, name string) (string, error) {
+	if !controllerBackupNamePattern.MatchString(name) {
+		return "", errors.New("invalid controller backup name")
+	}
+	if err := os.MkdirAll(controllerBackupDir(), 0700); err != nil {
+		return "", fmt.Errorf("create backup directory: %w", err)
+	}
+	path := filepath.Join(controllerBackupDir(), name)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return "", fmt.Errorf("create backup file: %w", err)
+	}
+	succeeded := false
+	defer func() {
+		_ = file.Close()
+		if !succeeded {
+			_ = os.Remove(path)
+		}
+	}()
+	values, _ := readEnv()
+	database := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_DB", "xingchen_monitor"))
+	user := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_USER", "xingchen"))
+	password := strings.TrimSpace(configuredEnvironmentValueFrom(values, "POSTGRES_PASSWORD", ""))
+	if password == "" {
+		return "", errors.New("PostgreSQL credentials are not configured")
+	}
+	args := postgresExecArgs("pg_dump", "--clean", "--if-exists", "--no-owner", "--no-privileges", "-U", user, "-d", database)
+	command := execCommandContext(ctx, "docker", args...)
+	command.Env = controllerUpdateEnvironment()
+	command.Stdout = file
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
+		return "", fmt.Errorf("pg_dump failed (%d stderr bytes): %w", stderr.Len(), err)
+	}
+	if err := file.Sync(); err != nil {
+		return "", fmt.Errorf("sync backup: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return "", fmt.Errorf("close backup: %w", err)
+	}
+	succeeded = true
+	return path, nil
 }
 
 func (s *controllerBackupService) runRestore(name string) {

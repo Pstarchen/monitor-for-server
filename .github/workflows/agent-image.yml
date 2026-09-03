@@ -115,12 +115,19 @@ jobs:
           build linux amd64 tar.gz
           build linux arm64 tar.gz
           build windows amd64 zip
+          build windows arm64 zip
           (cd dist && sha256sum xingchen-agent_* > checksums.txt)
+
+      - name: Generate release manifest
+        working-directory: setup
+        run: |
+          go run ./cmd/release-manifest -version "${GITHUB_REF_NAME}" -assets ../dist -output ../dist/manifest.json -minimum-controller v1.20.0
+          (cd ../dist && sha256sum manifest.json > manifest.json.sha256)
 
       - name: Publish Agent Release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes --title "星辰监控 ${GITHUB_REF_NAME}"
-          gh release upload "${GITHUB_REF_NAME}" dist/xingchen-agent_* dist/checksums.txt --repo "${GITHUB_REPOSITORY}" --clobber
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft --generate-notes --title "星辰监控 ${GITHUB_REF_NAME}"
+          gh release upload "${GITHUB_REF_NAME}" dist/xingchen-agent_* dist/checksums.txt dist/manifest.json dist/manifest.json.sha256 --repo "${GITHUB_REPOSITORY}" --clobber

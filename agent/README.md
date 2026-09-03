@@ -2,9 +2,9 @@
 
 Agent 默认读取当前目录的 `agent.json`，也可通过 `-config` 或 `XINGCHEN_AGENT_CONFIG` 指定配置文件。生产环境必须使用 HTTPS；只有本机开发地址会默认允许 HTTP。
 
-Linux 安装器默认从 GitHub Release 下载 `linux/amd64` 或 `linux/arm64` 预编译程序，并在安装前校验 `checksums.txt`；安装到 `/usr/local/bin/xingchen-agent` 后由 `xingchen-agent.service` 管理。GitHub 暂时不可用时才回退到 Gitee/GitHub 源码构建。需要容器隔离或宿主机 Docker 指标时，可显式添加 `--docker` 使用 GHCR 镜像。
+Linux 安装器默认向总控同域 API 查询 manifest，并下载 `linux/amd64` 或 `linux/arm64` 预编译程序；安装前同时校验清单中的文件大小和 SHA256，安装到 `/usr/local/bin/xingchen-agent` 后由 `xingchen-agent.service` 管理。目标机无需访问 GitHub/GHCR；外部 HTTPS 制品源、GitHub API、源码仓库和 Docker 镜像只在管理员显式配置时使用。需要容器隔离或宿主机 Docker 指标时，可显式添加 `--docker` 并将 `--image` 指向受信内部 Registry。
 
-安装器命令兼容 Nezha 式环境变量入口：`XINGCHEN_SERVER`、`XINGCHEN_DEVICE_ID`、`XINGCHEN_AGENT_KEY`。安装完成后，`/opt/xingchen/agent/agent.sh update` 会下载最新 Release，更新前在 `/var/lib/xingchen-agent/backups` 保留旧程序；`list-versions` 和 `rollback v1.20.4` 可查看及回退已发布版本。已安装的旧版 Agent 会继续使用原路径，确保升级过程不中断。
+安装器命令兼容 Nezha 式环境变量入口：`XINGCHEN_SERVER`、`XINGCHEN_DEVICE_ID`、`XINGCHEN_AGENT_KEY`。安装完成后，`/opt/xingchen/agent/agent.sh update` 会从总控获取最新稳定版本，更新前在 `/var/lib/xingchen-agent/backups` 保留旧程序；自动更新不会跨主版本，连续失败会触发 24 小时熔断，手动更新和 `rollback v1.20.4` 仍可执行。总控会按 manifest 的 `minimumCompatibleControllerVersion` 拒绝下发不兼容的 Agent。已安装的旧版 Agent 会继续使用原路径，确保升级过程不中断。
 
 ```powershell
 go build -o bin/xingchen-agent.exe ./cmd/agent

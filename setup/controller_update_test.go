@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -102,6 +104,22 @@ func TestControllerVersionComparison(t *testing.T) {
 	}
 }
 
+func TestAutomaticControllerUpdateCompatibility(t *testing.T) {
+	for _, test := range []struct {
+		current string
+		target  string
+		want    bool
+	}{
+		{current: "v1.20.10", target: "v1.20.11", want: true},
+		{current: "v1.20.11", target: "v2.0.0", want: false},
+		{current: "main", target: "v1.20.11", want: false},
+	} {
+		if got := controllerVersionsShareMajor(test.current, test.target); got != test.want {
+			t.Fatalf("controllerVersionsShareMajor(%q, %q) = %t, want %t", test.current, test.target, got, test.want)
+		}
+	}
+}
+
 func TestLatestReleaseUsesFreshCache(t *testing.T) {
 	now := time.Date(2026, 9, 2, 8, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -145,6 +163,29 @@ func TestLatestReleaseFallsBackToStaleCache(t *testing.T) {
 	}
 }
 
+func TestLatestControllerReleaseUsesOfflineManifestWithoutGitHub(t *testing.T) {
+	root := t.TempDir()
+	manifestPath := filepath.Join(root, "manifest.json")
+	writeTestManifest(t, manifestPath, testAgentAsset("linux", "amd64", "agent.tar.gz", []byte("agent")))
+	service := &controllerUpdateService{
+		now: time.Now,
+		releases: &agentReleaseService{
+			client:               http.DefaultClient,
+			manifestPath:         manifestPath,
+			manifestPathRequired: true,
+			offlineDir:           filepath.Join(root, "offline"),
+			cacheDir:             filepath.Join(root, "cache"),
+		},
+	}
+	release, cached, warning, err := service.latestRelease(context.Background(), controllerUpdateState{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached || warning != "" || release.TagName != "v1.20.11" || release.Source != "local" || release.Verification != "sha256" {
+		t.Fatalf("offline controller release = %+v, cached=%t warning=%q", release, cached, warning)
+	}
+}
+
 func TestRefreshReleaseStateMapsTaggedRevisionWithoutDowngrade(t *testing.T) {
 	revision := "5796b4696d138823918e087d68d9096c930cdc5b"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -177,6 +218,46 @@ func TestRefreshReleaseStateMapsTaggedRevisionWithoutDowngrade(t *testing.T) {
 	}
 	if state.UpdateAvailable {
 		t.Fatal("an older GitHub Release was treated as an available update")
+	}
+}
+
+func TestGitHubJSONRejectsRedirectToDifferentHost(t *testing.T) {
+	var untrustedRequests atomic.Int32
+	untrusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		untrustedRequests.Add(1)
+		_ = json.NewEncoder(w).Encode(controllerRelease{TagName: "v1.20.11"})
+	}))
+	defer untrusted.Close()
+	trusted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		http.Redirect(w, request, untrusted.URL+"/release", http.StatusFound)
+	}))
+	defer trusted.Close()
+
+	service := &controllerUpdateService{client: trusted.Client(), apiBase: trusted.URL}
+	var release controllerRelease
+	err := service.githubJSON(context.Background(), "/releases/latest", &release)
+	if err == nil || !strings.Contains(err.Error(), "outside the configured origin") {
+		t.Fatalf("cross-host redirect error = %v", err)
+	}
+	if untrustedRequests.Load() != 0 {
+		t.Fatalf("cross-host redirect reached untrusted server %d times", untrustedRequests.Load())
+	}
+}
+
+func TestGitHubJSONRejectsHTTPSDowngrade(t *testing.T) {
+	var trustedURL string
+	trusted := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		downgraded := "http://" + strings.TrimPrefix(trustedURL, "https://") + "/release"
+		http.Redirect(w, request, downgraded, http.StatusFound)
+	}))
+	defer trusted.Close()
+	trustedURL = trusted.URL
+
+	service := &controllerUpdateService{client: trusted.Client(), apiBase: trusted.URL}
+	var release controllerRelease
+	err := service.githubJSON(context.Background(), "/releases/latest", &release)
+	if err == nil || !strings.Contains(err.Error(), "outside the configured origin") {
+		t.Fatalf("HTTPS downgrade redirect error = %v", err)
 	}
 }
 
@@ -230,6 +311,125 @@ func TestNextAutoUpdateUsesConfiguredLocalTime(t *testing.T) {
 	next := service.nextAutoUpdate()
 	if got := next.Format("2006-01-02 15:04 MST"); got != "2026-08-22 04:00 CST" {
 		t.Fatalf("nextAutoUpdate() = %q", got)
+	}
+}
+
+func TestManualUpdateDoesNotAffectAutomaticFailureState(t *testing.T) {
+	now := time.Date(2026, 9, 4, 4, 15, 0, 0, time.UTC)
+	service := &controllerUpdateService{now: func() time.Time { return now }}
+	state := controllerUpdateState{Trigger: "manual", AutoFailureCount: 2}
+
+	service.recordAutomaticFailure(&state)
+
+	if state.AutoFailureCount != 2 || state.AutoPausedUntil != "" {
+		t.Fatalf("manual failure changed automatic breaker state: %+v", state)
+	}
+}
+
+func TestPrepareManualUpdateDoesNotConsumeAutomaticSchedule(t *testing.T) {
+	service := &controllerUpdateService{now: func() time.Time {
+		return time.Date(2026, 9, 4, 4, 15, 0, 0, time.UTC)
+	}}
+	state := controllerUpdateState{LastAutoRunDate: "2026-09-03"}
+
+	service.prepareUpdateState(&state, false)
+
+	if state.Trigger != "manual" || state.LastAutoRunDate != "2026-09-03" {
+		t.Fatalf("manual update state = %+v", state)
+	}
+}
+
+func TestAutomaticRunnerStartFailureOpensBreaker(t *testing.T) {
+	originalWorkspace, originalStatePath := workspace, controllerUpdateStatePath
+	workspace = t.TempDir()
+	controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+	t.Cleanup(func() { workspace, controllerUpdateStatePath = originalWorkspace, originalStatePath })
+	now := time.Date(2026, 9, 4, 4, 15, 0, 0, time.UTC)
+	state := controllerUpdateState{
+		State:            "UPDATING",
+		StartedAt:        now.Format(time.RFC3339),
+		Trigger:          "automatic",
+		AutoFailureCount: controllerAutoFailureLimit - 1,
+		Services:         []controllerServiceStatus{},
+	}
+	if err := writeControllerUpdateState(state); err != nil {
+		t.Fatal(err)
+	}
+	service := &controllerUpdateService{
+		running:     true,
+		now:         func() time.Time { return now },
+		startRunner: func() ([]byte, error) { return nil, errors.New("docker unavailable") },
+		waitRunner:  func() bool { return false },
+	}
+
+	service.launchUpdateRunner()
+
+	failed := service.readState()
+	if failed.State != "ERROR" || failed.AutoFailureCount != controllerAutoFailureLimit || !failed.AutoPaused {
+		t.Fatalf("runner start failure state = %+v", failed)
+	}
+}
+
+func TestAutomaticFailuresPauseAndSuccessResets(t *testing.T) {
+	now := time.Date(2026, 9, 4, 4, 15, 0, 0, time.UTC)
+	service := &controllerUpdateService{now: func() time.Time { return now }}
+	state := controllerUpdateState{Trigger: "automatic"}
+
+	for range controllerAutoFailureLimit {
+		service.recordAutomaticFailure(&state)
+	}
+	if state.AutoFailureCount != controllerAutoFailureLimit || !state.AutoPaused {
+		t.Fatalf("automatic breaker did not open: %+v", state)
+	}
+	pausedUntil, ok := parseControllerUpdateTime(state.AutoPausedUntil)
+	if !ok || !pausedUntil.Equal(now.Add(controllerAutoPauseDuration)) {
+		t.Fatalf("autoPausedUntil = %q, want %s", state.AutoPausedUntil, now.Add(controllerAutoPauseDuration))
+	}
+
+	service.resetAutomaticFailures(&state)
+	if state.AutoFailureCount != 0 || state.AutoPaused || state.AutoPausedUntil != "" {
+		t.Fatalf("successful update did not reset automatic breaker: %+v", state)
+	}
+}
+
+func TestNextAutoUpdateHonorsPauseWindow(t *testing.T) {
+	originalEnvPath := envPath
+	envPath = filepath.Join(t.TempDir(), ".env")
+	t.Cleanup(func() { envPath = originalEnvPath })
+	if err := os.WriteFile(envPath, []byte("APP_TIMEZONE=Asia/Shanghai\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 4, 20, 15, 0, 0, time.UTC)
+	service := &controllerUpdateService{now: func() time.Time { return now }}
+	state := controllerUpdateState{AutoPausedUntil: now.Add(controllerAutoPauseDuration).Format(time.RFC3339)}
+
+	next := service.nextAutoUpdateForState(state)
+	if got := next.Format("2006-01-02 15:04 MST"); got != "2026-09-06 04:15 CST" {
+		t.Fatalf("paused nextAutoUpdate = %q", got)
+	}
+}
+
+func TestRecoverStaleAutomaticUpdateRecordsFailure(t *testing.T) {
+	originalWorkspace, originalStatePath := workspace, controllerUpdateStatePath
+	workspace = t.TempDir()
+	controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+	t.Cleanup(func() { workspace, controllerUpdateStatePath = originalWorkspace, originalStatePath })
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	state := controllerUpdateState{
+		State:     "UPDATING",
+		StartedAt: now.Add(-controllerUpdateApplyStaleAfter - time.Minute).Format(time.RFC3339),
+		Trigger:   "automatic",
+		Services:  []controllerServiceStatus{},
+	}
+	if err := writeControllerUpdateState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	service := &controllerUpdateService{now: func() time.Time { return now }}
+	service.recoverStaleState()
+	recovered := service.readState()
+	if recovered.State != "ERROR" || recovered.AutoFailureCount != 1 {
+		t.Fatalf("recovered automatic update = %+v", recovered)
 	}
 }
 
