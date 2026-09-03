@@ -133,9 +133,9 @@ try {
     $services = @('setup', 'server', 'web')
     $imageKeys = @('XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE')
     $imageDefaults = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.12',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.12',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.12'
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.13',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.13',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.13'
     )
     $sourceContexts = @('setup', 'server', 'web')
     $targetVersion = Read-UpdateSetting 'XINGCHEN_TARGET_VERSION'
