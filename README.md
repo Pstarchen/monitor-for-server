@@ -2,6 +2,15 @@
 
 星辰监控是一套私有化部署的服务器监控系统。本仓库包含 Go Agent、Spring Boot 服务端、Vue 3 Web 控制台以及 Docker 部署配置，不包含鸿蒙 APP。
 
+## 配套 HarmonyOS 客户端
+
+配套客户端「星辰云巡」可在 HarmonyOS 设备上查看服务器实时指标、历史趋势、设备诊断、服务可用性和告警动态。部署本项目后，可在 Web 控制台创建 API Token，通过绑定二维码或手动输入地址与 Token 连接客户端。
+
+- [前往华为应用市场安装星辰云巡](https://appgallery.huawei.com/app/detail?id=cn.xciy.xcyx&channelId=SHARE&source=appshare)
+- [查看星辰云巡开源仓库](https://github.com/Pstarchen/xingchenyunxun)
+
+建议从只读权限开始，只授予客户端实际需要的 scope；生产环境应使用 HTTPS。
+
 ## 能力范围
 
 - Linux/Windows Agent 采集 CPU、内存、磁盘、网络、进程、监听端口、温度和自定义服务状态；支持额外指定关键进程，即使其不在资源排名前列也会持续保留，也可显式采集带命令行的完整进程清单；Linux 可选读取 Docker socket 展示容器资源，并在具备 `smartctl` 与设备权限时采集磁盘 SMART/NVMe 健康。
