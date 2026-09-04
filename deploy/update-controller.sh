@@ -524,18 +524,20 @@ image_value() {
 
 image_keys=(XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE)
 source_images=(
-  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16)"
-  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.16)"
-  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.16)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.17)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.17)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.17)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   image_keys+=(XINGCHEN_AGENT_IMAGE)
-  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17)")
 fi
-dependency_images=(
+dependency_image_keys=(XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE)
+dependency_source_images=(
   "$(image_value XINGCHEN_POSTGRES_IMAGE postgres:16-alpine)"
   "$(image_value XINGCHEN_REDIS_IMAGE redis:7.4-alpine)"
 )
+dependency_images=("${dependency_source_images[@]}")
 
 verify_image_version() {
   local image="$1" actual
@@ -561,6 +563,28 @@ versioned_reference() {
   fi
 }
 
+managed_dependency_reference() {
+  local image="$1" leaf repository
+  if [[ -z "${target_version}" || "${image}" == *@* || "${image}" != */* ]]; then
+    printf '%s' "${image}"
+    return
+  fi
+  leaf="${image##*/}"
+  [[ "${leaf}" == *:* ]] || {
+    printf '%s' "${image}"
+    return
+  }
+  repository="${leaf%:*}"
+  case "${repository}" in
+    monitor-for-server-postgres|monitor-for-server-redis)
+      printf '%s:%s' "${image%:*}" "${target_version}"
+      ;;
+    *)
+      printf '%s' "${image}"
+      ;;
+  esac
+}
+
 candidate_images=()
 if [[ -n "${offline_bundle}" ]]; then
   candidate_images=(
@@ -575,6 +599,9 @@ if [[ -n "${offline_bundle}" ]]; then
 else
   for source_image in "${source_images[@]}"; do
     candidate_images+=("$(versioned_reference "${source_image}")")
+  done
+  for index in "${!dependency_source_images[@]}"; do
+    dependency_images[index]="$(managed_dependency_reference "${dependency_source_images[index]}")"
   done
 fi
 
@@ -648,7 +675,7 @@ running_service_version() {
 
 guard_target_version() {
   [[ -n "${target_version}" ]] || return 0
-  local current_version service service_version all_current=true
+  local current_version service service_version index all_current=true
   current_version="$(running_service_version server || true)"
   if [[ -n "${current_version}" ]] && version_less "${target_version}" "${current_version}"; then
     echo "拒绝将总控从 ${current_version} 降级到 ${target_version}。" >&2
@@ -662,6 +689,14 @@ guard_target_version() {
       break
     fi
   done
+  if [[ "${all_current}" == true ]]; then
+    for index in "${!dependency_source_images[@]}"; do
+      if [[ "${dependency_source_images[index]}" != "${dependency_images[index]}" ]]; then
+        all_current=false
+        break
+      fi
+    done
+  fi
   if [[ "${all_current}" == true ]]; then
     echo "总控所有组件已是 ${target_version}，无需重复更新。"
     exit 0
@@ -1388,13 +1423,14 @@ snapshot_previous_images() {
 persist_images() {
   local include_target="$1" target_setting="$2" index key image
   shift 2
+  local keys=("${image_keys[@]}" "${dependency_image_keys[@]}")
   local images=("$@") settings=()
-  if ((${#images[@]} != ${#image_keys[@]})); then
+  if ((${#images[@]} != ${#keys[@]})); then
     echo "内部错误：镜像设置数量不匹配。" >&2
     return 1
   fi
-  for ((index = 0; index < ${#image_keys[@]}; index++)); do
-    key="${image_keys[index]}"
+  for ((index = 0; index < ${#keys[@]}; index++)); do
+    key="${keys[index]}"
     image="${images[index]}"
     settings+=("${key}" "${image}")
   done
@@ -1402,8 +1438,8 @@ persist_images() {
     settings+=(XINGCHEN_TARGET_VERSION "${target_setting}")
   fi
   set_env_values "${settings[@]}"
-  for ((index = 0; index < ${#image_keys[@]}; index++)); do
-    key="${image_keys[index]}"
+  for ((index = 0; index < ${#keys[@]}; index++)); do
+    key="${keys[index]}"
     image="${images[index]}"
     printf -v "${key}" '%s' "${image}"
     export "${key}"
@@ -1441,7 +1477,7 @@ restore_previous_images() {
     fi
   done
   [[ "${failed}" == false ]] || return 1
-  persist_images true "${previous_target_setting}" "${rollback_images[@]}"
+  persist_images true "${previous_target_setting}" "${rollback_images[@]}" "${dependency_source_images[@]}"
   compose_apply
 }
 
@@ -1507,9 +1543,9 @@ if [[ "${mode}" == check ]]; then
 fi
 
 if [[ -n "${target_version}" ]]; then
-  persist_images true "${target_version}" "${candidate_images[@]}"
+  persist_images true "${target_version}" "${candidate_images[@]}" "${dependency_images[@]}"
 else
-  persist_images false "" "${candidate_images[@]}"
+  persist_images false "" "${candidate_images[@]}" "${dependency_images[@]}"
 fi
 
 if ! compose_apply; then

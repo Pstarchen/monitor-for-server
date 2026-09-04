@@ -75,7 +75,7 @@ grep -F 'internal 网络模式下预编译 Agent Release 不可用，拒绝源�
   release_manifest_urls=''
   release_base_urls=''
   repository_urls=()
-  agent_image=ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16
+  agent_image=ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17
   XINGCHEN_AGENT_IMAGE_MIRRORS=''
   agent_mode=native
   validate_network_configuration
@@ -260,7 +260,7 @@ elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
   [[ "${TEST_CONTAINER_EXISTS:-0}" == "1" ]]
 elif [[ "${1:-}" == "image" && "${2:-}" == "inspect" && "${3:-}" == "--format" ]]; then
   if [[ "${4:-}" == *'org.opencontainers.image.version'* ]]; then
-    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.16}"
+    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.17}"
   else
     printf 'new-agent-image\n'
   fi
@@ -438,8 +438,8 @@ run_installer_stdin() {
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16' "${log_file}" >/dev/null
-grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
 grep -F 'docker run -d --name xingchen-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
@@ -528,8 +528,8 @@ TEST_FAIL_GITEE_BUILD=1
 TEST_REPOSITORY_URLS='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git'
 TEST_ALLOW_GITEE=true
 run_installer 1
-grep -F 'docker build --pull --build-arg VERSION=v1.20.16 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16 https://gitee.com/starchen520/monitor-for-server.git#v1.20.16:agent' "${log_file}" >/dev/null
-grep -F 'docker build --pull --build-arg VERSION=v1.20.16 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16 https://github.com/Pstarchen/monitor-for-server.git#v1.20.16:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.17 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17 https://gitee.com/starchen520/monitor-for-server.git#v1.20.17:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.17 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17 https://github.com/Pstarchen/monitor-for-server.git#v1.20.17:agent' "${log_file}" >/dev/null
 TEST_FAIL_AGENT_PULLS=0
 TEST_FAIL_GITEE_BUILD=0
 TEST_REPOSITORY_URLS=''
@@ -637,7 +637,7 @@ fi
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1 --binary "${binary_path}"
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
@@ -652,7 +652,7 @@ grep -F '"allow_file_operations": true' "${config_file}" >/dev/null
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer_stdin 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 
 : > "${log_file}"
@@ -845,8 +845,8 @@ run_as_root grep -F 'NETWORK_MODE=offline' "${temp_dir}/manager/install.env" >/d
 run_as_root grep -F "network_mode='offline'" "${temp_dir}/manager/update-agent.sh" >/dev/null
 
 : > "${log_file}"
-env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_AGENT_IMAGE_VERSION=v1.20.16" \
-  bash "${temp_dir}/manager/update-agent.sh" update v1.20.16
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_AGENT_IMAGE_VERSION=v1.20.17" \
+  bash "${temp_dir}/manager/update-agent.sh" update v1.20.17
 if grep -Eq '^(curl|docker pull|docker build|git) ' "${log_file}"; then
   echo 'offline Agent updater performed an outbound-capable operation.' >&2
   exit 1

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.20.17
+
+- 新增哪吒式 `xingchen` 总控管理入口，一条固定版本命令完成依赖补齐、Docker Compose 安装，并统一提供更新、状态、日志和重启操作。
+- 中国模式改为 Gitee 编排文件加腾讯云 TCR 六个公开预构建镜像，目标服务器不访问 GitHub、GHCR 或 Docker Hub，也不再本地编译应用；发布流程同时推送 GHCR/TCR 并验证 TCR 匿名拉取，更新时同步推进受管 PostgreSQL/Redis 镜像标签且不改写用户自定义镜像。
+- 控制台在中国模式下通过 Gitee 稳定标签发现已就绪版本，不再依赖 GitHub API；切换自离线部署时会清除旧 manifest 固定路径，在线模式默认使用 Setup 镜像内置清单，不再被遗留离线清单或旧缓存覆盖。
+- 安装失败保留可校验的续装状态；更新始终校验真实镜像与服务状态，持久化在线源和镜像策略，并在失败或中断时恢复源码提交、Git origin 与 `.env`。信号打断 Compose 切换后会明确要求复核运行容器，不把配置恢复误报为完整服务回滚。
+- Go、Maven 和 Alpine 构建依赖由阿里云镜像切换到腾讯云镜像，Go 代理不再以 `direct` 回退到 GitHub。
+
 ## v1.20.16
 
 - Linux Controller 安装器在 `public` 模式可自动补齐 `curl`、Docker Engine 与 Compose v2，并提供 `--no-install-dependencies` 供预置环境禁用；`internal/offline` 不访问公网软件包源，缺失依赖时直接失败。

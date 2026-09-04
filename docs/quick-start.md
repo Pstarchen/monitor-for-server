@@ -24,23 +24,32 @@ description: 安装星辰监控总控，完成首次配置并接入第一台服�
 
 ### Linux
 
-目标服务器无法访问 GitHub 时从 Gitee 获取：
+能够访问 GitHub 和 GHCR 时，下载固定版本的统一管理脚本并安装：
 
 ```bash
-git clone --depth 1 --branch v1.20.16 https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh --build
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.17
 ```
 
-能够访问 GitHub 时也可使用：
+中国大陆服务器或无法访问 GitHub/GHCR 时，使用 Gitee 入口：
 
 ```bash
-git clone --depth 1 --branch v1.20.16 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.17
 ```
 
-安装器在 `public` 模式会通过受支持的系统包管理器补齐 `curl`、Docker Engine 和 Compose v2，然后生成数据库凭据、准备固定版本镜像并等待 Web 健康检查通过。已预装依赖或需要由配置管理系统负责依赖时，添加 `--no-install-dependencies`；此时缺少任一依赖都会立即停止。安装器不会把数据库密码打印到日志。
+`xingchen.sh` 提供 `install`、`update`、`status`、`logs` 和 `restart` 五个直接动作；不带动作运行时会打开交互菜单。安装器在 `public` 模式会通过受支持的系统包管理器补齐 `curl`、Git、Docker Engine 和 Compose v2，然后生成数据库凭据、准备固定版本镜像并等待 Web 健康检查通过。安装器不会把数据库密码打印到日志。
 
-`internal` 和 `offline` 不会访问公网软件包源。无法访问 GHCR 时，应先在内部流程安装 curl、Docker Engine 与 Compose v2，并把全部 `XINGCHEN_*_IMAGE` 指向内部 Registry；完全断网时使用 Release 提供的架构对应离线 bundle，校验 `.sha256` 后执行包内 `install-offline.sh`。高级的内部 manifest、固定 digest、源码构建和存量离线升级方式见[部署与运维](./deployment.md)。
+`CN=true` 会从 Gitee 取得固定版本编排文件，并直接拉取腾讯云 TCR 中的六个预构建镜像；目标机不访问 GitHub、GitHub API、GHCR、Docker Hub，也不需要 Go、Maven 或 Node.js 构建环境。它仍需访问 Gitee、腾讯云 TCR 和系统包源，因此不适用于完全断网环境。完全断网时使用 Release 提供的架构对应离线 bundle，校验 `.sha256` 后执行包内 `install-offline.sh`。
 
-无论从 Gitee 还是 GitHub 取得仓库，都不要改成 `curl .../main | bash`。总控安装与更新只接受固定稳定版本或 OCI digest；manifest、SHA256 或制品校验缺失、失败时直接停止，不执行未校验内容，也不依赖可变 `latest`。
+默认安装目录是 `/opt/guanlan-monitor`；需要其他位置时，在 `install` 后添加 `--install-dir <绝对路径>`。安装成功后会创建系统命令 `xingchen`，常用管理命令如下：
+
+```bash
+sudo xingchen status
+sudo xingchen logs
+sudo xingchen restart
+sudo xingchen update
+```
+
+管理器会从现有部署的 Git origin 自动沿用 GitHub 或 Gitee 来源；必要时也可使用 `sudo xingchen update --source gitee` 显式指定。不要把下载 URL 改成可变的 `main` 分支；入口和安装目标都应固定稳定 `vX.Y.Z`。高级的内部 manifest、固定 digest、源码构建和存量离线升级方式见[部署与运维](./deployment.md)。
 
 ### Windows
 

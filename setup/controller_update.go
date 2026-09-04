@@ -46,6 +46,7 @@ type controllerUpdateService struct {
 	now            func() time.Time
 	client         *http.Client
 	apiBase        string
+	giteeAPIBase   string
 	releases       *agentReleaseService
 	allowGitHubAPI bool
 	networkMode    string
@@ -131,9 +132,9 @@ type controllerImage struct {
 }
 
 var controllerImages = []controllerImage{
-	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16"},
-	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.16"},
-	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.16"},
+	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.17"},
+	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.17"},
+	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.17"},
 }
 
 func newControllerUpdateService() *controllerUpdateService {
@@ -142,6 +143,7 @@ func newControllerUpdateService() *controllerUpdateService {
 		now:            time.Now,
 		client:         &http.Client{Timeout: controllerReleaseCheckTimeout},
 		apiBase:        controllerGitHubAPIBase,
+		giteeAPIBase:   controllerGiteeAPIBase,
 		releases:       newAgentReleaseService(),
 		allowGitHubAPI: strings.EqualFold(strings.TrimSpace(os.Getenv("XINGCHEN_CONTROLLER_ALLOW_GITHUB_API")), "true"),
 		networkMode:    configuredNetworkMode(),

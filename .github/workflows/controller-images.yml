@@ -8,6 +8,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  TCR_REGISTRY: ${{ vars.TCR_REGISTRY }}
+  TCR_NAMESPACE: ${{ vars.TCR_NAMESPACE }}
+  TCR_USERNAME: ${{ vars.TCR_USERNAME }}
 
 jobs:
   test:
@@ -32,7 +35,7 @@ jobs:
         run: sudo bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/*.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
+        run: bash -n deploy/*.sh && bash deploy/xingchen_test.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
 
       - name: Check PowerShell scripts and generated updater
         shell: pwsh
@@ -141,12 +144,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: '[[ "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]'
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate Tencent Cloud target
+        shell: bash
+        run: |
+          [[ "${TCR_REGISTRY}" == "ccr.ccs.tencentyun.com" ]]
+          [[ "${TCR_NAMESPACE}" == "xc_monitor" ]]
+          [[ -n "${TCR_USERNAME}" ]]
+
+      - name: Log in to Tencent Cloud TCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.TCR_REGISTRY }}
+          username: ${{ env.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -163,10 +185,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+          images: |
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+            ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/monitor-for-server-${{ matrix.name }}
           tags: |
             type=ref,event=tag
-            type=sha
+            type=sha,enable=${{ github.ref_type == 'branch' }}
 
       - name: Protect published GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -232,6 +256,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Tencent Cloud TCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.TCR_REGISTRY }}
+          username: ${{ env.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -256,6 +287,71 @@ jobs:
               sleep 30
             done
           done
+
+      - name: Verify Tencent Cloud release images
+        shell: bash
+        run: |
+          set -euo pipefail
+          for component in setup server web agent; do
+            image="${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-${component}:${GITHUB_REF_NAME}"
+            for attempt in {1..30}; do
+              if docker buildx imagetools inspect "${image}" >/dev/null 2>&1; then
+                break
+              fi
+              if [[ "${attempt}" -eq 30 ]]; then
+                echo "Tencent Cloud release image is not available: ${image}" >&2
+                exit 1
+              fi
+              sleep 30
+            done
+          done
+
+      - name: Mirror base images to Tencent Cloud TCR
+        shell: bash
+        run: |
+          set -euo pipefail
+          mirror_image() {
+            local source_image="$1"
+            local target_image="$2"
+            local manifest
+
+            docker buildx imagetools create --tag "${target_image}" "${source_image}"
+            manifest="$(docker buildx imagetools inspect --raw "${target_image}")"
+            jq -e '
+              [.manifests[]?.platform
+                | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64"))
+                | .architecture]
+              | unique
+              | sort == ["amd64", "arm64"]
+            ' <<<"${manifest}" >/dev/null
+          }
+
+          mirror_image \
+            docker.io/library/postgres:16-alpine \
+            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres:${GITHUB_REF_NAME}"
+          mirror_image \
+            docker.io/library/redis:7.4-alpine \
+            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis:${GITHUB_REF_NAME}"
+
+      - name: Verify Tencent Cloud images allow anonymous pulls
+        shell: bash
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/tcr-anonymous-docker
+        run: |
+          set -euo pipefail
+          mkdir -p "${DOCKER_CONFIG}"
+          for reference in \
+            monitor-for-server-setup:${GITHUB_REF_NAME} \
+            monitor-for-server-server:${GITHUB_REF_NAME} \
+            monitor-for-server-web:${GITHUB_REF_NAME} \
+            monitor-for-server-agent:${GITHUB_REF_NAME} \
+            monitor-for-server-postgres:${GITHUB_REF_NAME} \
+            monitor-for-server-redis:${GITHUB_REF_NAME}; do
+            image="${TCR_REGISTRY}/${TCR_NAMESPACE}/${reference}"
+            docker buildx imagetools inspect "${image}" >/dev/null \
+              || { echo "Tencent Cloud image is not publicly pullable: ${image}" >&2; exit 1; }
+          done
+
       - name: Download and verify Agent release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

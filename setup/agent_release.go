@@ -308,6 +308,9 @@ func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseMan
 	if !validNetworkMode(s.networkMode) {
 		return agentReleaseManifest{}, "", false, fmt.Errorf("XINGCHEN_NETWORK_MODE 必须是 public、internal 或 offline")
 	}
+	if s.usesPackagedManifestByDefault() {
+		return s.loadPackagedManifest()
+	}
 	if content, err := os.ReadFile(s.manifestPath); err == nil {
 		manifest, validationErr := s.decodeManifest(content)
 		if validationErr != nil {
@@ -371,20 +374,39 @@ func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseMan
 		return active.decoded, active.Source, true, nil
 	}
 	if s.packagedManifestPath != "" {
-		if content, packagedErr := os.ReadFile(s.packagedManifestPath); packagedErr == nil {
-			manifest, validationErr := s.decodeManifest(content)
-			if validationErr != nil {
-				return agentReleaseManifest{}, "", false, fmt.Errorf("镜像内清单无效: %w", validationErr)
-			}
-			return manifest, "local", false, nil
-		} else if !errors.Is(packagedErr, os.ErrNotExist) {
-			return agentReleaseManifest{}, "", false, fmt.Errorf("读取镜像内清单: %w", packagedErr)
+		manifest, source, cached, packagedErr := s.loadPackagedManifest()
+		if packagedErr == nil {
+			return manifest, source, cached, nil
+		}
+		if !errors.Is(packagedErr, os.ErrNotExist) {
+			return agentReleaseManifest{}, "", false, packagedErr
 		}
 	}
 	if len(failures) == 0 {
 		return agentReleaseManifest{}, "", false, errors.New("未配置可用清单源，且没有最后已知可用缓存")
 	}
 	return agentReleaseManifest{}, "", false, fmt.Errorf("所有清单源均失败（%s），且没有最后已知可用缓存", strings.Join(failures, "; "))
+}
+
+func (s *agentReleaseService) usesPackagedManifestByDefault() bool {
+	return normalizeNetworkMode(s.networkMode) == networkModePublic &&
+		!s.manifestPathRequired &&
+		len(s.manifestURLs) == 0
+}
+
+func (s *agentReleaseService) loadPackagedManifest() (agentReleaseManifest, string, bool, error) {
+	if strings.TrimSpace(s.packagedManifestPath) == "" {
+		return agentReleaseManifest{}, "", false, errors.New("镜像内未提供 Agent 版本清单")
+	}
+	content, err := os.ReadFile(s.packagedManifestPath)
+	if err != nil {
+		return agentReleaseManifest{}, "", false, fmt.Errorf("读取镜像内清单: %w", err)
+	}
+	manifest, err := s.decodeManifest(content)
+	if err != nil {
+		return agentReleaseManifest{}, "", false, fmt.Errorf("镜像内清单无效: %w", err)
+	}
+	return manifest, "local", false, nil
 }
 
 func validateManifestAdvance(content []byte, manifest agentReleaseManifest, active cachedAgentManifest, activeErr error) (bool, error) {

@@ -104,6 +104,119 @@ func TestAgentReleaseUsesPackagedFallback(t *testing.T) {
 	}
 }
 
+func TestAgentReleasePublicDefaultIgnoresImplicitWorkspaceManifest(t *testing.T) {
+	root := t.TempDir()
+	workspaceManifest := filepath.Join(root, "workspace", "manifest.json")
+	packagedManifest := filepath.Join(root, "packaged", "manifest.json")
+	for _, manifestPath := range []string{workspaceManifest, packagedManifest} {
+		if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(workspaceManifest, marshalExactTestManifest(t, "v1.20.10", completeTestAssets()...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packagedManifest, marshalExactTestManifest(t, "v1.20.11", completeTestAssets()...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := &agentReleaseService{
+		manifestPath:         workspaceManifest,
+		packagedManifestPath: packagedManifest,
+		cacheDir:             filepath.Join(root, "cache"),
+		networkMode:          networkModePublic,
+	}
+
+	response := requestAgentRelease(t, service, "/api/setup/agent-release?os=linux&arch=amd64")
+	assertAgentReleaseVersion(t, response, http.StatusOK, "v1.20.11", false)
+}
+
+func TestAgentReleasePublicDefaultIgnoresUnconfiguredCache(t *testing.T) {
+	root := t.TempDir()
+	packagedManifest := filepath.Join(root, "packaged", "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(packagedManifest), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packagedManifest, marshalExactTestManifest(t, "v1.20.11", completeTestAssets()...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := &agentReleaseService{
+		manifestPath:         filepath.Join(root, "workspace", "manifest.json"),
+		packagedManifestPath: packagedManifest,
+		cacheDir:             filepath.Join(root, "cache"),
+		networkMode:          networkModePublic,
+	}
+	staleManifest := marshalExactTestManifest(t, "v1.20.10", completeTestAssets()...)
+	if err := service.writeManifestCache(cachedAgentManifest{
+		ManifestBase64: base64.StdEncoding.EncodeToString(staleManifest),
+		Source:         "github.com",
+		FetchedAt:      "2026-09-04T00:00:00Z",
+		Verification:   "https",
+		ArtifactsReady: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response := requestAgentRelease(t, service, "/api/setup/agent-release?os=linux&arch=amd64")
+	assertAgentReleaseVersion(t, response, http.StatusOK, "v1.20.11", false)
+}
+
+func TestAgentReleaseNonPublicModesKeepImplicitManifestPrecedence(t *testing.T) {
+	for _, mode := range []string{networkModeInternal, networkModeOffline} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			workspaceManifest := filepath.Join(root, "workspace", "manifest.json")
+			packagedManifest := filepath.Join(root, "packaged", "manifest.json")
+			for _, manifestPath := range []string{workspaceManifest, packagedManifest} {
+				if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(workspaceManifest, marshalExactTestManifest(t, "v1.20.10", completeTestAssets()...), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(packagedManifest, marshalExactTestManifest(t, "v1.20.11", completeTestAssets()...), 0600); err != nil {
+				t.Fatal(err)
+			}
+			service := &agentReleaseService{
+				manifestPath:         workspaceManifest,
+				packagedManifestPath: packagedManifest,
+				cacheDir:             filepath.Join(root, "cache"),
+				networkMode:          mode,
+			}
+
+			response := requestAgentRelease(t, service, "/api/setup/agent-release?os=linux&arch=amd64")
+			assertAgentReleaseVersion(t, response, http.StatusOK, "v1.20.10", false)
+		})
+	}
+}
+
+func TestAgentReleaseExplicitManifestKeepsPrecedenceOverPackaged(t *testing.T) {
+	root := t.TempDir()
+	explicitManifest := filepath.Join(root, "configured", "manifest.json")
+	packagedManifest := filepath.Join(root, "packaged", "manifest.json")
+	for _, manifestPath := range []string{explicitManifest, packagedManifest} {
+		if err := os.MkdirAll(filepath.Dir(manifestPath), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(explicitManifest, marshalExactTestManifest(t, "v1.20.10", completeTestAssets()...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packagedManifest, marshalExactTestManifest(t, "v1.20.11", completeTestAssets()...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := &agentReleaseService{
+		manifestPath:         explicitManifest,
+		manifestPathRequired: true,
+		packagedManifestPath: packagedManifest,
+		cacheDir:             filepath.Join(root, "cache"),
+		networkMode:          networkModePublic,
+	}
+
+	response := requestAgentRelease(t, service, "/api/setup/agent-release?os=linux&arch=amd64")
+	assertAgentReleaseVersion(t, response, http.StatusOK, "v1.20.10", false)
+}
+
 func TestAgentReleaseDoesNotBypassRequiredManifestWithPackagedFallback(t *testing.T) {
 	root := t.TempDir()
 	packagedManifest := filepath.Join(root, "packaged", "manifest.json")

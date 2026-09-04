@@ -28,6 +28,7 @@ export function verificationText(value?: string): string {
   if (value === 'sha256') return 'SHA256 完整性校验'
   if (value === 'manifest-sha256') return '预置信任清单 + SHA256'
   if (value === 'github-api') return '发布平台元数据'
+  if (value === 'gitee-api') return 'Gitee 稳定标签元数据'
   return '尚未校验'
 }
 

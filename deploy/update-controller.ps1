@@ -1013,9 +1013,9 @@ try {
     $services = @('setup', 'server', 'web')
     $imageKeys = @('XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE')
     $imageDefaults = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.16',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.16'
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.17',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.17',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.17'
     )
     $sourceContexts = @('.', 'server', 'web')
     $sourceDockerfiles = @('setup/Dockerfile', '', '')
@@ -1070,10 +1070,24 @@ try {
         return "${Image}:$targetVersion"
     }
     $candidateImages = @($resolvedImages | ForEach-Object { ConvertTo-VersionedReference $_ })
-    $dependencyImages = @(
+    $dependencyKeys = @('XINGCHEN_POSTGRES_IMAGE', 'XINGCHEN_REDIS_IMAGE')
+    $resolvedDependencyImages = @(
         (Read-UpdateSetting 'XINGCHEN_POSTGRES_IMAGE' 'postgres:16-alpine'),
         (Read-UpdateSetting 'XINGCHEN_REDIS_IMAGE' 'redis:7.4-alpine')
     )
+
+    function ConvertTo-ManagedDependencyReference([string] $Image) {
+        if (-not $targetVersion -or $Image.Contains('@')) { return $Image }
+        $slash = $Image.LastIndexOf('/')
+        if ($slash -lt 0) { return $Image }
+        $leaf = $Image.Substring($slash + 1)
+        $colon = $leaf.LastIndexOf(':')
+        if ($colon -lt 0) { return $Image }
+        $repository = $leaf.Substring(0, $colon)
+        if ($repository -notin @('monitor-for-server-postgres', 'monitor-for-server-redis')) { return $Image }
+        return $Image.Substring(0, $slash + 1 + $colon) + ":$targetVersion"
+    }
+    $dependencyImages = @($resolvedDependencyImages | ForEach-Object { ConvertTo-ManagedDependencyReference $_ })
 
     $controllerMirrorValue = [string](Read-UpdateSetting 'XINGCHEN_CONTROLLER_IMAGE_MIRRORS')
     $controllerImageMirrors = @()
@@ -1140,6 +1154,14 @@ try {
                 if ((Get-RunningServiceVersion $service) -ne $targetVersion) {
                     $allCurrent = $false
                     break
+                }
+            }
+            if ($allCurrent) {
+                for ($index = 0; $index -lt $resolvedDependencyImages.Count; $index++) {
+                    if (-not [string]::Equals($resolvedDependencyImages[$index], $dependencyImages[$index], [System.StringComparison]::Ordinal)) {
+                        $allCurrent = $false
+                        break
+                    }
                 }
             }
             if ($allCurrent) {
@@ -1334,8 +1356,8 @@ try {
         }
     }
     if ($Apply) {
-        $settingNames = @($imageKeys)
-        $settingValues = @($candidateImages)
+        $settingNames = @($imageKeys) + @($dependencyKeys)
+        $settingValues = @($candidateImages) + @($dependencyImages)
         if ($targetVersion) {
             $settingNames += 'XINGCHEN_TARGET_VERSION'
             $settingValues += $targetVersion
@@ -1343,6 +1365,9 @@ try {
         Set-UpdateSettings $settingNames $settingValues
         for ($index = 0; $index -lt $imageKeys.Count; $index++) {
             [Environment]::SetEnvironmentVariable($imageKeys[$index], $candidateImages[$index], 'Process')
+        }
+        for ($index = 0; $index -lt $dependencyKeys.Count; $index++) {
+            [Environment]::SetEnvironmentVariable($dependencyKeys[$index], $dependencyImages[$index], 'Process')
         }
         if ($targetVersion) {
             $env:XINGCHEN_TARGET_VERSION = $targetVersion
@@ -1361,11 +1386,14 @@ try {
                 if ($LASTEXITCODE -ne 0) { $rollbackFailed = $true }
             }
             if (-not $rollbackFailed) {
-                $rollbackNames = @($imageKeys) + @('XINGCHEN_TARGET_VERSION')
-                $rollbackValues = @($rollbackImages) + @($previousTargetSetting)
+                $rollbackNames = @($imageKeys) + @($dependencyKeys) + @('XINGCHEN_TARGET_VERSION')
+                $rollbackValues = @($rollbackImages) + @($resolvedDependencyImages) + @($previousTargetSetting)
                 Set-UpdateSettings $rollbackNames $rollbackValues
                 for ($index = 0; $index -lt $imageKeys.Count; $index++) {
                     [Environment]::SetEnvironmentVariable($imageKeys[$index], $rollbackImages[$index], 'Process')
+                }
+                for ($index = 0; $index -lt $dependencyKeys.Count; $index++) {
+                    [Environment]::SetEnvironmentVariable($dependencyKeys[$index], $resolvedDependencyImages[$index], 'Process')
                 }
                 $env:XINGCHEN_TARGET_VERSION = $previousTargetSetting
                 & docker compose @composeArgs @composeApplyArguments $services

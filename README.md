@@ -43,24 +43,36 @@
 
 ## 快速启动
 
-Linux 总终端在 `public` 模式会按受支持的发行版包管理器补齐 `curl`、Docker Engine 和 Docker Compose v2；已由运维平台准备依赖时可传 `--no-install-dependencies`，让缺失依赖直接报错。`internal` 与 `offline` 不访问公网软件包源：前者要求预装依赖并使用内部 Registry/制品服务，后者只允许已校验 bundle 与本地 Docker image store。安装器提供 `public`、`internal`、`offline` 三种网络模式；`internal` 在代码层拒绝 GitHub、GitHub API、GitHubusercontent、GHCR 和 Docker Hub，Gitee 也必须显式开启。生产环境如果目标服务器不能访问 GitHub，推荐使用 `internal`，并把 setup、server、web、agent、PostgreSQL、Redis 六个镜像和 Agent 制品提前晋级到内部基础设施。
-
-总控保留一键准备和 Docker Compose 编排体验，但不会从代码托管平台的可变 `main` 分支下载后直接执行，也不会用 `latest` 作为升级依据。版本必须固定为稳定 `vX.Y.Z` 或 OCI digest；manifest、摘要或制品校验缺失、失败时立即停止，不降级为未校验安装。GitHub 与 Gitee 示例都先取得完整仓库，再执行仓库内安装器，便于审计和固定版本。
+Linux 总控推荐使用 `deploy/xingchen.sh`。它提供类似哪吒监控的一条命令安装与统一管理入口，并在 `public` 模式按受支持的发行版包管理器补齐 `curl`、Git、Docker Engine 和 Docker Compose v2。入口固定到稳定版本，不从可变 `main` 分支安装，也不用 `latest` 作为升级依据。
 
 第一次部署建议先阅读[新手使用指南](docs/user-guide.md)。它从 Docker 准备、首次 `/setup`、Agent 接入一直讲到告警、通知、备份、更新和常见问题排查。
 
-无法访问 GitHub/GHCR 时从 Gitee 固定版本本地构建：
-```bash
-git clone --depth 1 --branch v1.20.16 https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh --build
-```
-
-能够访问 GitHub 时也可使用：
+能够访问 GitHub 和 GHCR 时：
 
 ```bash
-git clone --depth 1 --branch v1.20.16 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.17
 ```
 
-需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；普通 `--apply` 在切换 Compose 服务前必须先创建 PostgreSQL 备份，备份失败则不切换。自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时，跨主版本或熔断期间仍可人工评估后手动执行。`public` 模式先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 和固定版本的官方 GHCR 镜像；源码回退默认关闭，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会启用，GitHub API 与 GitHub 源码不会被隐式访问。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。
+中国大陆服务器或无法访问 GitHub/GHCR 时：
+
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.17
+```
+
+`CN=true` 会固定使用 Gitee 取得对应版本的编排文件，并直接从腾讯云 TCR 拉取 setup、server、web、agent、PostgreSQL 和 Redis 六个预构建镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。它仍是在线安装：目标机至少需要访问 Gitee、腾讯云 TCR 和 Linux 发行版包源。完全断网时必须使用已校验的离线 bundle。
+
+默认安装目录是 `/opt/guanlan-monitor`；可在安装时用 `--install-dir <绝对路径>` 修改。安装成功后会创建系统命令 `xingchen`，后续用同一个入口管理总控：
+
+```bash
+sudo xingchen status
+sudo xingchen logs
+sudo xingchen restart
+sudo xingchen update
+```
+
+管理器会从现有部署的 Git origin 记住 GitHub 或 Gitee 来源，所以中国模式后续直接运行 `sudo xingchen update` 也不会切换到 GitHub/GHCR；必要时可显式使用 `sudo xingchen update --source gitee`。普通更新在切换 Compose 服务前必须先创建 PostgreSQL 备份，备份失败则不切换；控制台自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时。
+
+高级部署仍可直接使用仓库内的 `deploy/install-controller.sh` 和 `deploy/update-controller.sh`。`internal` 与 `offline` 不访问公网软件包源：前者要求预装依赖并使用内部 Registry/制品服务，后者只允许已校验 bundle 与本地 Docker image store。生产环境如果连 Gitee、腾讯云 TCR 或系统包源也不可达，应使用 `internal` 或 `offline`，而不是 `CN=true`。
 
 使用本地源码构建总控镜像：
 
@@ -68,7 +80,7 @@ git clone --depth 1 --branch v1.20.16 https://github.com/Pstarchen/monitor-for-s
 bash ./deploy/install-controller.sh --build
 ```
 
-目标服务器无法访问 GitHub/GHCR 时，将 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE`、`XINGCHEN_AGENT_IMAGE`、`XINGCHEN_POSTGRES_IMAGE` 和 `XINGCHEN_REDIS_IMAGE` 指向内部 Registry 的不可变 digest，通过 `XINGCHEN_RELEASE_MANIFEST_URLS`、`XINGCHEN_AGENT_RELEASE_BASE_URLS` 指向内部 HTTPS 制品服务，并设置 `XINGCHEN_NETWORK_MODE=internal`、`XINGCHEN_ALLOW_GITEE=false`、`XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false`。联网发布机可使用 `deploy/promote-internal-release.ps1` 按源 digest 晋级镜像并生成内部 manifest/lock；脚本不接收 Registry 凭据。稳定版 Setup 镜像还内置同版本的四个平台 Agent 制品作为末级本地基线；Agent 默认从总控同域取得受校验制品，目标节点不访问代码托管平台。
+只是在目标服务器上无法访问 GitHub/GHCR 时，优先使用上面的 `CN=true` + 腾讯云 TCR 路径。需要禁止全部公共服务时，再将六个 `XINGCHEN_*_IMAGE` 指向内部 Registry 的不可变 digest，通过 `XINGCHEN_RELEASE_MANIFEST_URLS`、`XINGCHEN_AGENT_RELEASE_BASE_URLS` 指向内部 HTTPS 制品服务，并设置 `XINGCHEN_NETWORK_MODE=internal`、`XINGCHEN_ALLOW_GITEE=false`、`XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false`。联网发布机可使用 `deploy/promote-internal-release.ps1` 按源 digest 晋级镜像并生成内部 manifest/lock；脚本不接收 Registry 凭据。稳定版 Setup 镜像还内置同版本的四个平台 Agent 制品作为末级本地基线；Agent 默认从总控同域取得受校验制品，目标节点不访问代码托管平台。
 
 完全断网环境在联网发布机取得 `xingchen-monitor-offline-vX.Y.Z-<架构>.tar.gz` 与同名 `.sha256`，通过受控介质传入目标机。新装执行包内 `install-offline.sh` 或 `install-offline.ps1`；已有部署必须执行 `upgrade-offline.sh --project-root <绝对部署目录> --check` 后再使用 `--apply`，以保留原 `.env`、Compose 项目、端口和数据卷，并在切换前备份 PostgreSQL。不要用新装入口覆盖存量部署。
 

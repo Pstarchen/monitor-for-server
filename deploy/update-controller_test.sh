@@ -70,7 +70,9 @@ if [[ "${1:-}" == "inspect" && "${2:-}" == "--format" ]]; then
 fi
 if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
   inspected="${@: -1}"
-  if [[ "${TEST_MISSING_LOCAL_IMAGE:-false}" == "true" || ( -n "${TEST_MISSING_LOCAL_IMAGE_MATCH:-}" && "${inspected}" == *"${TEST_MISSING_LOCAL_IMAGE_MATCH}"* ) ]]; then
+  if [[ "${TEST_MISSING_LOCAL_IMAGE:-false}" == "true" ||
+        ( -n "${TEST_MISSING_LOCAL_IMAGE_MATCH:-}" && "${inspected}" == *"${TEST_MISSING_LOCAL_IMAGE_MATCH}"* ) ||
+        ( -n "${TEST_MISSING_LOCAL_IMAGE_REGEX:-}" && "${inspected}" =~ ${TEST_MISSING_LOCAL_IMAGE_REGEX} ) ]]; then
     exit 1
   fi
 fi
@@ -158,6 +160,7 @@ run_update() {
   env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=${TEST_CONTROLLER_AGENT_ENABLED:-false}" \
     "TEST_FAIL_COMPOSE_MODE=${TEST_FAIL_COMPOSE_MODE:-}" "TEST_COMPOSE_STATE=${TEST_COMPOSE_STATE:-${temp_dir}/compose-state}" \
     "TEST_RUNNING_VERSION=${TEST_RUNNING_VERSION:-}" "TEST_MISSING_LOCAL_IMAGE_MATCH=${TEST_MISSING_LOCAL_IMAGE_MATCH:-}" \
+    "TEST_MISSING_LOCAL_IMAGE_REGEX=${TEST_MISSING_LOCAL_IMAGE_REGEX:-}" \
     "TEST_MISSING_LOCAL_IMAGE=${TEST_MISSING_LOCAL_IMAGE:-false}" "TEST_IMAGE_VERSION=${TEST_IMAGE_VERSION:-v1.20.5}" \
     "TEST_IMAGE_ARCH=${TEST_IMAGE_ARCH:-amd64}" \
     "TEST_FAIL_BACKUP=${TEST_FAIL_BACKUP:-false}" "TEST_FAIL_BACKUP_COPY=${TEST_FAIL_BACKUP_COPY:-false}" \
@@ -392,8 +395,8 @@ fi
 
 : > "${log_file}"
 run_update --check
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
-grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
+grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
 if grep -Eq 'ghcr\.(m\.daocloud\.io|1ms\.run|nju\.edu\.cn)' "${log_file}"; then
   echo 'Default update path still uses an unconfigured public mirror.' >&2
   exit 1
@@ -437,15 +440,15 @@ printf '%s\n' \
   'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS="11"' > "${timeout_root}/.env"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" bash "${timeout_root}/deploy/update-controller.sh" --check
-grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
-grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
+grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
 
 : > "${log_file}"
 TEST_SOURCE_REPOSITORIES='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git' \
   TEST_ALLOW_GITEE=true TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
 grep -E 'docker build --pull --file setup/Dockerfile --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://gitee.com/starchen520/monitor-for-server.git#main$' "${log_file}" >/dev/null
 grep -E 'docker build --pull --file setup/Dockerfile --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://github.com/Pstarchen/monitor-for-server.git#main$' "${log_file}" >/dev/null
-grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
 
 : > "${log_file}"
 if TEST_FAIL_ALL_PULLS=true run_update --check --no-mirror; then
@@ -567,7 +570,7 @@ fi
 
 : > "${log_file}"
 run_update --apply --no-mirror
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.17' "${log_file}" >/dev/null
 grep -q 'docker compose .* up -d --force-recreate --wait --wait-timeout 300 --remove-orphans' "${log_file}"
 backup_line="$(grep -n 'pg_dump' "${log_file}" | head -n 1 | cut -d: -f1)"
 pull_line="$(grep -n '^docker pull ' "${log_file}" | head -n 1 | cut -d: -f1)"
@@ -577,6 +580,61 @@ if [[ -z "${backup_line}" || -z "${pull_line}" || "${backup_line}" -ge "${pull_l
 fi
 if grep -q 'controller-agent' "${log_file}"; then
   echo 'Update unexpectedly enabled controller Agent.' >&2
+  exit 1
+fi
+
+managed_dependency_root="${temp_dir}/managed-dependency-project"
+create_upgrade_project "${managed_dependency_root}"
+printf '%s\n' \
+  'POSTGRES_PASSWORD="test-only"' \
+  'COMPOSE_PROJECT_NAME="xingchen-monitor"' \
+  'XINGCHEN_TARGET_VERSION="v1.20.17"' \
+  'XINGCHEN_SETUP_IMAGE="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-setup:v1.20.16"' \
+  'XINGCHEN_SERVER_IMAGE="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-server:v1.20.16"' \
+  'XINGCHEN_WEB_IMAGE="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-web:v1.20.16"' \
+  'XINGCHEN_POSTGRES_IMAGE="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-postgres:v1.20.16"' \
+  'XINGCHEN_REDIS_IMAGE="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-redis:v1.20.16"' > "${managed_dependency_root}/.env"
+: > "${log_file}"
+rm -f "${temp_dir}/managed-dependency-compose-state"
+set +e
+TEST_RUNNING_VERSION=v1.20.17 TEST_IMAGE_VERSION=v1.20.17 \
+  TEST_MISSING_LOCAL_IMAGE_REGEX='monitor-for-server-(postgres|redis):v1\.20\.17$' \
+  TEST_FAIL_COMPOSE_MODE=once TEST_COMPOSE_STATE="${temp_dir}/managed-dependency-compose-state" \
+  run_update --project-root "${managed_dependency_root}" --apply --no-mirror --no-source-fallback
+managed_rollback_status=$?
+set -e
+if [[ "${managed_rollback_status}" -ne 10 ]]; then
+  echo "Managed dependency rollback returned ${managed_rollback_status}, want 10." >&2
+  exit 1
+fi
+grep -F 'XINGCHEN_POSTGRES_IMAGE="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-postgres:v1.20.16"' "${managed_dependency_root}/.env" >/dev/null
+grep -F 'XINGCHEN_REDIS_IMAGE="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-redis:v1.20.16"' "${managed_dependency_root}/.env" >/dev/null
+
+: > "${log_file}"
+TEST_RUNNING_VERSION=v1.20.17 TEST_IMAGE_VERSION=v1.20.17 \
+  TEST_MISSING_LOCAL_IMAGE_REGEX='monitor-for-server-(postgres|redis):v1\.20\.17$' \
+  run_update --project-root "${managed_dependency_root}" --apply --no-mirror --no-source-fallback
+for dependency in postgres redis; do
+  target_image="ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-${dependency}:v1.20.17"
+  grep -F "docker pull ${target_image}" "${log_file}" >/dev/null
+  grep -F "XINGCHEN_${dependency^^}_IMAGE=\"${target_image}\"" "${managed_dependency_root}/.env" >/dev/null
+done
+grep -q '^docker compose .* up -d --force-recreate --wait' "${log_file}"
+
+custom_dependency_root="${temp_dir}/custom-dependency-project"
+create_upgrade_project "${custom_dependency_root}"
+printf '%s\n' \
+  'POSTGRES_PASSWORD="test-only"' \
+  'COMPOSE_PROJECT_NAME="xingchen-monitor"' \
+  'XINGCHEN_TARGET_VERSION="v1.20.17"' \
+  'XINGCHEN_POSTGRES_IMAGE="registry.example/base/postgres:16"' \
+  'XINGCHEN_REDIS_IMAGE="registry.example/base/redis:7.4"' > "${custom_dependency_root}/.env"
+: > "${log_file}"
+TEST_IMAGE_VERSION=v1.20.17 run_update --project-root "${custom_dependency_root}" --apply --no-mirror --no-source-fallback
+grep -F 'XINGCHEN_POSTGRES_IMAGE="registry.example/base/postgres:16"' "${custom_dependency_root}/.env" >/dev/null
+grep -F 'XINGCHEN_REDIS_IMAGE="registry.example/base/redis:7.4"' "${custom_dependency_root}/.env" >/dev/null
+if grep -Eq 'registry\.example/base/(postgres|redis):v1\.20\.17' "${log_file}" "${custom_dependency_root}/.env"; then
+  echo 'Custom dependency image was rewritten to the Controller target version.' >&2
   exit 1
 fi
 
@@ -631,7 +689,7 @@ if TEST_FAIL_COMPOSE_MODE=once TEST_COMPOSE_STATE="${temp_dir}/compose-state" ru
   echo 'Update reported success even though the candidate health check failed.' >&2
   exit 1
 fi
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
 if [[ "$(grep -c '^docker compose .* up -d --force-recreate --wait' "${log_file}")" -ne 2 ]]; then
   echo 'Rollback did not perform a second Compose health check.' >&2
   exit 1
@@ -929,7 +987,7 @@ if TEST_RUNNING_VERSION=v1.20.13 TEST_IMAGE_VERSION=v1.20.14 TEST_MISSING_LOCAL_
   exit 1
 fi
 cmp -s "${temp_dir}/missing-image.env.before" "${missing_image_root}/.env"
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
 if grep -q '^docker compose .* up -d ' "${log_file}"; then
   echo 'Missing-image failure attempted to switch services.' >&2
   exit 1
@@ -966,7 +1024,7 @@ fi
 cmp -s "${temp_dir}/load-failure.env.before" "${load_failure_root}/.env"
 cmp -s "${temp_dir}/load-failure.compose.before" "${load_failure_root}/docker-compose.yml"
 cmp -s "${temp_dir}/load-failure.updater.before" "${load_failure_root}/deploy/update-controller.sh"
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
 if grep -q '^docker compose .* up -d ' "${log_file}"; then
   echo 'Load failure attempted to switch services.' >&2
   exit 1
@@ -1000,7 +1058,7 @@ if [[ "$(grep -c '^docker compose .* up -d --force-recreate --wait' "${log_file}
   echo 'Bundle rollback did not perform a second health check.' >&2
   exit 1
 fi
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.17' "${log_file}" >/dev/null
 [[ -s "$(find "${bundle_rollback_root}/backups" -maxdepth 1 -type f -name 'xingchen-monitor-*.sql' -print -quit)" ]]
 
 downgrade_root="${temp_dir}/downgrade-project"
@@ -1021,7 +1079,12 @@ fi
 same_root="${temp_dir}/same-version-project"
 mkdir -p "${same_root}/deploy"
 cp "${updater}" "${same_root}/deploy/update-controller.sh"
-printf '%s\n' 'POSTGRES_PASSWORD="test-only"' 'XINGCHEN_TARGET_VERSION="v1.20.14"' > "${same_root}/.env"
+printf '%s\n' \
+  'POSTGRES_PASSWORD="test-only"' \
+  'XINGCHEN_TARGET_VERSION="v1.20.14"' \
+  'XINGCHEN_POSTGRES_IMAGE="registry.example/base/postgres:16"' \
+  'XINGCHEN_REDIS_IMAGE="registry.example/base/redis:7.4"' > "${same_root}/.env"
+cp "${same_root}/.env" "${same_root}/env.before"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" \
   "TEST_RUNNING_VERSION=v1.20.14" bash "${same_root}/deploy/update-controller.sh" --apply --no-mirror
@@ -1029,6 +1092,7 @@ if grep -Eq '^docker (pull|build) |^docker compose .* up ' "${log_file}"; then
   echo 'Same-version apply pulled images or restarted services.' >&2
   exit 1
 fi
+cmp -s "${same_root}/env.before" "${same_root}/.env"
 
 digest_root="${temp_dir}/digest-project"
 mkdir -p "${digest_root}/deploy"

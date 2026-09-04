@@ -4,7 +4,7 @@
 
 ## 前置条件
 
-- Linux Controller 使用 root/sudo 运行。`public` 模式可通过受支持的发行版包管理器自动安装 `curl`、Docker Engine 24+ 与 Docker Compose v2；传入 `--no-install-dependencies` 后只检查、不安装。
+- Linux Controller 使用 root/sudo 运行。`public` 模式可通过受支持的发行版包管理器自动安装 `curl`、Git、Docker Engine 24+ 与 Docker Compose v2；传入 `--no-install-dependencies` 后只检查、不安装。
 - `internal` 与 `offline` 不访问公网软件包源，必须由内部配置管理预装依赖，或直接使用包含所需镜像的已校验离线 bundle。
 - Docker Compose 会自动启动 PostgreSQL 16 和 Redis。数据库、用户和密码由控制端安装器自动生成，数据库端口只在 Compose 内网可见，无需安装数据库客户端或执行 SQL。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
@@ -13,14 +13,30 @@
 
 ## Docker Compose 部署
 
-Linux 生产环境应使用总终端安装器启动。该入口保留一键准备与 Docker Compose 编排体验，但不执行代码托管平台的 `raw main`，不以可变 `latest` 判定升级，也不会在 manifest、SHA256 或制品校验缺失时继续安装。`public` 模式先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置的受信 Registry，再尝试固定版本的官方 GHCR 镜像；源码列表默认为空，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会回退源码，使用 Gitee 还必须设置 `XINGCHEN_ALLOW_GITEE=true`。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。安装器会自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境推荐使用 `deploy/xingchen.sh`。它保留一条命令准备环境、Docker Compose 编排和统一运维的体验，但入口固定到稳定版本，不执行代码托管平台的可变 `raw main`，也不以 `latest` 判定升级。
+
+能够访问 GitHub 和 GHCR 时：
+
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.17
+```
+
+中国大陆服务器或无法访问 GitHub/GHCR 时：
+
+```bash
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.17
+```
+
+`CN=true` 固定使用 Gitee 的对应版本编排文件，并直接从 `ccr.ccs.tencentyun.com/xc_monitor` 拉取 setup、server、web、agent、PostgreSQL 和 Redis 六个多架构镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。该模式仍然联网：依赖补齐需要 Linux 发行版包源，运行镜像需要腾讯云 TCR。所有这些外部源都不可达时必须改用内部源或离线 bundle。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。
+
+高级或配置管理场景可以取得完整仓库后直接运行底层安装器。安装器会自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
 bash ./deploy/install-controller.sh
 docker compose --profile host-monitoring ps
 ```
 
-在 `public` 模式运行上述命令时，缺少的 `curl`、Docker Engine 或 Compose v2 会先通过受支持的系统包管理器安装。要禁止安装器修改系统软件包，使用：
+在 `public` 模式运行上述命令时，缺少的 `curl`、Git、Docker Engine 或 Compose v2 会先通过受支持的系统包管理器安装。要禁止安装器修改系统软件包，使用：
 
 ```bash
 bash ./deploy/install-controller.sh --no-install-dependencies
@@ -85,7 +101,18 @@ Linux：
 bash ./deploy/install-controller.sh
 ```
 
-总控更新可以先检查并拉取候选镜像，再决定是否重启：
+安装成功后会创建 `/usr/local/bin/xingchen`，可以直接执行统一管理动作：
+
+```bash
+sudo xingchen status
+sudo xingchen logs
+sudo xingchen restart
+sudo xingchen update
+```
+
+不带动作运行 `sudo xingchen` 会打开交互菜单。`status` 展示 Compose 服务状态，`logs` 显示最近 200 行总控日志，`restart` 重新创建并等待现有服务健康，`update` 执行稳定版本更新。管理器会从已有部署的 Git origin 沿用 GitHub 或 Gitee 来源；也可用 `--source gitee|github` 显式指定。
+
+需要精细控制时，底层更新器可以先检查候选版本，再决定是否重启：
 
 ```bash
 sudo bash ./deploy/update-controller.sh --check
@@ -97,7 +124,7 @@ sudo bash ./deploy/update-controller.sh --auto
 
 更新器默认给予单个内部镜像前缀 45 秒快速失败时间，镜像自身地址最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS`、`XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；`XINGCHEN_UPDATE_MIN_FREE_BYTES` 默认要求至少 1 GiB 可用空间。外层任务上限覆盖完整回退链，更新失败不会删除数据库卷。
 
-稳定发布使用 `vX.Y.Z`，但目标服务器的版本发现不依赖 GitHub API。总控优先读取本地或 `XINGCHEN_RELEASE_MANIFEST_URLS` 配置的 HTTPS manifest，并保存 last-known-good 缓存；只有显式设置 `XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=true` 才允许 GitHub API 回退。联网 CI 先创建 draft Release，等待四个项目镜像、四个平台 Agent 制品、manifest、校验文件和两个架构离线包全部验证完成后才公开发布，避免目标机看见半成品版本。
+稳定发布使用 `vX.Y.Z`。`CN=true` 部署从 Gitee 稳定标签发现新版本，并且只在 TCR 验证完成后才向 Gitee 推送版本标签；GitHub 部署从已公开 Release 发现版本。内部或离线部署优先读取本地或 `XINGCHEN_RELEASE_MANIFEST_URLS` 配置的 HTTPS manifest，并保存 last-known-good 缓存。联网 CI 先创建 draft Release，等待四个项目镜像、四个平台 Agent 制品、manifest、校验文件和两个架构离线包全部验证完成后才公开发布，避免目标机看见半成品版本。
 
 更新器不内置公共镜像加速器。控制台发起更新时拉取固定的 `vX.Y.Z` 或管理员配置的 OCI digest，并校验 OCI 版本标签，避免旧 `latest` 混入升级。自动更新只允许同一主版本内前进，跨主版本必须由管理员评估后手动执行。镜像源全部失败后，再按 `XINGCHEN_SOURCE_REPOSITORIES` 顺序使用目标版本标签作为 Docker 远程构建上下文；GitHub 只有显式配置时才会参与。`--source-build` 直接走配置的源码列表，`--no-source-fallback` 在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
 
@@ -149,7 +176,7 @@ XINGCHEN_WEB_IMAGE=registry.internal.example/xingchen/web@sha256:<digest>
 XINGCHEN_AGENT_IMAGE=registry.internal.example/xingchen/agent@sha256:<digest>
 XINGCHEN_POSTGRES_IMAGE=registry.internal.example/xingchen/postgres@sha256:<digest>
 XINGCHEN_REDIS_IMAGE=registry.internal.example/xingchen/redis@sha256:<digest>
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.16/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.17/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<manifest.json 的 SHA256>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 XINGCHEN_SOURCE_REPOSITORIES=
@@ -177,8 +204,8 @@ sudo ./install-offline.sh
 已有 `v1.20.15` 部署升级到 `v1.20.16` 时不要运行 `install-offline.*`。先验证外层 `.sha256` 并解压，再从包内执行存量升级入口，其中 `--project-root` / `-ProjectRoot` 必须是已有部署的绝对目录：
 
 ```bash
-sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --check
-sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --apply
+sudo ./upgrade-offline.sh --project-root /opt/guanlan-monitor --check
+sudo ./upgrade-offline.sh --project-root /opt/guanlan-monitor --apply
 ```
 
 ```powershell

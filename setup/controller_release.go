@@ -16,6 +16,8 @@ const (
 	controllerReleaseCheckTimeout = 30 * time.Second
 	controllerReleaseCacheTTL     = 20 * time.Minute
 	controllerGitHubAPIBase       = "https://api.github.com/repos/Pstarchen/monitor-for-server"
+	controllerGiteeAPIBase        = "https://gitee.com/api/v5/repos/starchen520/monitor-for-server"
+	controllerGiteeRepository     = "https://gitee.com/starchen520/monitor-for-server"
 	controllerReleaseResponseSize = 2 * 1024 * 1024
 )
 
@@ -30,10 +32,15 @@ type controllerRelease struct {
 }
 
 type controllerRepositoryTag struct {
-	Name   string `json:"name"`
-	Commit struct {
-		SHA string `json:"sha"`
+	Name    string `json:"name"`
+	Message string `json:"message"`
+	Commit  struct {
+		SHA  string `json:"sha"`
+		Date string `json:"date"`
 	} `json:"commit"`
+	Tagger *struct {
+		Date string `json:"date"`
+	} `json:"tagger"`
 }
 
 func (s *controllerUpdateService) refreshReleaseState(ctx context.Context, state *controllerUpdateState, force bool) error {
@@ -83,25 +90,18 @@ func (s *controllerUpdateService) latestRelease(ctx context.Context, state contr
 		return releaseFromState(state), true, "", nil
 	}
 	var sourceErrors []string
-	if s.releases != nil {
-		s.releases.mu.Lock()
-		manifest, source, cached, err := s.releases.loadManifest(ctx)
-		s.releases.mu.Unlock()
-		if err == nil {
-			warning := ""
-			if cached {
-				warning = "版本清单源暂时不可用，当前使用最后已知可用清单"
-			}
-			verification := "sha256"
-			if s.releases.manifestSHA256 != "" {
-				verification = "manifest-sha256"
-			}
-			return controllerRelease{
-				TagName: manifest.Version, Name: manifest.Version, PublishedAt: manifest.PublishedAt,
-				Source: source, Verification: verification,
-			}, cached, warning, nil
+	manifestConfigured := s.releases != nil && (s.releases.manifestPathRequired || len(s.releases.manifestURLs) > 0)
+	if manifestConfigured {
+		if release, cached, warning, err := s.manifestRelease(ctx); err == nil {
+			return release, cached, warning, nil
 		}
 		sourceErrors = append(sourceErrors, "版本清单不可用")
+	}
+	if s.giteeReleaseEnabled() {
+		if release, err := s.latestGiteeRelease(ctx); err == nil {
+			return release, false, "", nil
+		}
+		sourceErrors = append(sourceErrors, "Gitee 标签 API 不可用")
 	}
 	if s.githubReleaseEnabled() {
 		var release controllerRelease
@@ -112,6 +112,15 @@ func (s *controllerUpdateService) latestRelease(ctx context.Context, state contr
 		}
 		sourceErrors = append(sourceErrors, "GitHub API 不可用")
 	}
+	if s.releases != nil && !manifestConfigured {
+		if release, cached, warning, err := s.manifestRelease(ctx); err == nil {
+			if warning == "" && len(sourceErrors) > 0 {
+				warning = "远程发布源暂时不可用，当前使用镜像内版本清单"
+			}
+			return release, cached, warning, nil
+		}
+		sourceErrors = append(sourceErrors, "版本清单不可用")
+	}
 	cached := releaseFromState(state)
 	if normalizeControllerVersion(cached.TagName) != "" {
 		return cached, true, "发布源暂时不可用，当前显示缓存结果", nil
@@ -120,6 +129,27 @@ func (s *controllerUpdateService) latestRelease(ctx context.Context, state contr
 		return controllerRelease{}, false, "", errors.New("未配置版本清单源，且 GitHub API 回退未启用")
 	}
 	return controllerRelease{}, false, "", errors.New(strings.Join(sourceErrors, "；"))
+}
+
+func (s *controllerUpdateService) manifestRelease(ctx context.Context) (controllerRelease, bool, string, error) {
+	s.releases.mu.Lock()
+	manifest, source, cached, err := s.releases.loadManifest(ctx)
+	s.releases.mu.Unlock()
+	if err != nil {
+		return controllerRelease{}, false, "", err
+	}
+	warning := ""
+	if cached {
+		warning = "版本清单源暂时不可用，当前使用最后已知可用清单"
+	}
+	verification := "sha256"
+	if s.releases.manifestSHA256 != "" {
+		verification = "manifest-sha256"
+	}
+	return controllerRelease{
+		TagName: manifest.Version, Name: manifest.Version, PublishedAt: manifest.PublishedAt,
+		Source: source, Verification: verification,
+	}, cached, warning, nil
 }
 
 func (s *controllerUpdateService) releaseCacheFresh(state controllerUpdateState) bool {
@@ -147,13 +177,36 @@ func releaseFromState(state controllerUpdateState) controllerRelease {
 }
 
 func (s *controllerUpdateService) versionForRevision(ctx context.Context, revision string) (string, error) {
-	if !s.githubReleaseEnabled() {
-		return "", errors.New("GitHub API 回退未启用")
+	var sourceErrors []string
+	if s.giteeReleaseEnabled() {
+		tags, err := s.giteeTags(ctx)
+		if err == nil {
+			if version := versionForRepositoryRevision(tags, revision); version != "" {
+				return version, nil
+			}
+			sourceErrors = append(sourceErrors, "Gitee 标签中没有当前提交")
+		} else {
+			sourceErrors = append(sourceErrors, "Gitee 标签 API 不可用")
+		}
 	}
-	var tags []controllerRepositoryTag
-	if err := s.githubJSON(ctx, "/tags?per_page=100", &tags); err != nil {
-		return "", err
+	if s.githubReleaseEnabled() {
+		var tags []controllerRepositoryTag
+		if err := s.githubJSON(ctx, "/tags?per_page=100", &tags); err == nil {
+			if version := versionForRepositoryRevision(tags, revision); version != "" {
+				return version, nil
+			}
+			sourceErrors = append(sourceErrors, "GitHub 标签中没有当前提交")
+		} else {
+			sourceErrors = append(sourceErrors, "GitHub API 不可用")
+		}
 	}
+	if len(sourceErrors) == 0 {
+		return "", errors.New("未启用可用的发布标签 API")
+	}
+	return "", errors.New(strings.Join(sourceErrors, "；"))
+}
+
+func versionForRepositoryRevision(tags []controllerRepositoryTag, revision string) string {
 	matched := ""
 	for _, tag := range tags {
 		if !strings.EqualFold(strings.TrimSpace(tag.Commit.SHA), strings.TrimSpace(revision)) {
@@ -164,10 +217,63 @@ func (s *controllerUpdateService) versionForRevision(ctx context.Context, revisi
 			matched = version
 		}
 	}
-	if matched == "" {
-		return "", fmt.Errorf("no release tag found for revision %s", revision)
+	return matched
+}
+
+func (s *controllerUpdateService) giteeReleaseEnabled() bool {
+	if !s.allowGitee {
+		return false
 	}
-	return matched, nil
+	apiBase := strings.TrimRight(strings.TrimSpace(s.giteeAPIBase), "/")
+	if apiBase == "" {
+		apiBase = controllerGiteeAPIBase
+	}
+	return networkModeAllowsURL(s.effectiveNetworkMode(), apiBase, true)
+}
+
+func (s *controllerUpdateService) latestGiteeRelease(ctx context.Context) (controllerRelease, error) {
+	tags, err := s.giteeTags(ctx)
+	if err != nil {
+		return controllerRelease{}, err
+	}
+	latestVersion := ""
+	var latestTag controllerRepositoryTag
+	for _, tag := range tags {
+		version := normalizeControllerVersion(tag.Name)
+		if version == "" || (latestVersion != "" && !controllerVersionLess(latestVersion, version)) {
+			continue
+		}
+		latestVersion = version
+		latestTag = tag
+	}
+	if latestVersion == "" {
+		return controllerRelease{}, errors.New("Gitee 标签中没有稳定版本")
+	}
+	publishedAt := strings.TrimSpace(latestTag.Commit.Date)
+	if latestTag.Tagger != nil && strings.TrimSpace(latestTag.Tagger.Date) != "" {
+		publishedAt = strings.TrimSpace(latestTag.Tagger.Date)
+	}
+	return controllerRelease{
+		TagName:      latestVersion,
+		Name:         latestVersion,
+		Body:         strings.TrimSpace(latestTag.Message),
+		PublishedAt:  publishedAt,
+		HTMLURL:      controllerGiteeRepository + "/tree/" + latestVersion,
+		Source:       "gitee.com",
+		Verification: "gitee-api",
+	}, nil
+}
+
+func (s *controllerUpdateService) giteeTags(ctx context.Context) ([]controllerRepositoryTag, error) {
+	apiBase := strings.TrimRight(strings.TrimSpace(s.giteeAPIBase), "/")
+	if apiBase == "" {
+		apiBase = controllerGiteeAPIBase
+	}
+	var tags []controllerRepositoryTag
+	if err := s.repositoryJSON(ctx, apiBase, "/tags?per_page=100&sort=updated&direction=desc", "Gitee API", true, &tags); err != nil {
+		return nil, err
+	}
+	return tags, nil
 }
 
 func (s *controllerUpdateService) githubReleaseEnabled() bool {
@@ -186,38 +292,42 @@ func (s *controllerUpdateService) githubJSON(ctx context.Context, path string, d
 	if apiBase == "" {
 		apiBase = controllerGitHubAPIBase
 	}
-	if !networkModeAllowsURL(s.effectiveNetworkMode(), apiBase, s.allowGitee) {
+	return s.repositoryJSON(ctx, apiBase, path, "GitHub API", s.allowGitee, destination)
+}
+
+func (s *controllerUpdateService) repositoryJSON(ctx context.Context, apiBase, path, source string, allowGitee bool, destination any) error {
+	if !networkModeAllowsURL(s.effectiveNetworkMode(), apiBase, allowGitee) {
 		return errors.New("当前网络模式禁止访问配置的版本 API")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+path, nil)
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Accept", "application/vnd.github+json")
+	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "xingchen-monitor-controller-updater")
-	response, err := s.doGitHubRequest(request)
+	response, err := s.doRepositoryRequest(request, source)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return fmt.Errorf("GitHub API returned %s", response.Status)
+		return fmt.Errorf("%s returned %s", source, response.Status)
 	}
 	content, err := io.ReadAll(io.LimitReader(response.Body, controllerReleaseResponseSize+1))
 	if err != nil {
 		return err
 	}
 	if len(content) > controllerReleaseResponseSize {
-		return errors.New("GitHub API response is too large")
+		return fmt.Errorf("%s response is too large", source)
 	}
 	if err := json.Unmarshal(content, destination); err != nil {
-		return fmt.Errorf("decode GitHub API response: %w", err)
+		return fmt.Errorf("decode %s response: %w", source, err)
 	}
 	return nil
 }
 
-func (s *controllerUpdateService) doGitHubRequest(request *http.Request) (*http.Response, error) {
+func (s *controllerUpdateService) doRepositoryRequest(request *http.Request, source string) (*http.Response, error) {
 	baseClient := s.client
 	if baseClient == nil {
 		baseClient = &http.Client{Timeout: controllerReleaseCheckTimeout}
@@ -228,10 +338,10 @@ func (s *controllerUpdateService) doGitHubRequest(request *http.Request) (*http.
 	originHost := request.URL.Host
 	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
-			return errors.New("GitHub API redirect limit exceeded")
+			return fmt.Errorf("%s redirect limit exceeded", source)
 		}
 		if next.URL.User != nil || !strings.EqualFold(next.URL.Scheme, originScheme) || !strings.EqualFold(next.URL.Host, originHost) {
-			return errors.New("GitHub API redirect target is outside the configured origin")
+			return fmt.Errorf("%s redirect target is outside the configured origin", source)
 		}
 		if configuredRedirect != nil {
 			return configuredRedirect(next, via)

@@ -1,6 +1,7 @@
 FROM golang:1.24-alpine AS build
 WORKDIR /src
-ENV GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY=https://mirrors.cloud.tencent.com/go
+ENV GOPROXY=$GOPROXY
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .

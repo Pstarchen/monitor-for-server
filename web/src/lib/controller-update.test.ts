@@ -20,6 +20,7 @@ describe('controller update helpers', () => {
     expect(releaseSourceText('local')).toBe('本地离线清单')
     expect(verificationText('sha256')).toBe('SHA256 完整性校验')
     expect(verificationText('manifest-sha256')).toBe('预置信任清单 + SHA256')
+    expect(verificationText('gitee-api')).toBe('Gitee 稳定标签元数据')
     expect(updatePhaseText('BACKUP')).toBe('更新前备份')
     expect(updatePhaseText('INCOMPATIBLE_VERSION')).toBe('主版本需人工评估')
     expect(rollbackStateText('FAILED')).toBe('自动恢复失败')

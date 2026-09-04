@@ -295,6 +295,77 @@ func TestLatestControllerReleaseUsesOfflineManifestWithoutGitHub(t *testing.T) {
 	}
 }
 
+func TestLatestControllerReleaseUsesGiteeTagsBeforePackagedManifest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/tags" || request.URL.Query().Get("per_page") != "100" {
+			http.NotFound(w, request)
+			return
+		}
+		older := controllerRepositoryTag{Name: "v1.20.17", Message: "older"}
+		older.Commit.Date = "2026-09-03T08:00:00Z"
+		latest := controllerRepositoryTag{Name: "v1.20.18", Message: "ready"}
+		latest.Commit.SHA = "8888888888888888888888888888888888888888"
+		latest.Commit.Date = "2026-09-04T08:00:00Z"
+		_ = json.NewEncoder(w).Encode([]controllerRepositoryTag{
+			older,
+			{Name: "v9.0.0-rc.1"},
+			latest,
+		})
+	}))
+	defer server.Close()
+
+	packagedManifest := filepath.Join(t.TempDir(), "manifest.json")
+	if err := os.WriteFile(packagedManifest, []byte("not-a-valid-manifest"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := &controllerUpdateService{
+		now:          time.Now,
+		client:       server.Client(),
+		giteeAPIBase: server.URL,
+		allowGitee:   true,
+		networkMode:  networkModePublic,
+		releases: &agentReleaseService{
+			manifestPath:         filepath.Join(t.TempDir(), "missing.json"),
+			packagedManifestPath: packagedManifest,
+		},
+	}
+	release, cached, warning, err := service.latestRelease(context.Background(), controllerUpdateState{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached || warning != "" || release.TagName != "v1.20.18" || release.Source != "gitee.com" || release.Verification != "gitee-api" {
+		t.Fatalf("Gitee controller release = %+v, cached=%t warning=%q", release, cached, warning)
+	}
+	if release.Body != "ready" || release.PublishedAt != "2026-09-04T08:00:00Z" || release.HTMLURL != controllerGiteeRepository+"/tree/v1.20.18" {
+		t.Fatalf("Gitee controller release metadata = %+v", release)
+	}
+}
+
+func TestVersionForRevisionUsesGiteeTags(t *testing.T) {
+	const revision = "8888888888888888888888888888888888888888"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/tags" {
+			http.NotFound(w, request)
+			return
+		}
+		older := controllerRepositoryTag{Name: "v1.20.17"}
+		older.Commit.SHA = revision
+		latest := controllerRepositoryTag{Name: "v1.20.18"}
+		latest.Commit.SHA = revision
+		_ = json.NewEncoder(w).Encode([]controllerRepositoryTag{older, latest})
+	}))
+	defer server.Close()
+
+	service := &controllerUpdateService{client: server.Client(), giteeAPIBase: server.URL, allowGitee: true, networkMode: networkModePublic}
+	version, err := service.versionForRevision(context.Background(), revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "v1.20.18" {
+		t.Fatalf("Gitee revision version = %q, want v1.20.18", version)
+	}
+}
+
 func TestRefreshReleaseStateMapsTaggedRevisionWithoutDowngrade(t *testing.T) {
 	revision := "5796b4696d138823918e087d68d9096c930cdc5b"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

@@ -160,7 +160,7 @@ function openCreate() {
 
 async function createRollout() {
   if (!isStableAgentVersion(form.targetVersion)) {
-    ElMessage.warning('目标版本必须是稳定版本，例如 v1.20.16')
+    ElMessage.warning('目标版本必须是稳定版本，例如 v1.20.17')
     return
   }
   if (!form.deviceIds.length) {
@@ -433,7 +433,7 @@ useVisibilityPolling(() => refreshRollouts(), 8_000)
       <el-form label-position="top" @submit.prevent="createRollout">
         <div class="rollout-create-intro"><PackageCheck :size="18" /><span>发布先保存为草稿，启动后才会向 Agent 下发固定格式的更新任务。</span></div>
         <el-form-item label="目标版本" required>
-          <el-input v-model="form.targetVersion" maxlength="32" placeholder="v1.20.16" />
+          <el-input v-model="form.targetVersion" maxlength="32" placeholder="v1.20.17" />
         </el-form-item>
         <el-form-item label="目标设备" required>
           <el-select v-model="form.deviceIds" multiple filterable collapse-tags :max-collapse-tags="3" placeholder="选择已上报版本的 Agent">

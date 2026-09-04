@@ -4,9 +4,9 @@
           xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
   <mirrors>
     <mirror>
-      <id>aliyun-public</id>
-      <name>Aliyun Public Mirror</name>
-      <url>https://maven.aliyun.com/repository/public</url>
+      <id>tencent-public</id>
+      <name>Tencent Cloud Public Mirror</name>
+      <url>https://mirrors.cloud.tencent.com/nexus/repository/maven-public/</url>
       <mirrorOf>*</mirrorOf>
     </mirror>
   </mirrors>

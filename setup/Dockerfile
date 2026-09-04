@@ -1,6 +1,7 @@
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS build
 WORKDIR /src
-ENV GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY=https://mirrors.cloud.tencent.com/go
+ENV GOPROXY=$GOPROXY
 COPY setup/go.mod setup/go.sum* ./
 RUN go mod download
 COPY setup/main.go setup/controller_update.go setup/controller_update_state_lock_linux.go setup/controller_release.go setup/controller_backup.go setup/agent_release.go setup/network_policy.go ./
@@ -10,8 +11,9 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 
 FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS agent-release
 WORKDIR /src/agent
-ENV GOPROXY=https://goproxy.cn,direct
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+ARG GOPROXY=https://mirrors.cloud.tencent.com/go
+ENV GOPROXY=$GOPROXY
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories \
     && apk add --no-cache zip
 COPY agent/go.mod agent/go.sum ./
 RUN go mod download
@@ -46,7 +48,7 @@ RUN set -eux; \
 FROM docker:27-cli
 ARG VERSION=dev
 LABEL org.opencontainers.image.version=$VERSION
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories \
     && apk add --no-cache bash docker-cli-compose util-linux
 COPY --from=build /out/setup /usr/local/bin/xingchen-setup
 COPY deploy/install-agent.sh deploy/install-agent.ps1 /usr/local/share/xingchen/installers/

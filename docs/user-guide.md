@@ -122,23 +122,27 @@ Windows 总控不会自动采集 Windows 宿主机。完成总控安装后，还
 ### 4.1 Linux：从 Gitee 安装
 
 ```bash
-git clone --depth 1 --branch v1.20.16 https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh --build
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.17
 ```
+
+该入口从 Gitee 取得固定版本编排文件，并从腾讯云 TCR 拉取六个公开预构建镜像；目标机不访问 GitHub/GHCR，也不编译应用。
 
 ### 4.2 Linux：能够访问 GitHub 时
 
 ```bash
-git clone --depth 1 --branch v1.20.16 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.17
 ```
 
 安装器会自动完成这些工作：
 
-1. `public` 模式自动补齐 curl、Docker Engine 和 Compose v2；`internal/offline` 只检查本地依赖。
+1. `public` 模式自动补齐 curl、Git、Docker Engine 和 Compose v2；`internal/offline` 只检查本地依赖。
 2. 生成随机 PostgreSQL 凭据并写入私有 `.env`。
-3. 优先从配置的受信内部 Registry 拉取固定版本镜像，再尝试镜像自身地址。
-4. 镜像不可用时，仅按显式配置的 `XINGCHEN_SOURCE_REPOSITORIES` 顺序构建；默认不访问任何源码仓库。
+3. 中国模式从腾讯云 TCR 拉取固定版本镜像，GitHub 模式从 GHCR 拉取；不使用可变的 `latest`。
+4. 统一管理入口关闭隐式源码构建回退，拉取失败会直接停止并保留可重试状态。
 5. 启动数据库和临时安装环境。
 6. 等待 `http://127.0.0.1:18080/healthz` 健康检查通过。
+
+Linux 安装成功后可直接使用 `sudo xingchen status`、`sudo xingchen logs`、`sudo xingchen restart` 和 `sudo xingchen update`。安装中断或网络失败时，修复问题后重新执行原 `install` 命令即可安全续装。
 
 安装完成后，终端会提示打开：
 
@@ -546,7 +550,7 @@ API Token 用于移动端、脚本或 MCP 客户端，不要用管理员 Cookie 
 5. 控制台重启期间耐心等待；恢复后页面会自动刷新状态。
 6. 检查总控组件版本、设备在线状态和通知投递。
 
-稳定版本使用 `vX.Y.Z`。发布流程只有在 setup、server、web 和 Agent 的同版本镜像全部构建完成后才发布制品和离线包；目标服务器通过本地或内部 HTTPS manifest 发现版本，不依赖 GitHub API。控制台会显示 manifest 来源及 last-known-good 缓存状态。
+稳定版本使用 `vX.Y.Z`。发布流程只有在 setup、server、web 和 Agent 的同版本镜像全部构建完成后才发布制品和离线包；中国模式通过 Gitee 稳定标签发现新版本，GitHub 模式只读取已公开 Release，内部或离线模式使用受信 manifest。控制台会显示版本来源及 last-known-good 缓存状态。
 
 ### 9.4.1 更新页面的逐项操作和判断标准
 
@@ -572,7 +576,7 @@ docker compose logs --tail 100 web
 curl -fsS https://<你的域名>/healthz
 ```
 
-如果控制台仍可访问，优先查看“系统更新”页的错误提示和服务状态；如果控制台不可访问，先看 `setup` 日志和 `/healthz`，不要连续重试。更新任务失败不会删除数据卷，但失败时也不会自动切回旧镜像，因为新版本可能已经执行数据库迁移。需要降级时，先确认目标版本兼容性，再结合升级前 PostgreSQL 备份恢复。
+如果控制台仍可访问，优先查看“系统更新”页的错误提示和服务状态；如果控制台不可访问，先看 `setup` 日志和 `/healthz`，不要连续重试。更新任务失败不会删除数据卷；候选服务健康检查失败时，更新器会尝试恢复旧应用镜像并再次检查。数据库不会自动回滚，新版本可能已经执行 Flyway 迁移，因此恢复镜像后仍要确认数据库兼容性。需要完整降级时，先确认目标版本兼容性，再结合升级前 PostgreSQL 备份恢复。
 
 ### 9.5 命令行检查和更新
 
@@ -594,11 +598,13 @@ powershell -ExecutionPolicy Bypass -File .\deploy\update-controller.ps1 -Apply
 
 自动更新在控制台开启后每天 04:00 按服务时区执行。更新过程不会删除 PostgreSQL 和 Redis 数据卷。
 
-### 9.6 为什么更新失败后不自动切回旧镜像
+### 9.6 健康检查失败时如何回滚
 
-服务端启动时，Flyway 可能已经对数据库执行了前向迁移。旧应用镜像不一定兼容新数据库结构，因此“切回旧镜像”不等于安全回滚，反而可能造成第二次故障。
+候选服务健康检查失败时，更新器会尝试恢复更新前的应用镜像并再次检查；它不会删除数据卷，也不会自动恢复 PostgreSQL。服务端启动时，Flyway 可能已经执行前向迁移，旧应用镜像不一定兼容新数据库结构，因此镜像恢复成功仍不等于数据库已经安全降级。
 
 需要降级时，必须先确认目标版本的数据库兼容性；必要时同时恢复升级前 PostgreSQL 备份和对应版本镜像。不要只改镜像标签后直接启动旧版本。
+
+若命令被 `SIGINT`、`SIGTERM` 等系统信号打断，管理器会恢复源码、Git origin 和 `.env`，但仍应先执行 `sudo xingchen status` 确认运行容器，再决定是否重跑同版本更新。
 
 ## 10. 日常运维速查
 
@@ -764,7 +770,7 @@ curl -v https://monitor.example.com/healthz
 
 ### 11.8 检查更新显示缓存或发布源不可用
 
-版本检查缓存 20 分钟是正常设计。内部 manifest 或显式启用的外部源临时失败时会保留 last-known-good 缓存并显示提示。判断发布是否完整时，应同时检查 manifest、四个应用镜像、PostgreSQL/Redis 依赖镜像和四个平台 Agent 制品。
+版本检查缓存 20 分钟是正常设计。Gitee 标签 API、GitHub Release API 或内部 manifest 临时失败时会保留 last-known-good 缓存并显示提示。中国模式若持续出现该提示，先确认服务器能访问 `gitee.com/api/v5`；判断发布是否完整时，应同时检查版本来源、四个应用镜像、PostgreSQL/Redis 依赖镜像和四个平台 Agent 制品。
 
 命令行更新失败时查看输出中的具体镜像源。更新器按配置的内部镜像、镜像自身地址和源码仓库顺序回退；完全断网环境应使用离线 bundle，不要等待公共源超时。
 
