@@ -3,7 +3,7 @@ WORKDIR /src
 ENV GOPROXY=https://goproxy.cn,direct
 COPY setup/go.mod setup/go.sum* ./
 RUN go mod download
-COPY setup/main.go setup/controller_update.go setup/controller_release.go setup/controller_backup.go setup/agent_release.go ./
+COPY setup/main.go setup/controller_update.go setup/controller_update_state_lock_linux.go setup/controller_release.go setup/controller_backup.go setup/agent_release.go setup/network_policy.go ./
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/setup .
@@ -20,7 +20,7 @@ COPY setup/cmd/release-manifest /src/release-manifest
 ARG VERSION=dev
 RUN set -eux; \
     mkdir -p /out/release/assets /out/stage; \
-    if printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then \
+    if printf '%s' "$VERSION" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then \
       release_version="${VERSION#v}"; \
       build_agent() { \
         target_os="$1"; target_arch="$2"; extension="$3"; \
@@ -50,7 +50,9 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
     && apk add --no-cache bash docker-cli-compose util-linux
 COPY --from=build /out/setup /usr/local/bin/xingchen-setup
 COPY deploy/install-agent.sh deploy/install-agent.ps1 /usr/local/share/xingchen/installers/
+COPY deploy/update-controller.sh /usr/local/share/xingchen/updaters/update-controller.sh
 COPY --from=agent-release /out/release /usr/local/share/xingchen/release/
-RUN chmod 0444 /usr/local/share/xingchen/installers/install-agent.sh /usr/local/share/xingchen/installers/install-agent.ps1
+RUN chmod 0444 /usr/local/share/xingchen/installers/install-agent.sh /usr/local/share/xingchen/installers/install-agent.ps1 \
+    && chmod 0555 /usr/local/share/xingchen/updaters/update-controller.sh
 EXPOSE 8090
 ENTRYPOINT ["/usr/local/bin/xingchen-setup"]

@@ -7,7 +7,7 @@
 ## 必备材料
 
 - Docker Engine 24+ 和 Docker Compose v2。
-- 安装器优先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 或 `XINGCHEN_*_IMAGE` 配置的受信内部 Registry，不内置公共加速器；更新固定 `vX.Y.Z` 或 OCI digest，不用 `latest` 作为已验证版本依据。源码构建默认只使用 Gitee，GitHub 必须显式加入 `XINGCHEN_SOURCE_REPOSITORIES`。需要强制使用配置的源码列表时使用 `--source-build`，验证当前目录源码时使用 `--build`。
+- 安装器支持 `public`、`internal`、`offline`。生产受限网络推荐 `internal`：只使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 或 `XINGCHEN_*_IMAGE` 指定的内部 Registry，拒绝 GitHub、GHCR 和 Docker Hub；Gitee 也必须显式开启。更新固定 `vX.Y.Z` 或 OCI digest，不用 `latest`。`--source-build` 与 `--build` 都可能访问基础镜像和包源，不等于离线。
 - Docker Compose 会自动拉取 PostgreSQL 16 镜像并创建私有数据卷；数据库、用户和密码由控制端安装器自动生成，端口只在 Compose 内网可见。
 - 一个生产域名及 TLS 证书。公网只暴露 Web 入口，PostgreSQL、Redis 和 Spring Boot 端口保持内网。若先用 IP 初始化，必须显式启用临时 HTTP，完成宝塔反向代理和 HTTPS 后立即关闭。
 - 安装服务需要短暂访问宿主机 Docker socket，以便向导完成后自动重建生产容器；不要把安装端口以外的 Docker API 暴露到公网。
@@ -20,7 +20,26 @@
 
 ## 首次部署
 
-目标服务器无法访问 GitHub 时从 Gitee 获取：
+目标服务器不能访问 GitHub 时，先在可联网发布机把 setup、server、web、agent、PostgreSQL、Redis 六个 digest 固定镜像晋级到内部 Registry，并把四平台 Agent 制品发布到内部 HTTPS 域。目标机配置 `.env` 后执行：
+
+```bash
+bash ./deploy/install-controller.sh --network-mode internal --no-source-fallback
+```
+
+生产建议至少设置：
+
+```dotenv
+XINGCHEN_NETWORK_MODE=internal
+XINGCHEN_ALLOW_GITEE=false
+XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.15/manifest.json
+XINGCHEN_RELEASE_MANIFEST_SHA256=<受信 manifest 摘要>
+XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
+```
+
+六个 `XINGCHEN_*_IMAGE` 必须使用内部 Registry 的固定 digest；上面的域名和摘要只是占位符，未替换时不得部署。完整晋级和配置示例见[部署与运维](deployment.md#内部源与完全离线安装)。
+
+只有目标服务器明确允许 Gitee 时，才可在 `public` 模式从 Gitee 获取仓库：
 
 ```bash
 git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
@@ -34,7 +53,7 @@ bash ./deploy/install-controller.sh
 2. 设置公网入口、来源、站点名、时区和首个管理员密码。
 3. 提交后页面会自动进入登录页；生产服务就绪前登录按钮会暂时锁定，就绪后即可登录。
 
-管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、manifest 来源、缓存、校验、失败阶段和镜像回滚结果，也可启用每日 04:00 自动更新。总控优先读取本地或内部 HTTPS manifest，并保存 last-known-good 缓存；GitHub API 默认关闭。连续 3 次自动失败会暂停 24 小时，手动更新不受影响。命令行仍可使用 `deploy/update-controller.sh --check`、`--apply` 和 `--auto`。
+管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、manifest 来源、缓存、校验、失败阶段和镜像回滚结果，也可启用每日 04:00 自动更新。总控优先读取本地或内部 HTTPS manifest，并保存完整验证后的 last-known-good 缓存；GitHub API 默认关闭且在 `internal/offline` 中强制禁止。连续 3 次自动失败会暂停 24 小时，手动更新不受影响。命令行仍可使用 `deploy/update-controller.sh --check`、`--apply` 和 `--auto`。
 
 如果暂时没有域名，可以先用 `http://<服务器IP>:18080`；HTTPS 和宝塔反代配置完成后，再在系统设置中切换为正式域名。
 
@@ -79,6 +98,18 @@ TLS 在 Caddy、Nginx、Traefik、宝塔或云负载均衡器终止，并转发�
 4. 在“系统设置”修改站点名、入口 URL、采集周期、离线阈值和通知配置；敏感值会加密存储。
 
 更新失败不会删除数据卷。健康检查失败时更新器会尝试恢复旧应用镜像并再次检查，但不会自动回滚 PostgreSQL；新版本 `server` 可能已经执行前向 Flyway 迁移，因此镜像恢复后仍必须确认数据库兼容性。需要完整降级时，应使用升级前备份恢复 PostgreSQL。
+
+完全断网的已有部署必须使用离线包内的 `upgrade-offline.sh/.ps1`，不能再次运行新装入口。例如从 `v1.20.14` 升级到 `v1.20.15`：
+
+```bash
+sha256sum -c xingchen-monitor-offline-v1.20.15-amd64.tar.gz.sha256
+tar -xzf xingchen-monitor-offline-v1.20.15-amd64.tar.gz
+cd xingchen-monitor-offline-v1.20.15-amd64
+sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --check
+sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --apply
+```
+
+升级入口会保留现有 `.env`、端口、Compose 项目名和数据卷，切换前创建 PostgreSQL 逻辑备份；它不会重新生成数据库密码。即使应用镜像回滚成功，也仍需单独判断 Flyway 迁移后的数据库兼容性。
 
 ```powershell
 docker compose exec -T postgres pg_dump -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2)" "$(grep '^POSTGRES_DB=' .env | cut -d= -f2)" > monitor-backup.sql

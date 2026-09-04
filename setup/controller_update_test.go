@@ -38,10 +38,75 @@ func TestControllerUpdateInternalAuthentication(t *testing.T) {
 	}
 }
 
-func TestUpdateControllerCommandUsesBash(t *testing.T) {
-	command := updateControllerCommand(context.Background(), "--check")
-	if got, want := command.Args, []string{"bash", filepath.Join(workspace, "deploy", "update-controller.sh"), "--check"}; !reflect.DeepEqual(got, want) {
+func TestControllerUpdaterPrefersPackagedScript(t *testing.T) {
+	originalPackagedPath, originalWorkspace := packagedControllerUpdaterPath, workspace
+	root := t.TempDir()
+	packagedControllerUpdaterPath = filepath.Join(root, "image", "update-controller.sh")
+	workspace = filepath.Join(root, "workspace")
+	t.Cleanup(func() {
+		packagedControllerUpdaterPath, workspace = originalPackagedPath, originalWorkspace
+	})
+	writeControllerUpdaterFixture(t, packagedControllerUpdaterPath)
+	writeControllerUpdaterFixture(t, filepath.Join(workspace, "deploy", "update-controller.sh"))
+	t.Setenv(controllerUpdateWorkspaceFallbackEnvironment, "true")
+
+	updaterPath, err := resolveControllerUpdaterPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updaterPath != packagedControllerUpdaterPath {
+		t.Fatalf("resolveControllerUpdaterPath() = %q, want packaged path %q", updaterPath, packagedControllerUpdaterPath)
+	}
+	command := updateControllerCommand(context.Background(), updaterPath, "--check")
+	if got, want := command.Args, []string{"bash", packagedControllerUpdaterPath, "--check"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("updateControllerCommand args = %v, want %v", got, want)
+	}
+}
+
+func TestControllerUpdaterFailsClosedWithoutPackagedScript(t *testing.T) {
+	originalPackagedPath, originalWorkspace := packagedControllerUpdaterPath, workspace
+	root := t.TempDir()
+	packagedControllerUpdaterPath = filepath.Join(root, "missing", "update-controller.sh")
+	workspace = filepath.Join(root, "workspace")
+	t.Cleanup(func() {
+		packagedControllerUpdaterPath, workspace = originalPackagedPath, originalWorkspace
+	})
+	writeControllerUpdaterFixture(t, filepath.Join(workspace, "deploy", "update-controller.sh"))
+	t.Setenv(controllerUpdateWorkspaceFallbackEnvironment, "")
+
+	if path, err := resolveControllerUpdaterPath(); err == nil {
+		t.Fatalf("resolveControllerUpdaterPath() = %q, want packaged-updater error", path)
+	}
+}
+
+func TestControllerUpdaterAllowsExplicitWorkspaceFallback(t *testing.T) {
+	originalPackagedPath, originalWorkspace := packagedControllerUpdaterPath, workspace
+	root := t.TempDir()
+	packagedControllerUpdaterPath = filepath.Join(root, "missing", "update-controller.sh")
+	workspace = filepath.Join(root, "workspace")
+	t.Cleanup(func() {
+		packagedControllerUpdaterPath, workspace = originalPackagedPath, originalWorkspace
+	})
+	workspaceUpdater := filepath.Join(workspace, "deploy", "update-controller.sh")
+	writeControllerUpdaterFixture(t, workspaceUpdater)
+	t.Setenv(controllerUpdateWorkspaceFallbackEnvironment, " TrUe ")
+
+	path, err := resolveControllerUpdaterPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != workspaceUpdater {
+		t.Fatalf("resolveControllerUpdaterPath() = %q, want workspace path %q", path, workspaceUpdater)
+	}
+}
+
+func writeControllerUpdaterFixture(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("#!/usr/bin/env bash\nexit 0\n"), 0555); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -67,11 +132,23 @@ func TestControllerUpdateRunnerPassesRunnerEnvironment(t *testing.T) {
 	if !strings.Contains(joined, "-e CONTROLLER_UPDATE_RUNNER=true") {
 		t.Fatalf("controllerUpdateRunnerArgs() = %q, missing runner environment", joined)
 	}
-	if !strings.Contains(joined, "--project-name custom-monitor-update-runner run") {
+	if !strings.Contains(joined, "--project-name custom-monitor-update-runner run --pull never") {
 		t.Fatalf("controllerUpdateRunnerArgs() = %q, runner is not isolated from the controller project", joined)
 	}
 	if !strings.Contains(joined, "-e COMPOSE_PROJECT_NAME=custom-monitor") {
 		t.Fatalf("controllerUpdateRunnerArgs() = %q, inner updater target project was not preserved", joined)
+	}
+}
+
+func TestControllerUpdateRunnerNeverPullsMissingImage(t *testing.T) {
+	for _, mode := range []string{networkModePublic, networkModeInternal, networkModeOffline} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("XINGCHEN_NETWORK_MODE", mode)
+			joined := strings.Join(controllerUpdateRunnerArgs(), " ")
+			if !strings.Contains(joined, " run --pull never ") {
+				t.Fatalf("controllerUpdateRunnerArgs() may pull a missing image in %s mode: %q", mode, joined)
+			}
+		})
 	}
 }
 
@@ -83,6 +160,14 @@ func TestControllerUpdateEnvironmentPassesNormalizedTargetVersion(t *testing.T) 
 	environment = controllerUpdateEnvironment("not-a-version")
 	if containsEnvironmentPrefix(environment, "XINGCHEN_TARGET_VERSION=") {
 		t.Fatalf("controllerUpdateEnvironment() accepted an invalid target version: %v", environment)
+	}
+}
+
+func TestNormalizeControllerVersionRejectsLeadingZeroes(t *testing.T) {
+	for _, value := range []string{"v01.20.5", "v1.020.5", "v1.20.05"} {
+		if got := normalizeControllerVersion(value); got != "" {
+			t.Fatalf("normalizeControllerVersion(%q) = %q, want empty", value, got)
+		}
 	}
 }
 
@@ -166,7 +251,12 @@ func TestLatestReleaseFallsBackToStaleCache(t *testing.T) {
 func TestLatestControllerReleaseUsesOfflineManifestWithoutGitHub(t *testing.T) {
 	root := t.TempDir()
 	manifestPath := filepath.Join(root, "manifest.json")
-	writeTestManifest(t, manifestPath, testAgentAsset("linux", "amd64", "agent.tar.gz", []byte("agent")))
+	writeTestManifest(t, manifestPath,
+		testAgentAsset("linux", "amd64", "agent-linux-amd64.tar.gz", []byte("linux-amd64")),
+		testAgentAsset("linux", "arm64", "agent-linux-arm64.tar.gz", []byte("linux-arm64")),
+		testAgentAsset("windows", "amd64", "agent-windows-amd64.zip", []byte("windows-amd64")),
+		testAgentAsset("windows", "arm64", "agent-windows-arm64.zip", []byte("windows-arm64")),
+	)
 	service := &controllerUpdateService{
 		now: time.Now,
 		releases: &agentReleaseService{
@@ -370,6 +460,152 @@ func TestAutomaticRunnerStartFailureOpensBreaker(t *testing.T) {
 	}
 }
 
+func TestControllerUpdateBeginIsAtomicAcrossServices(t *testing.T) {
+	originalWorkspace, originalEnvPath, originalStatePath := workspace, envPath, controllerUpdateStatePath
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+	t.Cleanup(func() {
+		workspace, envPath, controllerUpdateStatePath = originalWorkspace, originalEnvPath, originalStatePath
+		invalidateControllerInspectionCache()
+	})
+	if err := os.WriteFile(envPath, []byte("CONTROLLER_AUTO_UPDATE=\"false\"\nAPP_TIMEZONE=UTC\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeControllerUpdateState(controllerUpdateState{State: "IDLE", Services: []controllerServiceStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	controllerInspectionCache.Lock()
+	controllerInspectionCache.at = time.Now()
+	controllerInspectionCache.value = controllerInspection{services: []controllerServiceStatus{}}
+	controllerInspectionCache.Unlock()
+
+	fileLock, err := acquireControllerUpdateStateFileLock(controllerUpdateStatePath + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 4, 4, 15, 0, 0, time.UTC)
+	first := &controllerUpdateService{now: func() time.Time { return now }, networkMode: networkModePublic}
+	second := &controllerUpdateService{now: func() time.Time { return now }, networkMode: networkModePublic}
+	results := make(chan error, 2)
+	go func() { results <- first.begin("CHECKING", "first check") }()
+	go func() { results <- second.begin("UPDATING", "second update") }()
+
+	deadline := time.Now().Add(time.Second)
+	for !controllerUpdateServiceMutexLocked(first) || !controllerUpdateServiceMutexLocked(second) {
+		if time.Now().After(deadline) {
+			if closeErr := fileLock.Close(); closeErr != nil {
+				t.Logf("release state lock after timeout: %v", closeErr)
+			}
+			<-results
+			<-results
+			t.Fatal("begin calls did not reach the durable state lock")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := fileLock.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	succeeded, conflicted := 0, 0
+	for range 2 {
+		switch err := <-results; {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, errUpdateRunning):
+			conflicted++
+		default:
+			t.Fatalf("begin returned unexpected error: %v", err)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("begin results: succeeded=%d conflicted=%d, want one of each", succeeded, conflicted)
+	}
+}
+
+func controllerUpdateServiceMutexLocked(service *controllerUpdateService) bool {
+	if service.mu.TryLock() {
+		service.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+func TestControllerUpdateStateCreatesLockDirectory(t *testing.T) {
+	originalStatePath := controllerUpdateStatePath
+	controllerUpdateStatePath = filepath.Join(t.TempDir(), "nested", "state", ".controller-update-state.json")
+	t.Cleanup(func() { controllerUpdateStatePath = originalStatePath })
+
+	if err := writeControllerUpdateState(controllerUpdateState{State: "IDLE", Services: []controllerServiceStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(controllerUpdateStatePath); err != nil {
+		t.Fatalf("state file was not created with its parent directory: %v", err)
+	}
+}
+
+func TestControllerUpdateRuntimeWritePreservesConcurrentAutoReset(t *testing.T) {
+	originalWorkspace, originalEnvPath, originalStatePath := workspace, envPath, controllerUpdateStatePath
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+	t.Cleanup(func() {
+		workspace, envPath, controllerUpdateStatePath = originalWorkspace, originalEnvPath, originalStatePath
+		invalidateControllerInspectionCache()
+	})
+	if err := os.WriteFile(envPath, []byte("CONTROLLER_AUTO_UPDATE=\"false\"\nAPP_TIMEZONE=UTC\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 4, 4, 15, 0, 0, time.UTC)
+	initial := controllerUpdateState{
+		State:            "UPDATING",
+		StartedAt:        now.Format(time.RFC3339),
+		Message:          "正在更新总控服务",
+		Trigger:          "automatic",
+		AutoFailureCount: controllerAutoFailureLimit - 1,
+		AutoPaused:       true,
+		AutoPausedUntil:  now.Add(controllerAutoPauseDuration).Format(time.RFC3339),
+		LastAutoRunDate:  "2026-09-04",
+		Services:         []controllerServiceStatus{},
+	}
+	if err := writeControllerUpdateState(initial); err != nil {
+		t.Fatal(err)
+	}
+	staleRunnerState := initial
+
+	controllerInspectionCache.Lock()
+	controllerInspectionCache.at = time.Now()
+	controllerInspectionCache.value = controllerInspection{services: []controllerServiceStatus{}}
+	controllerInspectionCache.Unlock()
+	service := &controllerUpdateService{now: func() time.Time { return now }, networkMode: networkModePublic}
+	request := httptest.NewRequest(http.MethodPut, "/internal/controller-update/auto", strings.NewReader(`{"enabled":true}`))
+	response := httptest.NewRecorder()
+	service.auto(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("auto reset returned %d: %s", response.Code, response.Body.String())
+	}
+	duringUpdate := service.readState()
+	if duringUpdate.Message != initial.Message {
+		t.Fatalf("auto reset changed runtime message to %q, want %q", duringUpdate.Message, initial.Message)
+	}
+
+	staleRunnerState.State = "ERROR"
+	staleRunnerState.StartedAt = ""
+	staleRunnerState.Message = "runner failed after the auto reset"
+	if err := service.writeRuntimeState(staleRunnerState, recordControllerAutomaticFailure); err != nil {
+		t.Fatal(err)
+	}
+
+	state := service.readState()
+	if state.State != "ERROR" || !state.AutoUpdate || state.AutoFailureCount != 1 || state.AutoPaused || state.AutoPausedUntil != "" {
+		t.Fatalf("concurrent auto/runner state = %+v", state)
+	}
+	if state.LastAutoRunDate != initial.LastAutoRunDate {
+		t.Fatalf("lastAutoRunDate = %q, want %q", state.LastAutoRunDate, initial.LastAutoRunDate)
+	}
+}
+
 func TestAutomaticFailuresPauseAndSuccessResets(t *testing.T) {
 	now := time.Date(2026, 9, 4, 4, 15, 0, 0, time.UTC)
 	service := &controllerUpdateService{now: func() time.Time { return now }}
@@ -433,6 +669,43 @@ func TestRecoverStaleAutomaticUpdateRecordsFailure(t *testing.T) {
 	}
 }
 
+func TestControllerUpdateStaleRecoveryPreservesNewOperation(t *testing.T) {
+	originalStatePath := controllerUpdateStatePath
+	controllerUpdateStatePath = filepath.Join(t.TempDir(), ".controller-update-state.json")
+	t.Cleanup(func() { controllerUpdateStatePath = originalStatePath })
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	observed := controllerUpdateState{
+		State:     "UPDATING",
+		StartedAt: now.Add(-controllerUpdateApplyStaleAfter - time.Minute).Format(time.RFC3339),
+		Trigger:   "automatic",
+		Services:  []controllerServiceStatus{},
+	}
+	if err := writeControllerUpdateState(observed); err != nil {
+		t.Fatal(err)
+	}
+	newOperation := controllerUpdateState{
+		State:     "CHECKING",
+		StartedAt: now.Format(time.RFC3339),
+		Message:   "new check in progress",
+		Services:  []controllerServiceStatus{},
+	}
+	if err := writeControllerUpdateState(newOperation); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := (&controllerUpdateService{now: func() time.Time { return now }}).recoverObservedState(observed, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.State != newOperation.State || state.StartedAt != newOperation.StartedAt || state.Message != newOperation.Message {
+		t.Fatalf("stale recovery replaced newer operation: %+v", state)
+	}
+	persisted := readControllerUpdateState()
+	if persisted.State != newOperation.State || persisted.StartedAt != newOperation.StartedAt || persisted.Message != newOperation.Message {
+		t.Fatalf("persisted newer operation was replaced: %+v", persisted)
+	}
+}
+
 func TestControllerUpdateStateExpiryIsRecoverable(t *testing.T) {
 	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 	service := &controllerUpdateService{now: func() time.Time { return now }}
@@ -482,7 +755,7 @@ func TestControllerUpdateSnapshotClearsExpiredState(t *testing.T) {
 		invalidateControllerInspectionCache()
 	})
 	now := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
-	if err := writeControllerUpdateState(controllerUpdateState{State: "UPDATING", StartedAt: now.Add(-controllerUpdateApplyStaleAfter - time.Minute).Format(time.RFC3339), Services: []controllerServiceStatus{}}); err != nil {
+	if err := writeControllerUpdateState(controllerUpdateState{State: "UPDATING", StartedAt: now.Add(-controllerUpdateApplyStaleAfter - time.Minute).Format(time.RFC3339), Trigger: "automatic", Services: []controllerServiceStatus{}}); err != nil {
 		t.Fatal(err)
 	}
 	controllerInspectionCache.Lock()
@@ -491,11 +764,11 @@ func TestControllerUpdateSnapshotClearsExpiredState(t *testing.T) {
 	controllerInspectionCache.Unlock()
 
 	state := (&controllerUpdateService{now: func() time.Time { return now }}).snapshot()
-	if state.State != "ERROR" || state.StartedAt != "" {
+	if state.State != "ERROR" || state.StartedAt != "" || state.AutoFailureCount != 1 {
 		t.Fatalf("expired snapshot = %+v, want recoverable error", state)
 	}
 	persisted := (&controllerUpdateService{now: func() time.Time { return now }}).readState()
-	if persisted.State != "ERROR" {
+	if persisted.State != "ERROR" || persisted.AutoFailureCount != 1 {
 		t.Fatalf("persisted state = %+v, want ERROR", persisted)
 	}
 }

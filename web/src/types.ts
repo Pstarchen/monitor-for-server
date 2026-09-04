@@ -1,5 +1,6 @@
 export type Role = 'ADMIN' | 'OPERATOR' | 'VIEWER'
 export type DeviceStatus = 'PENDING' | 'ONLINE' | 'OFFLINE'
+export type AgentUpdateStatus = 'IDLE' | 'CHECKING' | 'DOWNLOADING' | 'APPLYING' | 'SUCCEEDED' | 'FAILED' | 'PAUSED' | 'ROLLING_BACK'
 export type DeviceHealthState = 'HEALTHY' | 'PENDING' | 'OFFLINE' | 'DEGRADED'
 export type DeviceHealthSeverity = 'INFO' | 'WARNING' | 'CRITICAL'
 export type DeviceHealthCheckState = 'PASS' | 'PENDING' | 'WARN' | 'FAIL'
@@ -175,6 +176,10 @@ export interface Device {
   hardware: Record<string, unknown>
   latest: Metric | null
   health: DeviceHealth
+  agentVersion: string | null
+  agentUpdateStatus: AgentUpdateStatus
+  agentLastUpdateError: string | null
+  agentUpdateStateChangedAt: string | null
 }
 
 export interface DeviceNote {
@@ -608,7 +613,7 @@ export interface CreatedApiToken {
 }
 
 export type AgentTaskStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'TIMED_OUT' | 'CANCELED'
-export type AgentTaskOperation = 'COMMAND' | 'FILE_LIST' | 'FILE_READ' | 'FILE_WRITE' | 'FILE_DELETE'
+export type AgentTaskOperation = 'COMMAND' | 'FILE_LIST' | 'FILE_READ' | 'FILE_WRITE' | 'FILE_DELETE' | 'AGENT_UPDATE'
 
 export interface AgentTask {
   id: number
@@ -628,6 +633,49 @@ export interface AgentTask {
   stdout: string
   stderr: string
   error: string
+}
+
+export type AgentRolloutStatus = 'DRAFT' | 'RUNNING' | 'PAUSED' | 'CANCELED' | 'SUCCEEDED' | 'FAILED' | 'ROLLING_BACK' | 'ROLLED_BACK'
+export type AgentRolloutMemberStatus = 'PENDING' | 'QUEUED' | 'ACCEPTED' | 'CONFIRMED' | 'FAILED' | 'CANCELED'
+  | 'ROLLBACK_PENDING' | 'ROLLBACK_QUEUED' | 'ROLLBACK_ACCEPTED' | 'ROLLBACK_CONFIRMED' | 'ROLLBACK_FAILED'
+
+export interface AgentRolloutMember {
+  id: number
+  deviceId: string
+  deviceName: string
+  previousVersion: string
+  ring: number
+  order: number
+  eligibleAt: string | null
+  taskId: number | null
+  status: AgentRolloutMemberStatus
+  attempt: number
+  queuedAt: string | null
+  error: string | null
+  confirmedAt: string | null
+}
+
+export interface AgentRollout {
+  id: number
+  targetVersion: string
+  maintenanceWindowId: number | null
+  canaryPercent: number
+  ringCount: number
+  currentRing: number
+  maxConcurrent: number
+  jitterSeconds: number
+  failureThreshold: number
+  verificationTimeoutSeconds: number
+  status: AgentRolloutStatus
+  statusReason: string | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+  startedAt: string | null
+  completedAt: string | null
+  rollbackStartedAt: string | null
+  rollbackTotal: number | null
+  members: AgentRolloutMember[]
 }
 
 export type ServiceCheckType = 'HTTP_GET' | 'ICMP_PING' | 'TCPING' | 'FTP' | 'SFTP' | 'SNMP' | 'REDIS_PING' | 'POSTGRESQL' | 'MYSQL' | 'HEARTBEAT'

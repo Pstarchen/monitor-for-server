@@ -17,7 +17,7 @@ import java.time.Instant;
 })
 public class AgentTask {
     public enum Status { QUEUED, RUNNING, SUCCEEDED, FAILED, TIMED_OUT, CANCELED }
-    public enum Operation { COMMAND, FILE_LIST, FILE_READ, FILE_WRITE, FILE_DELETE }
+    public enum Operation { COMMAND, FILE_LIST, FILE_READ, FILE_WRITE, FILE_DELETE, AGENT_UPDATE }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

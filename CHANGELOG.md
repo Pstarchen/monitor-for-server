@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.20.15
+
+- Controller 与 Agent 安装/更新新增 `public`、`internal`、`offline` 网络策略；`internal` 拒绝 GitHub/GHCR/Docker Hub 并要求显式开启 Gitee，`offline` 禁止远程 URL、镜像拉取和源码回退。
+- 离线 bundle 增加存量部署专用的 Linux/Windows 升级入口，双层校验后导入六个镜像、保留原 `.env` 与数据卷、先备份 PostgreSQL，再原子更新 Compose 和 updater。
+- Agent manifest 增加 OS、架构、文件名、大小、SHA256、最低 Controller 版本和受限重定向校验，并在完整验证后才更新 last-known-good 缓存。
+- Agent 上报自身版本、更新状态和最近错误；新增固定 `AGENT_UPDATE` 协议、灰度/批次发布控制台、维护窗口、并发限制、确定性抖动、失败阈值暂停、版本上报确认和批量回滚。
+- 新增内部制品晋级脚本，按源 OCI digest 推送固定版本并生成内部 HTTPS manifest、镜像 lock 和无凭据环境示例；发布流程不再生成或推进可变 `latest`。`v1.20.5` 中的 `latest` 描述保留为历史行为，不代表当前策略。
+- 离线包严格校验六个预期镜像且拒绝额外镜像；GitHub Release 一旦公开，标签工作流即 fail closed，禁止重跑覆写镜像或发布资产。
+
 ## v1.20.14
 
 - 修复 Controller 镜像升级后仍从宿主机旧工作目录下发过期 Agent 安装器的问题；Setup 镜像现在固化版本匹配的 Linux/Windows 安装脚本。

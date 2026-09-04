@@ -5,6 +5,11 @@ manager_root="${XINGCHEN_AGENT_MANAGER_ROOT:-/opt/xingchen/agent}"
 manager_path="${manager_root}/agent.sh"
 manager_metadata_path="${manager_root}/install.env"
 manager_updater_path="${manager_root}/update-agent.sh"
+agent_update_status_path="${XINGCHEN_AGENT_UPDATE_STATUS_PATH:-${manager_root}/update-status.json}"
+agent_update_status_dir="${agent_update_status_path%/*}"
+agent_update_request_dir="${manager_root}/requests"
+agent_update_request_path="${agent_update_request_dir}/update-request"
+agent_update_request_handler_path="${manager_root}/handle-update-request.sh"
 systemd_dir="${XINGCHEN_SYSTEMD_DIR:-/etc/systemd/system}"
 agent_service_name="${XINGCHEN_AGENT_SERVICE:-xingchen-agent.service}"
 agent_user="${XINGCHEN_AGENT_USER:-xingchen-agent}"
@@ -16,6 +21,8 @@ agent_backup_dir="${agent_data_dir}/backups"
 agent_binary_target="${XINGCHEN_AGENT_BINARY:-/usr/local/bin/xingchen-agent}"
 agent_update_service_name="${XINGCHEN_AGENT_UPDATE_SERVICE:-xingchen-agent-update.service}"
 agent_update_timer_name="${XINGCHEN_AGENT_UPDATE_TIMER:-xingchen-agent-update.timer}"
+agent_update_request_service_name="xingchen-agent-update-request.service"
+agent_update_request_path_name="xingchen-agent-update-request.path"
 legacy_updater_path="${XINGCHEN_LEGACY_AGENT_UPDATER_PATH:-/usr/local/sbin/guanlan-agent-update}"
 legacy_installation=false
 original_args=("$@")
@@ -35,6 +42,7 @@ usage() {
   echo "Usage: XINGCHEN_SERVER=HOST_OR_URL XINGCHEN_DEVICE_ID=ID XINGCHEN_ENROLLMENT_TOKEN=... $0"
   echo "       Legacy automation may provide XINGCHEN_AGENT_KEY instead."
   echo "       $0 install --server-url HOST_OR_URL --device-id ID [安装参数]"
+  echo "       [--network-mode public|internal|offline] [--allow-gitee]"
   echo "       [--source-url GIT_URL]... [--source-ref GIT_REF]"
   echo "       $0 update|upgrade|rollback [VERSION] | list-versions"
   echo "       $0 restart|status|logs|uninstall [--purge]"
@@ -58,7 +66,7 @@ source_ref_overridden=false
 source_build_timeout="${XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
 mirror_pull_timeout="${XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45}"
 agent_pull_timeout="${XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
-agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.14}}"
+agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.15}}"
 container_name="${XINGCHEN_AGENT_CONTAINER:-xingchen-agent}"
 container_overridden=false
 [[ -n "${XINGCHEN_AGENT_CONTAINER:-}" ]] && container_overridden=true
@@ -69,6 +77,8 @@ release_base_urls="${XINGCHEN_AGENT_RELEASE_BASE_URLS:-}"
 release_manifest_urls="${XINGCHEN_RELEASE_MANIFEST_URLS:-}"
 controller_releases="${XINGCHEN_AGENT_CONTROLLER_RELEASES:-true}"
 allow_github_api="${XINGCHEN_AGENT_ALLOW_GITHUB_API:-false}"
+network_mode="${XINGCHEN_NETWORK_MODE:-public}"
+allow_gitee="${XINGCHEN_ALLOW_GITEE:-false}"
 release_version="${XINGCHEN_AGENT_VERSION:-}"
 release_downloaded_binary="xingchen-agent"
 rollback_version=""
@@ -101,6 +111,9 @@ while [[ $# -gt 0 ]]; do
     --server-url) server_url="${2:-}"; shift 2 ;;
     --device-id) device_id="${2:-}"; shift 2 ;;
     --allow-insecure-http) allow_insecure_http=true; shift ;;
+    --network-mode) network_mode="${2:-}"; shift 2 ;;
+    --allow-gitee) allow_gitee=true; shift ;;
+    --offline) network_mode=offline; shift ;;
     --allow-command-execution) allow_command_execution=true; shift ;;
     --allow-file-operations) allow_file_operations=true; shift ;;
     --no-auto-update) auto_update=false; shift ;;
@@ -154,10 +167,33 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+network_mode="${network_mode,,}"
+allow_gitee="${allow_gitee,,}"
+allow_github_api="${allow_github_api,,}"
+if [[ ! "${network_mode}" =~ ^(public|internal|offline)$ ]]; then
+  echo "--network-mode 必须是 public、internal 或 offline。" >&2
+  exit 2
+fi
+if [[ ! "${allow_gitee}" =~ ^(true|false)$ || ! "${allow_github_api}" =~ ^(true|false)$ ]]; then
+  echo "XINGCHEN_ALLOW_GITEE 和 XINGCHEN_AGENT_ALLOW_GITHUB_API 必须是 true 或 false。" >&2
+  exit 2
+fi
+if [[ "${network_mode}" != public && "${allow_github_api}" == true ]]; then
+  echo "${network_mode} 网络模式禁止 GitHub API；请移除 --allow-github-api/XINGCHEN_AGENT_ALLOW_GITHUB_API。" >&2
+  exit 2
+fi
+if [[ "${network_mode}" == offline ]]; then
+  auto_update=false
+fi
+release_max_redirects=10
+if [[ "${network_mode}" == internal ]]; then
+  release_max_redirects=0
+fi
+
 script_source="${BASH_SOURCE[0]-}"
 if [[ "${EUID}" -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1 && [[ -n "${script_source}" && -f "${script_source}" ]]; then
-    exec sudo --preserve-env=XINGCHEN_SERVER,XINGCHEN_SERVER_URL,XINGCHEN_DEVICE_ID,XINGCHEN_ENROLLMENT_TOKEN,XINGCHEN_AGENT_KEY,XINGCHEN_AGENT_IMAGE,XINGCHEN_AGENT_IMAGE_MIRRORS,XINGCHEN_AGENT_MODE,XINGCHEN_AGENT_RELEASE_REPO,XINGCHEN_AGENT_RELEASE_BASE_URLS,XINGCHEN_RELEASE_MANIFEST_URLS,XINGCHEN_AGENT_CONTROLLER_RELEASES,XINGCHEN_AGENT_ALLOW_GITHUB_API,XINGCHEN_REPOSITORY_URL,XINGCHEN_REPOSITORY_URLS,XINGCHEN_SOURCE_REF,XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS,XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS,XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
+    exec sudo --preserve-env=XINGCHEN_SERVER,XINGCHEN_SERVER_URL,XINGCHEN_DEVICE_ID,XINGCHEN_ENROLLMENT_TOKEN,XINGCHEN_AGENT_KEY,XINGCHEN_AGENT_IMAGE,XINGCHEN_AGENT_IMAGE_MIRRORS,XINGCHEN_AGENT_MODE,XINGCHEN_AGENT_RELEASE_REPO,XINGCHEN_AGENT_RELEASE_BASE_URLS,XINGCHEN_RELEASE_MANIFEST_URLS,XINGCHEN_AGENT_CONTROLLER_RELEASES,XINGCHEN_AGENT_ALLOW_GITHUB_API,XINGCHEN_NETWORK_MODE,XINGCHEN_ALLOW_GITEE,XINGCHEN_REPOSITORY_URL,XINGCHEN_REPOSITORY_URLS,XINGCHEN_SOURCE_REF,XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS,XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS,XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
   fi
   echo "请以 root 身份运行，或安装 sudo 后重试。" >&2
   exit 1
@@ -166,7 +202,7 @@ unset XINGCHEN_AGENT_KEY XINGCHEN_ENROLLMENT_TOKEN
 
 load_manager_metadata() {
   [[ -r "${manager_metadata_path}" ]] || return 0
-  local saved_container saved_volume saved_mode saved_binary saved_repo saved_base_urls saved_service saved_user saved_config_dir saved_data_dir saved_binary_target saved_update_service saved_update_timer
+  local saved_container saved_volume saved_mode saved_binary saved_repo saved_base_urls saved_service saved_user saved_config_dir saved_data_dir saved_binary_target saved_update_service saved_update_timer saved_network_mode saved_allow_gitee
   saved_mode="$(sed -n 's/^AGENT_MODE=//p' "${manager_metadata_path}" | head -n 1)"
   saved_binary="$(sed -n 's/^BINARY_PATH=//p' "${manager_metadata_path}" | head -n 1)"
   saved_repo="$(sed -n 's/^RELEASE_REPO=//p' "${manager_metadata_path}" | head -n 1)"
@@ -180,6 +216,8 @@ load_manager_metadata() {
   saved_binary_target="$(sed -n 's/^BINARY_TARGET=//p' "${manager_metadata_path}" | head -n 1)"
   saved_update_service="$(sed -n 's/^UPDATE_SERVICE=//p' "${manager_metadata_path}" | head -n 1)"
   saved_update_timer="$(sed -n 's/^UPDATE_TIMER=//p' "${manager_metadata_path}" | head -n 1)"
+  saved_network_mode="$(sed -n 's/^NETWORK_MODE=//p' "${manager_metadata_path}" | head -n 1)"
+  saved_allow_gitee="$(sed -n 's/^ALLOW_GITEE=//p' "${manager_metadata_path}" | head -n 1)"
   if [[ "${saved_mode}" == native || "${saved_mode}" == docker ]]; then
     agent_mode="${saved_mode}"
   fi
@@ -205,6 +243,8 @@ load_manager_metadata() {
   [[ -n "${saved_binary_target}" ]] && agent_binary_target="${saved_binary_target}"
   [[ -n "${saved_update_service}" ]] && agent_update_service_name="${saved_update_service}"
   [[ -n "${saved_update_timer}" ]] && agent_update_timer_name="${saved_update_timer}"
+  [[ "${saved_network_mode}" =~ ^(public|internal|offline)$ ]] && network_mode="${saved_network_mode}"
+  [[ "${saved_allow_gitee}" =~ ^(true|false)$ ]] && allow_gitee="${saved_allow_gitee}"
 }
 
 use_legacy_installation_names() {
@@ -219,6 +259,8 @@ use_legacy_installation_names() {
   agent_binary_target="/usr/local/bin/guanlan-agent"
   agent_update_service_name="guanlan-agent-update.service"
   agent_update_timer_name="guanlan-agent-update.timer"
+  agent_update_request_service_name="guanlan-agent-update-request.service"
+  agent_update_request_path_name="guanlan-agent-update-request.path"
   docker_socket_target="/run/guanlan-agent-docker.sock"
 }
 
@@ -294,7 +336,11 @@ manager_uninstall() {
     rm -f "${systemd_dir}/${agent_service_name}" "${agent_binary_target}"
   fi
   systemctl disable --now "${agent_update_timer_name}" >/dev/null 2>&1 || true
-  rm -f "${systemd_dir}/${agent_update_service_name}" "${systemd_dir}/${agent_update_timer_name}" "${manager_updater_path}" "${legacy_updater_path}"
+  systemctl disable --now "${agent_update_request_path_name}" >/dev/null 2>&1 || true
+  rm -f "${systemd_dir}/${agent_update_service_name}" "${systemd_dir}/${agent_update_timer_name}" \
+    "${systemd_dir}/${agent_update_request_service_name}" "${systemd_dir}/${agent_update_request_path_name}" \
+    "${manager_updater_path}" "${agent_update_request_handler_path}" "${agent_update_request_path}" "${legacy_updater_path}"
+  rmdir "${agent_update_request_dir}" >/dev/null 2>&1 || true
   systemctl daemon-reload >/dev/null 2>&1 || true
   if [[ "${purge}" == true ]]; then
     rm -rf -- "${agent_config_dir}" "${agent_data_dir}"
@@ -366,6 +412,33 @@ if [[ -z "${agent_image}" ]]; then
   echo "Agent image cannot be empty." >&2
   exit 2
 fi
+if [[ "${agent_update_status_path}" != /* \
+  || "${agent_update_status_path}" == *[[:space:]]* \
+  || "${agent_update_status_path}" == */ \
+  || "${agent_update_status_path}" == *//* \
+  || "${agent_update_status_path}" == */./* \
+  || "${agent_update_status_path}" == */. \
+  || "${agent_update_status_path}" == */../* \
+  || "${agent_update_status_path}" == */.. \
+  || -z "${agent_update_status_dir}" \
+  || "${agent_update_status_dir}" == / \
+  || "${agent_update_status_dir}" == "${agent_update_status_path}" ]]; then
+  echo "XINGCHEN_AGENT_UPDATE_STATUS_PATH 必须是位于非根目录下、无空白或路径跳转的绝对文件路径。" >&2
+  exit 2
+fi
+if [[ "${agent_update_request_path}" != /* \
+  || "${agent_update_request_path}" == *[[:space:]]* \
+  || "${agent_update_request_path}" == */ \
+  || "${agent_update_request_path}" == *//* \
+  || "${agent_update_request_path}" == */./* \
+  || "${agent_update_request_path}" == */../* \
+  || "${agent_update_request_path}" == */.. \
+  || -z "${agent_update_request_dir}" \
+  || "${agent_update_request_dir}" == / \
+  || "${agent_update_request_dir}" == "${agent_update_request_path}" ]]; then
+  echo "Agent update request path must be an absolute file path below a non-root directory." >&2
+  exit 2
+fi
 if [[ -z "${source_ref}" || "${source_ref}" == -* || "${source_ref}" == *..* || ! "${source_ref}" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
   echo "Agent source repository list or Git ref is invalid." >&2
   exit 2
@@ -396,6 +469,145 @@ fi
 is_local_host() {
   local host="$1"
   [[ "${host}" =~ ^(localhost|127\.0\.0\.1|\[::1\]|::1)(:[0-9]+)?$ ]]
+}
+
+network_url_host() {
+  local value="${1,,}" authority host
+  authority="${value#*://}"
+  authority="${authority%%/*}"
+  authority="${authority%%\?*}"
+  authority="${authority%%\#*}"
+  [[ "${authority}" != *@* ]] || return 1
+  if [[ "${authority}" == \[* ]]; then
+    host="${authority#\[}"
+    host="${host%%\]*}"
+  else
+    host="${authority%%:*}"
+  fi
+  host="${host%.}"
+  [[ -n "${host}" ]] || return 1
+  printf '%s' "${host}"
+}
+
+network_host_matches() {
+  local host="${1,,}" suffix="${2,,}"
+  [[ "${host}" == "${suffix}" || "${host}" == *."${suffix}" ]]
+}
+
+network_host_is_forbidden() {
+  local host="$1"
+  network_host_matches "${host}" github.com \
+    || network_host_matches "${host}" githubusercontent.com \
+    || network_host_matches "${host}" githubassets.com \
+    || network_host_matches "${host}" ghcr.io \
+    || network_host_matches "${host}" docker.io \
+    || network_host_matches "${host}" docker.com
+}
+
+network_source_host() {
+  local value="$1" authority
+  if [[ "${value}" == *://* ]]; then
+    network_url_host "${value}"
+  elif [[ "${value}" == *@*:* ]]; then
+    authority="${value#*@}"
+    authority="${authority%%:*}"
+    authority="${authority,,}"
+    authority="${authority%.}"
+    [[ -n "${authority}" ]] || return 1
+    printf '%s' "${authority}"
+  else
+    return 1
+  fi
+}
+
+validate_remote_source() {
+  local value="$1" label="$2" host
+  [[ -z "${value}" ]] && return 0
+  if [[ "${network_mode}" == offline ]]; then
+    echo "offline 网络模式拒绝远程${label}：${value}" >&2
+    return 1
+  fi
+  host="$(network_source_host "${value}" 2>/dev/null || true)"
+  if [[ -n "${host}" ]] && network_host_matches "${host}" gitee.com && [[ "${allow_gitee}" != true ]]; then
+    echo "Gitee ${label}仅在 XINGCHEN_ALLOW_GITEE=true 时允许：${value}" >&2
+    return 1
+  fi
+  [[ "${network_mode}" == internal ]] || return 0
+  if [[ "${value}" != https://* ]]; then
+    echo "internal 网络模式只允许 HTTPS ${label}：${value}" >&2
+    return 1
+  fi
+  host="$(network_url_host "${value}")" || { echo "${label}地址无效：${value}" >&2; return 1; }
+  if network_host_is_forbidden "${host}"; then
+    echo "internal 网络模式拒绝 GitHub/GHCR/Docker ${label}：${value}" >&2
+    return 1
+  fi
+}
+
+validate_internal_registry() {
+  local reference="$1" label="$2" name first host
+  [[ "${network_mode}" != offline ]] || return 0
+  name="${reference%%@*}"
+  if [[ "${name}" != */* ]]; then
+    [[ "${network_mode}" == internal ]] || return 0
+    echo "internal 网络模式拒绝无 Registry 主机的${label}：${reference}" >&2
+    return 1
+  fi
+  first="${name%%/*}"
+  if [[ "${first}" != *.* && "${first}" != *:* && "${first,,}" != localhost ]]; then
+    [[ "${network_mode}" == internal ]] || return 0
+    echo "internal 网络模式拒绝 Docker Hub/无主机${label}：${reference}" >&2
+    return 1
+  fi
+  host="${first%%:*}"
+  host="${host,,}"
+  host="${host%.}"
+  if network_host_matches "${host}" gitee.com && [[ "${allow_gitee}" != true ]]; then
+    echo "Gitee Registry 仅在 XINGCHEN_ALLOW_GITEE=true 时允许：${reference}" >&2
+    return 1
+  fi
+  [[ "${network_mode}" == internal ]] || return 0
+  if network_host_is_forbidden "${host}"; then
+    echo "internal 网络模式拒绝公共 Registry ${label}：${reference}" >&2
+    return 1
+  fi
+}
+
+validate_network_configuration() {
+  local value
+  IFS=',' read -r -a configured_manifest_sources <<< "${release_manifest_urls}"
+  for value in "${configured_manifest_sources[@]}"; do
+    value="${value//[[:space:]]/}"
+    if [[ -n "${value}" ]]; then
+      validate_remote_source "${value}" "manifest 源" || return 1
+    fi
+  done
+  IFS=',' read -r -a configured_release_sources <<< "${release_base_urls}"
+  for value in "${configured_release_sources[@]}"; do
+    value="${value//[[:space:]]/}"
+    if [[ -n "${value}" ]]; then
+      validate_remote_source "${value}" "制品源" || return 1
+    fi
+  done
+  for value in "${repository_urls[@]}"; do
+    if [[ -n "${value}" ]]; then
+      validate_remote_source "${value}" "源码源" || return 1
+    fi
+  done
+  if [[ "${agent_mode}" == docker ]]; then
+    if [[ "${network_mode}" == offline && -n "${XINGCHEN_AGENT_IMAGE_MIRRORS:-}" ]]; then
+      echo "offline 网络模式拒绝配置镜像源；请预先导入 Agent 镜像。" >&2
+      return 1
+    fi
+    validate_internal_registry "${agent_image}" "Agent 镜像" || return 1
+    IFS=',' read -r -a configured_mirrors <<< "${XINGCHEN_AGENT_IMAGE_MIRRORS:-}"
+    for value in "${configured_mirrors[@]}"; do
+      value="${value%/}"
+      if [[ -n "${value}" ]]; then
+        validate_internal_registry "${value}/placeholder/image:v0.0.0" "镜像源" || return 1
+      fi
+    done
+  fi
 }
 
 probe_server_url() {
@@ -439,6 +651,11 @@ resolve_server_url() {
     return
   fi
 
+  if [[ "${network_mode}" == offline ]]; then
+    echo "offline 网络模式不会探测 DNS/协议；请通过 --server-url 提供完整 HTTP(S) URL。" >&2
+    exit 2
+  fi
+
   if [[ -z "${raw}" || "${raw}" == *[[:space:]/?#@]* || "${raw}" == *://* ]]; then
     echo "Server URL must be a hostname, hostname:port, or complete HTTP(S) URL: ${server_url}" >&2
     exit 2
@@ -475,6 +692,10 @@ resolve_server_url() {
 
 exchange_enrollment_token() {
   [[ -z "${agent_key}" ]] || return 0
+  if [[ "${network_mode}" == offline ]]; then
+    echo "offline 网络模式不能交换一次性接入令牌；请仅通过 XINGCHEN_AGENT_KEY 环境变量提供已签发长期密钥。" >&2
+    return 1
+  fi
   local endpoint="${server_url%/}/api/agent/v1/enroll" protocol='=https' response
   [[ "${server_url}" == http://* ]] && protocol='=http'
   response="$(printf '{"deviceId":"%s","token":"%s"}' "$(json_escape "${device_id}")" "$(json_escape "${enrollment_token}")" |
@@ -493,7 +714,11 @@ exchange_enrollment_token() {
   unset XINGCHEN_ENROLLMENT_TOKEN
 }
 
+validate_network_configuration
 resolve_server_url
+if [[ "${network_mode}" == internal ]]; then
+  validate_remote_source "${server_url}" "Controller 地址"
+fi
 
 run_with_timeout() {
   local seconds="$1"
@@ -519,7 +744,7 @@ release_platform() {
 normalize_release_version() {
   local value="${1:-}"
   value="${value#v}"
-  if [[ "${value}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+  if [[ "${value}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
     printf 'v%s.%s.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
     return 0
   fi
@@ -531,12 +756,13 @@ get_release_version() {
     normalize_release_version "${release_version}" || { echo "版本号必须是稳定语义版本，例如 v1.20.6。" >&2; return 2; }
     return
   fi
+  [[ "${network_mode}" != offline ]] || return 1
   local response latest manifest_url
   IFS=',' read -r -a manifest_sources <<< "${release_manifest_urls}"
   for manifest_url in "${manifest_sources[@]}"; do
     manifest_url="${manifest_url//[[:space:]]/}"
     [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue
-    response="$(curl -fsSL --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto '=https' --proto-redir '=https' --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue
+    response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto '=https' --proto-redir '=https' --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue
     latest="$(printf '%s' "${response}" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
     normalize_release_version "${latest}" && return 0
   done
@@ -577,7 +803,7 @@ extract_agent_archive() {
 
 controller_release_metadata() {
   local endpoint response version file checksum size protocol
-  [[ "${controller_releases}" == true ]] || return 1
+  [[ "${controller_releases}" == true && "${network_mode}" != offline ]] || return 1
   endpoint="${server_url%/}/api/setup/agent-release?os=${release_os}&arch=${release_arch}"
   protocol="$(controller_curl_protocol)"
   response="$(curl -fsSL --max-redirs 0 --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "${protocol}" --proto-redir "${protocol}" --tlsv1.2 "${endpoint}" 2>/dev/null)" || return 1
@@ -650,12 +876,12 @@ download_release_binary() {
       archive="${destination}/${asset}"
       checksum="${destination}/checksums.txt"
       echo "正在下载 Agent ${version}（${release_os}/${release_arch}）..."
-      if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 300 --max-filesize 52428800 --proto '=https' --proto-redir '=https' --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}"; then
+      if ! curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 300 --max-filesize 52428800 --proto '=https' --proto-redir '=https' --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}"; then
         rm -f "${archive}"
         continue
       fi
       [[ -s "${archive}" ]] || { rm -f "${archive}"; continue; }
-      if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto '=https' --proto-redir '=https' --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}"; then
+      if ! curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto '=https' --proto-redir '=https' --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}"; then
         rm -f "${archive}" "${checksum}"
         continue
       fi
@@ -733,6 +959,10 @@ json_escape() {
   printf '%s' "${value}"
 }
 
+write_initial_update_status() {
+  printf '{"status":"IDLE","lastError":"","changedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${temp_dir}/update-status.json"
+}
+
 service_json=""
 if ((${#services[@]} > 0)); then
   for service in "${services[@]}"; do
@@ -797,8 +1027,8 @@ fi
 
 config_tmp="${temp_dir}/agent.json"
 write_agent_config() {
-  printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "%s",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "allow_command_execution": %s,\n  "allow_file_operations": %s,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s",\n  "docker_socket": "%s"\n}\n' \
-    "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "$(json_escape "${agent_spool_path}")" "${allow_command_execution}" "${allow_file_operations}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" "$(json_escape "${docker_socket_config}")" > "${config_tmp}"
+  printf '{\n  "server_url": "%s",\n  "device_id": "%s",\n  "agent_key": "%s",\n  "interval": "%s",\n  "request_timeout": "10s",\n  "spool_dir": "%s",\n  "update_status_path": "%s",\n  "update_request_path": "%s",\n  "update_launcher_path": "",\n  "max_buffered_reports": 10000,\n  "allow_insecure_http": false,\n  "allow_command_execution": %s,\n  "allow_file_operations": %s,\n  "monitored_services": [%s],\n  "skip_process_collection": %s,\n  "skip_connection_count": %s,\n  "disk_mountpoints": [%s],\n  "host_root": "%s",\n  "docker_socket": "%s"\n}\n' \
+    "$(json_escape "${server_url}")" "$(json_escape "${device_id}")" "$(json_escape "${agent_key}")" "${interval}" "$(json_escape "${agent_spool_path}")" "$(json_escape "${agent_update_status_path}")" "$(json_escape "${agent_update_request_path}")" "${allow_command_execution}" "${allow_file_operations}" "${service_json}" "${skip_processes}" "${skip_connections}" "${disk_json}" "$(json_escape "${host_root}")" "$(json_escape "${docker_socket_config}")" > "${config_tmp}"
 
   # Avoid passing escaped JSON through awk -v, which can reinterpret backslashes.
   sed -i '$d' "${config_tmp}"
@@ -811,7 +1041,7 @@ write_agent_config() {
 }
 
 install_docker_agent() {
-  echo "正在拉取 Agent 镜像 ${agent_image}..."
+  echo "正在准备 Agent 镜像 ${agent_image}..."
   if ! pull_agent_image; then
     echo "无法从配置的镜像或源码源准备 Agent 镜像 ${agent_image}。请配置内网源，或使用 --no-docker --binary PATH 安装已校验程序。" >&2
     return 1
@@ -819,11 +1049,15 @@ install_docker_agent() {
 
   exchange_enrollment_token
   write_agent_config
+  write_initial_update_status
 
   local spool_volume="${XINGCHEN_AGENT_VOLUME:-xingchen-agent-spool}"
   docker volume create "${spool_volume}" >/dev/null
   install -d -m 0750 "${agent_config_dir}"
+  install -d -m 0755 "${manager_root}" "${agent_update_status_dir}"
+  install -d -o root -g root -m 0750 "${agent_update_request_dir}"
   install -m 0600 "${config_tmp}" "${agent_config_path}"
+  [[ -f "${agent_update_status_path}" ]] || install -m 0644 "${temp_dir}/update-status.json" "${agent_update_status_path}"
   systemctl disable --now "${agent_service_name}" >/dev/null 2>&1 || true
   if docker container inspect "${container_name}" >/dev/null 2>&1; then
     docker rm -f "${container_name}" >/dev/null
@@ -843,6 +1077,8 @@ install_docker_agent() {
     --env HOST_SYS=/host/sys \
     --env HOST_ETC=/host/etc \
     --mount "type=bind,src=${agent_config_path},dst=${agent_config_path},readonly" \
+    --mount "type=bind,src=${agent_update_status_dir},dst=${agent_update_status_dir},readonly" \
+    --mount "type=bind,src=${agent_update_request_dir},dst=${agent_update_request_dir}" \
     --mount "type=volume,src=${spool_volume},dst=${agent_spool_path}" \
     --mount "type=bind,src=/,dst=/host,readonly" \
     --mount "type=bind,src=/proc,dst=/host/proc,readonly" \
@@ -861,6 +1097,7 @@ install_docker_agent() {
   echo "星辰监控 Agent Docker 容器已安装并启动：${container_name}"
   echo "检查状态：docker logs --tail 100 ${container_name}"
   install_agent_updater
+  install_agent_update_bridge
 }
 
 pull_agent_image() {
@@ -868,6 +1105,14 @@ pull_agent_image() {
   if [[ ! "${mirror_pull_timeout}" =~ ^[1-9][0-9]*$ || ! "${agent_pull_timeout}" =~ ^[1-9][0-9]*$ ]]; then
     echo "Agent 镜像拉取超时必须是正整数秒数。" >&2
     return 2
+  fi
+  if [[ "${network_mode}" == offline ]]; then
+    if docker image inspect "${agent_image}" >/dev/null 2>&1; then
+      echo "offline 网络模式使用已导入的本地 Agent 镜像。"
+      return 0
+    fi
+    echo "offline 网络模式未找到本地 Agent 镜像 ${agent_image}；请先从已校验 bundle 导入。" >&2
+    return 1
   fi
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
@@ -886,11 +1131,16 @@ pull_agent_image() {
   if run_with_timeout "${agent_pull_timeout}" docker pull "${agent_image}"; then
     return 0
   fi
+  if [[ "${network_mode}" == internal ]]; then
+    echo "internal 网络模式下 Agent 镜像拉取失败，拒绝源码构建回退。" >&2
+    return 1
+  fi
   build_agent_image_from_source
 }
 
 build_agent_image_from_source() {
   local repository_url context build_version="${release_version:-}" build_ref="${source_ref}" image_tag actual_build_version
+  [[ "${network_mode}" == public ]] || return 1
   if [[ "${agent_image}" == *@* ]]; then
     echo "固定摘要镜像无法使用源码构建回退：${agent_image}" >&2
     return 1
@@ -924,6 +1174,49 @@ shell_quote() {
   printf "'%s'" "${1//\'/\'\"\'\"\'}"
 }
 
+install_agent_update_bridge() {
+  if [[ "$(uname -s)" != Linux ]] || ! command -v systemctl >/dev/null 2>&1 || ! systemctl show-environment >/dev/null 2>&1; then
+    echo "未检测到可用的 systemd；专用 Agent 远程更新请求未启用。" >&2
+    return 0
+  fi
+  local handler="${agent_update_request_handler_path}"
+  local service="${systemd_dir}/${agent_update_request_service_name}"
+  local path_unit="${systemd_dir}/${agent_update_request_path_name}"
+  install -d -m 0755 "${manager_root}" "${systemd_dir}"
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf 'request_path=%s\n' "$(shell_quote "${agent_update_request_path}")"
+    printf 'manager_root=%s\n' "$(shell_quote "${manager_root}")"
+    printf 'updater_path=%s\n' "$(shell_quote "${manager_updater_path}")"
+    printf 'update_status_path=%s\n' "$(shell_quote "${agent_update_status_path}")"
+    printf '%s\n' \
+      'processing_path="${manager_root}/.update-request.processing.$$"' \
+      'write_rejected_status() { local temporary now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; temporary="$(mktemp "${update_status_path}.XXXXXX" 2>/dev/null || true)"; [[ -n "${temporary}" ]] || return 0; printf '\''{"status":"FAILED","lastError":"Agent update request rejected.","changedAt":"%s"}\n'\'' "${now}" > "${temporary}"; chmod 0644 "${temporary}"; mv -f "${temporary}" "${update_status_path}"; }' \
+      'reject_request() { write_rejected_status || true; echo "Agent update request rejected." >&2; exit 2; }' \
+      '[[ -e "${request_path}" ]] || exit 0' \
+      'mv -- "${request_path}" "${processing_path}" || exit 75' \
+      'trap '\''rm -f -- "${processing_path}"'\'' EXIT' \
+      '[[ -f "${processing_path}" && ! -L "${processing_path}" ]] || reject_request' \
+      '[[ "$(stat -c %a "${processing_path}" 2>/dev/null || true)" == 600 ]] || reject_request' \
+      'size="$(stat -c %s "${processing_path}" 2>/dev/null || true)"; [[ "${size}" =~ ^[1-9][0-9]*$ ]] && ((size <= 512)) || reject_request' \
+      'mapfile -t fields < "${processing_path}"; ((${#fields[@]} == 4)) || reject_request' \
+      '[[ "${fields[0]}" =~ ^action=(update|rollback)$ ]] || reject_request; action="${BASH_REMATCH[1]}"' \
+      '[[ "${fields[1]}" =~ ^version=(v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$ ]] || reject_request; version="${BASH_REMATCH[1]}"; ((${#version} <= 64)) || reject_request' \
+      '[[ "${fields[2]}" =~ ^rollout_id=([1-9][0-9]*)?$ ]] || reject_request; rollout_id="${BASH_REMATCH[1]:-}"' \
+      '[[ "${fields[3]}" =~ ^member_id=([1-9][0-9]*)?$ ]] || reject_request; member_id="${BASH_REMATCH[1]:-}"' \
+      '[[ ( -z "${rollout_id}" && -z "${member_id}" ) || ( -n "${rollout_id}" && -n "${member_id}" ) ]] || reject_request' \
+      '[[ -x "${updater_path}" && ! -L "${updater_path}" ]] || reject_request' \
+      'sleep 10' \
+      '"${updater_path}" "${action}" "${version}"'
+  } > "${handler}"
+  chmod 0755 "${handler}"
+  printf '%s\n' '[Unit]' 'Description=Handle a validated Xingchen Agent update request' '' '[Service]' 'Type=oneshot' 'User=root' 'TimeoutStartSec=20min' "ExecStart=${handler}" > "${service}"
+  printf '%s\n' '[Unit]' 'Description=Watch for Xingchen Agent update requests' '' '[Path]' "PathExists=${agent_update_request_path}" "Unit=${agent_update_request_service_name}" '' '[Install]' 'WantedBy=multi-user.target' > "${path_unit}"
+  chmod 0644 "${service}" "${path_unit}"
+  systemctl daemon-reload
+  systemctl enable --now "${agent_update_request_path_name}" >/dev/null
+}
+
 install_agent_updater() {
   local systemd_available=true
   if [[ "$(uname -s)" != "Linux" ]] || ! command -v systemctl >/dev/null 2>&1 || ! systemctl show-environment >/dev/null 2>&1; then
@@ -951,6 +1244,9 @@ install_agent_updater() {
     printf 'controller_protocol=%s\n' "$(shell_quote "$(controller_curl_protocol)")"
     printf 'controller_releases=%s\n' "$(shell_quote "${controller_releases}")"
     printf 'allow_github_api=%s\n' "$(shell_quote "${allow_github_api}")"
+    printf 'network_mode=%s\n' "$(shell_quote "${network_mode}")"
+    printf 'allow_gitee=%s\n' "$(shell_quote "${allow_gitee}")"
+    printf 'release_max_redirects=%s\n' "$(shell_quote "${release_max_redirects}")"
     printf 'repositories=('
     for repository_url in "${repository_urls[@]}"; do
       printf ' %s' "$(shell_quote "${repository_url}")"
@@ -959,27 +1255,44 @@ install_agent_updater() {
     printf 'docker_socket_source=%s\n' "$(shell_quote "${docker_socket}")"
     printf 'docker_socket_target=%s\n' "$(shell_quote "${docker_socket_target}")"
     printf 'update_state_dir=%s\n' "$(shell_quote "${manager_root}")"
+    printf 'update_status_path=%s\n' "$(shell_quote "${agent_update_status_path}")"
+    printf 'update_status_dir=%s\n' "$(shell_quote "${agent_update_status_dir}")"
+    printf 'update_request_dir=%s\n' "$(shell_quote "${agent_update_request_dir}")"
     printf '%s\n' \
       'automatic_update=false; if [[ "${1:-}" == --automatic ]]; then automatic_update=true; shift; fi' \
       'failure_file="${update_state_dir}/update-failures"; pause_file="${update_state_dir}/update-paused-until"; failure_threshold=5; pause_seconds=86400' \
-      'if [[ "${automatic_update}" == true && -r "${pause_file}" ]]; then paused_until="$(cat "${pause_file}" 2>/dev/null || true)"; now="$(date +%s)"; if [[ "${paused_until}" =~ ^[0-9]+$ ]] && ((paused_until > now)); then echo "Agent 自动更新已暂停到 Unix 时间 ${paused_until}；可手动执行 update 重试。"; exit 0; fi; fi' \
+      'write_update_status() { local state="$1" message="${2:-}" temporary now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; temporary="$(mktemp "${update_status_path}.XXXXXX" 2>/dev/null || true)"; [[ -n "${temporary}" ]] || return 0; printf '\''{"status":"%s","lastError":"%s","changedAt":"%s"}\n'\'' "${state}" "${message}" "${now}" > "${temporary}"; chmod 0644 "${temporary}"; mv -f "${temporary}" "${update_status_path}"; }' \
+      'if [[ "${automatic_update}" == true && -r "${pause_file}" ]]; then paused_until="$(cat "${pause_file}" 2>/dev/null || true)"; now="$(date +%s)"; if [[ "${paused_until}" =~ ^[0-9]+$ ]] && ((paused_until > now)); then write_update_status PAUSED "Automatic updates paused after repeated failures." || true; echo "Agent 自动更新已暂停到 Unix 时间 ${paused_until}；可手动执行 update 重试。"; exit 0; fi; fi' \
       'command -v flock >/dev/null 2>&1 || { echo "Agent 更新需要 flock；请先安装 util-linux。" >&2; exit 1; }; lock_path="/run/lock/xingchen-agent-update.lock"; mkdir -p "$(dirname "${lock_path}")"; exec 9>"${lock_path}"; flock -n 9 || { echo "Agent 更新任务正在执行。" >&2; exit 75; }' \
-      'finish_update() { status=$?; trap - EXIT; if ((status == 0)); then rm -f "${failure_file}" "${pause_file}" 2>/dev/null || true; elif [[ "${automatic_update}" == true ]] && ((status != 75)); then count="$(cat "${failure_file}" 2>/dev/null || true)"; [[ "${count}" =~ ^[0-9]+$ ]] || count=0; count=$((count + 1)); temporary="$(mktemp "${update_state_dir}/.update-failures.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${count}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${failure_file}"; fi; if ((count >= failure_threshold)); then pause_until=$(($(date +%s) + pause_seconds)); temporary="$(mktemp "${update_state_dir}/.update-paused.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${pause_until}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${pause_file}"; fi; echo "Agent 自动更新连续失败 ${count} 次，已暂停 24 小时。" >&2; fi; fi; exit "${status}"; }' \
+      'finish_update() {' \
+      '  status=$?; trap - EXIT' \
+      '  if ((status == 0)); then' \
+      '    rm -f "${failure_file}" "${pause_file}" 2>/dev/null || true; write_update_status SUCCEEDED "" || true' \
+      '  elif [[ "${automatic_update}" == true ]] && ((status != 75)); then' \
+      '    count="$(cat "${failure_file}" 2>/dev/null || true)"; [[ "${count}" =~ ^[0-9]+$ ]] || count=0; count=$((count + 1)); temporary="$(mktemp "${update_state_dir}/.update-failures.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${count}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${failure_file}"; fi' \
+      '    if ((count >= failure_threshold)); then pause_until=$(($(date +%s) + pause_seconds)); temporary="$(mktemp "${update_state_dir}/.update-paused.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${pause_until}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${pause_file}"; fi; write_update_status PAUSED "Automatic updates paused after repeated failures." || true; echo "Agent 自动更新连续失败 ${count} 次，已暂停 24 小时。" >&2' \
+      '    else write_update_status FAILED "Agent update failed with exit code ${status}." || true; fi' \
+      '  else write_update_status FAILED "Agent update failed with exit code ${status}." || true; fi' \
+      '  exit "${status}"' \
+      '}' \
       'trap finish_update EXIT' \
+      'write_update_status CHECKING "" || true' \
       'run_with_timeout() {' \
       '  local seconds="$1"; shift' \
       '  if command -v timeout >/dev/null 2>&1; then timeout "${seconds}s" "$@"; else "$@"; fi' \
       '}' \
-      'normalize_version() { local value="${1#v}"; [[ "${value}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1; printf "v%s" "${value}"; }' \
+      'normalize_version() { local value="${1#v}"; [[ "${value}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || return 1; printf "v%s" "${value}"; }' \
       'version_less() { local left="${1#v}" right="${2#v}" l1 l2 l3 r1 r2 r3; IFS=. read -r l1 l2 l3 <<< "${left}"; IFS=. read -r r1 r2 r3 <<< "${right}"; ((10#${l1} < 10#${r1} || (10#${l1} == 10#${r1} && 10#${l2} < 10#${r2}) || (10#${l1} == 10#${r1} && 10#${l2} == 10#${r2} && 10#${l3} < 10#${r3}))); }' \
       'same_major() { local left="${1#v}" right="${2#v}"; [[ "${left%%.*}" == "${right%%.*}" ]]; }' \
       'platform() { os="$(uname -s | tr "[:upper:]" "[:lower:]")"; arch="$(uname -m)"; [[ "${os}" == linux ]] || return 1; case "${arch}" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) return 1 ;; esac; }' \
-      'controller_version() { local response value; [[ "${controller_releases}" == true ]] || return 1; response="$(curl -fsSL --max-redirs 0 --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-release?os=${os}&arch=${arch}" 2>/dev/null)" || return 1; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}"; }' \
-      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; if controller_version; then return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in "${manifests[@]}"; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${allow_github_api}" == true ]]; then response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null)" || return 1; value="$(printf "%s" "${response}" | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}"; return; fi; return 1; }' \
+      'controller_version() { local response value; [[ "${controller_releases}" == true && "${network_mode}" != offline ]] || return 1; response="$(curl -fsSL --max-redirs 0 --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-release?os=${os}&arch=${arch}" 2>/dev/null)" || return 1; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}"; }' \
+      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; [[ "${network_mode}" != offline ]] || return 1; if controller_version; then return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in "${manifests[@]}"; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${network_mode}" == public && "${allow_github_api}" == true ]]; then response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null)" || return 1; value="$(printf "%s" "${response}" | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}"; return; fi; return 1; }' \
       'versioned_image() { local reference="$1" version="$2" leaf; [[ "${reference}" != *@* ]] || return 1; leaf="${reference##*/}"; if [[ "${leaf}" == *:* ]]; then printf "%s:%s" "${reference%:*}" "${version}"; else printf "%s:%s" "${reference}" "${version}"; fi; }' \
       'verify_image_version() { local candidate="$1" expected="$2" actual; actual="$(docker image inspect --format "{{index .Config.Labels \"org.opencontainers.image.version\"}}" "${candidate}" 2>/dev/null || true)"; [[ "${actual#v}" == "${expected#v}" ]]; }' \
       'pull_image() {' \
       '  local target_version="$1" suffix prefix candidate build_ref="${1}"' \
+      '  if [[ "${network_mode}" == offline ]]; then verify_image_version "${image}" "${target_version}"; return; fi' \
+      '  write_update_status DOWNLOADING "" || true' \
       '  if [[ "${image}" == ghcr.io/* ]]; then' \
       '    suffix="${image#ghcr.io/}"' \
       '    IFS="," read -r -a prefixes <<< "${mirror_list}"' \
@@ -990,6 +1303,7 @@ install_agent_updater() {
       '    done' \
       '  fi' \
       '  if run_with_timeout "${pull_timeout}" docker pull "${image}" && verify_image_version "${image}" "${target_version}"; then return 0; fi' \
+      '  [[ "${network_mode}" == public ]] || return 1' \
       '  [[ "${image}" == *@* ]] && return 1' \
       '  for repository in "${repositories[@]}"; do' \
       '    echo "镜像源不可用，尝试从源码构建 Agent：${repository} (${build_ref})"' \
@@ -1012,6 +1326,7 @@ install_agent_updater() {
       'pull_image "${version}"' \
       'after="$(docker image inspect --format "{{.Id}}" "${image}" 2>/dev/null || true)"' \
       '[[ -n "${current}" && "${current}" == "${after}" ]] && exit 0' \
+      'write_update_status APPLYING "" || true' \
       'new_container="${container_name}.update"' \
       'old_container="${container_name}.previous"' \
       'docker rm -f "${new_container}" "${old_container}" >/dev/null 2>&1 || true' \
@@ -1022,6 +1337,7 @@ install_agent_updater() {
       '  old_exists=true' \
       'fi' \
       'restore_old() {' \
+      '  write_update_status ROLLING_BACK "Agent health check failed; restoring previous container." || true' \
       '  docker rm -f "${new_container}" >/dev/null 2>&1 || true' \
       '  if [[ "${old_exists}" == true ]]; then' \
       '    docker rename "${old_container}" "${container_name}" >/dev/null 2>&1 || true' \
@@ -1031,7 +1347,7 @@ install_agent_updater() {
       'if [[ -z "${docker_socket_source}" ]]; then for candidate_socket in /var/run/docker.sock /run/podman/podman.sock; do if [[ -S "${candidate_socket}" ]]; then docker_socket_source="${candidate_socket}"; break; fi; done; fi' \
       'socket_mount=()' \
       'if [[ -n "${docker_socket_source}" && -S "${docker_socket_source}" ]]; then socket_mount=(--mount "type=bind,src=${docker_socket_source},dst=${docker_socket_target},readonly"); fi' \
-       'if ! run_with_timeout 30 docker run -d --name "${new_container}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=${config_path},dst=${config_path},readonly" --mount "type=volume,src=${spool_volume},dst=${spool_path}" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/dev,dst=/host/dev,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${socket_mount[@]}" "${image}" -config "${config_path}" >/dev/null; then restore_old; exit 1; fi' \
+       'if ! run_with_timeout 30 docker run -d --name "${new_container}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=${config_path},dst=${config_path},readonly" --mount "type=bind,src=${update_status_dir},dst=${update_status_dir},readonly" --mount "type=bind,src=${update_request_dir},dst=${update_request_dir}" --mount "type=volume,src=${spool_volume},dst=${spool_path}" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/dev,dst=/host/dev,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${socket_mount[@]}" "${image}" -config "${config_path}" >/dev/null; then restore_old; exit 1; fi' \
       'sleep 2' \
       'if [[ "$(docker inspect --format "{{.State.Running}}" "${new_container}" 2>/dev/null || true)" != true ]]; then docker logs --tail 100 "${new_container}" >&2 || true; restore_old; exit 1; fi' \
       'docker rm -f "${old_container}" >/dev/null 2>&1 || true' \
@@ -1043,6 +1359,11 @@ install_agent_updater() {
     return 0
   fi
   if [[ "${auto_update}" != true ]]; then
+    if [[ "${systemd_available}" == true ]]; then
+      systemctl disable --now "${agent_update_timer_name}" >/dev/null 2>&1 || true
+      rm -f "${service}" "${timer}"
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
     echo "Agent 自动更新未启用，可运行 ${manager_path} update 手动检查。"
     return 0
   fi
@@ -1060,6 +1381,7 @@ install_agent_updater() {
 
 clone_agent_source() {
   local destination="$1" repository_url
+  [[ "${network_mode}" == public ]] || return 1
   for repository_url in "${repository_urls[@]}"; do
     rm -rf -- "${destination}"
     echo "正在尝试 Agent 源码仓库：${repository_url} (${source_ref})"
@@ -1085,29 +1407,45 @@ install_local_agent_updater() {
     printf 'controller_protocol=%s\n' "$(shell_quote "$(controller_curl_protocol)")"
     printf 'controller_releases=%s\n' "$(shell_quote "${controller_releases}")"
     printf 'allow_github_api=%s\n' "$(shell_quote "${allow_github_api}")"
+    printf 'network_mode=%s\n' "$(shell_quote "${network_mode}")"
+    printf 'allow_gitee=%s\n' "$(shell_quote "${allow_gitee}")"
+    printf 'release_max_redirects=%s\n' "$(shell_quote "${release_max_redirects}")"
     printf 'binary_path=%s\n' "$(shell_quote "${agent_binary_target}")"
     printf 'service_name=%s\n' "$(shell_quote "${agent_service_name}")"
     printf 'backup_dir=%s\n' "$(shell_quote "${agent_backup_dir}")"
     printf 'update_state_dir=%s\n' "$(shell_quote "${manager_root}")"
+    printf 'update_status_path=%s\n' "$(shell_quote "${agent_update_status_path}")"
     printf '%s\n' \
       'temp_dir="$(mktemp -d)"' \
       'automatic_update=false; if [[ "${1:-}" == --automatic ]]; then automatic_update=true; shift; fi' \
       'failure_file="${update_state_dir}/update-failures"; pause_file="${update_state_dir}/update-paused-until"; failure_threshold=5; pause_seconds=86400' \
-      'if [[ "${automatic_update}" == true && -r "${pause_file}" ]]; then paused_until="$(cat "${pause_file}" 2>/dev/null || true)"; now="$(date +%s)"; if [[ "${paused_until}" =~ ^[0-9]+$ ]] && ((paused_until > now)); then rm -rf "${temp_dir}"; echo "Agent 自动更新已暂停到 Unix 时间 ${paused_until}；可手动执行 update 重试。"; exit 0; fi; fi' \
+      'write_update_status() { local state="$1" message="${2:-}" temporary now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; temporary="$(mktemp "${update_status_path}.XXXXXX" 2>/dev/null || true)"; [[ -n "${temporary}" ]] || return 0; printf '\''{"status":"%s","lastError":"%s","changedAt":"%s"}\n'\'' "${state}" "${message}" "${now}" > "${temporary}"; chmod 0644 "${temporary}"; mv -f "${temporary}" "${update_status_path}"; }' \
+      'if [[ "${automatic_update}" == true && -r "${pause_file}" ]]; then paused_until="$(cat "${pause_file}" 2>/dev/null || true)"; now="$(date +%s)"; if [[ "${paused_until}" =~ ^[0-9]+$ ]] && ((paused_until > now)); then write_update_status PAUSED "Automatic updates paused after repeated failures." || true; rm -rf "${temp_dir}"; echo "Agent 自动更新已暂停到 Unix 时间 ${paused_until}；可手动执行 update 重试。"; exit 0; fi; fi' \
       'command -v flock >/dev/null 2>&1 || { echo "Agent 更新需要 flock；请先安装 util-linux。" >&2; exit 1; }; lock_path="/run/lock/xingchen-agent-update.lock"; mkdir -p "$(dirname "${lock_path}")"; exec 9>"${lock_path}"; flock -n 9 || exit 75' \
-      'finish_update() { status=$?; trap - EXIT; rm -rf "${temp_dir}"; if ((status == 0)); then rm -f "${failure_file}" "${pause_file}" 2>/dev/null || true; elif [[ "${automatic_update}" == true ]] && ((status != 75)); then count="$(cat "${failure_file}" 2>/dev/null || true)"; [[ "${count}" =~ ^[0-9]+$ ]] || count=0; count=$((count + 1)); temporary="$(mktemp "${update_state_dir}/.update-failures.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${count}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${failure_file}"; fi; if ((count >= failure_threshold)); then pause_until=$(($(date +%s) + pause_seconds)); temporary="$(mktemp "${update_state_dir}/.update-paused.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${pause_until}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${pause_file}"; fi; echo "Agent 自动更新连续失败 ${count} 次，已暂停 24 小时。" >&2; fi; fi; exit "${status}"; }' \
+      'finish_update() {' \
+      '  status=$?; trap - EXIT; rm -rf "${temp_dir}"' \
+      '  if ((status == 0)); then' \
+      '    rm -f "${failure_file}" "${pause_file}" 2>/dev/null || true; write_update_status SUCCEEDED "" || true' \
+      '  elif [[ "${automatic_update}" == true ]] && ((status != 75)); then' \
+      '    count="$(cat "${failure_file}" 2>/dev/null || true)"; [[ "${count}" =~ ^[0-9]+$ ]] || count=0; count=$((count + 1)); temporary="$(mktemp "${update_state_dir}/.update-failures.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${count}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${failure_file}"; fi' \
+      '    if ((count >= failure_threshold)); then pause_until=$(($(date +%s) + pause_seconds)); temporary="$(mktemp "${update_state_dir}/.update-paused.XXXXXX" 2>/dev/null || true)"; if [[ -n "${temporary}" ]]; then printf "%s\n" "${pause_until}" > "${temporary}"; chmod 0600 "${temporary}"; mv -f "${temporary}" "${pause_file}"; fi; write_update_status PAUSED "Automatic updates paused after repeated failures." || true; echo "Agent 自动更新连续失败 ${count} 次，已暂停 24 小时。" >&2' \
+      '    else write_update_status FAILED "Agent update failed with exit code ${status}." || true; fi' \
+      '  else write_update_status FAILED "Agent update failed with exit code ${status}." || true; fi' \
+      '  exit "${status}"' \
+      '}' \
       'trap finish_update EXIT' \
-      'normalize_version() { local value="${1#v}"; [[ "${value}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1; printf "v%s" "${value}"; }' \
+      'write_update_status CHECKING "" || true' \
+      'normalize_version() { local value="${1#v}"; [[ "${value}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || return 1; printf "v%s" "${value}"; }' \
       'version_less() { local left="${1#v}" right="${2#v}" l1 l2 l3 r1 r2 r3; IFS=. read -r l1 l2 l3 <<< "${left}"; IFS=. read -r r1 r2 r3 <<< "${right}"; ((10#${l1} < 10#${r1} || (10#${l1} == 10#${r1} && 10#${l2} < 10#${r2}) || (10#${l1} == 10#${r1} && 10#${l2} == 10#${r2} && 10#${l3} < 10#${r3}))); }' \
       'same_major() { local left="${1#v}" right="${2#v}"; [[ "${left%%.*}" == "${right%%.*}" ]]; }' \
       'platform() { os="$(uname -s | tr "[:upper:]" "[:lower:]")"; arch="$(uname -m)"; [[ "${os}" == linux ]] || return 1; case "${arch}" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) return 1 ;; esac; }' \
-      'controller_metadata() { local response; [[ "${controller_releases}" == true ]] || return 1; response="$(curl -fsSL --max-redirs 0 --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-release?os=${os}&arch=${arch}" 2>/dev/null)" || return 1; controller_version="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; controller_file="$(printf "%s" "${response}" | sed -n "s/.*\"file\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; controller_sha="$(printf "%s" "${response}" | sed -n "s/.*\"sha256\"[[:space:]]*:[[:space:]]*\"\([a-fA-F0-9]*\)\".*/\1/p" | head -n 1 | tr "[:upper:]" "[:lower:]")"; controller_size="$(printf "%s" "${response}" | sed -n "s/.*\"size\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" | head -n 1)"; controller_version="$(normalize_version "${controller_version}")" || return 1; [[ "${controller_file}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.tar\.gz$ && "${controller_sha}" =~ ^[a-f0-9]{64}$ && "${controller_size}" =~ ^[1-9][0-9]*$ ]] || return 1; ((controller_size <= 536870912)); }' \
-      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; if controller_metadata; then printf "%s" "${controller_version}"; return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in "${manifests[@]}"; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${allow_github_api}" == true ]]; then curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1 | while IFS= read -r value; do normalize_version "${value}"; done; return; fi; return 1; }' \
+      'controller_metadata() { local response; [[ "${controller_releases}" == true && "${network_mode}" != offline ]] || return 1; response="$(curl -fsSL --max-redirs 0 --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-release?os=${os}&arch=${arch}" 2>/dev/null)" || return 1; controller_version="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; controller_file="$(printf "%s" "${response}" | sed -n "s/.*\"file\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; controller_sha="$(printf "%s" "${response}" | sed -n "s/.*\"sha256\"[[:space:]]*:[[:space:]]*\"\([a-fA-F0-9]*\)\".*/\1/p" | head -n 1 | tr "[:upper:]" "[:lower:]")"; controller_size="$(printf "%s" "${response}" | sed -n "s/.*\"size\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" | head -n 1)"; controller_version="$(normalize_version "${controller_version}")" || return 1; [[ "${controller_file}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.tar\.gz$ && "${controller_sha}" =~ ^[a-f0-9]{64}$ && "${controller_size}" =~ ^[1-9][0-9]*$ ]] || return 1; ((controller_size <= 536870912)); }' \
+      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; [[ "${network_mode}" != offline ]] || return 1; if controller_metadata; then printf "%s" "${controller_version}"; return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in "${manifests[@]}"; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${network_mode}" == public && "${allow_github_api}" == true ]]; then curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1 | while IFS= read -r value; do normalize_version "${value}"; done; return; fi; return 1; }' \
       'extract_archive() { local archive="$1" expected="${2:-}" listing entry verbose; listing="$(tar -tzf "${archive}")" || return 1; [[ -n "${listing}" && "${listing}" != *$'\''\n'\''* ]] || return 1; entry="${listing#./}"; [[ "${entry}" == xingchen-agent || "${entry}" == guanlan-agent ]] || return 1; [[ -z "${expected}" || "${entry}" == "${expected}" ]] || return 1; verbose="$(tar -tvzf "${archive}")" || return 1; [[ -n "${verbose}" && "${verbose}" != *$'\''\n'\''* && "${verbose:0:1}" == - ]] || return 1; tar -xzf "${archive}" -C "${temp_dir}" || return 1; [[ -f "${temp_dir}/${entry}" && ! -L "${temp_dir}/${entry}" ]] || return 1; install -m 0755 "${temp_dir}/${entry}" "${temp_dir}/xingchen-agent.new"; }' \
       'download_controller() { local version="$1" archive actual_size actual; controller_metadata || return 1; [[ "${controller_version}" == "${version}" ]] || return 1; archive="${temp_dir}/${controller_file}"; curl -fsSL --max-redirs 0 --retry 3 --connect-timeout 10 --max-time 300 --max-filesize 536870912 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-artifact?os=${os}&arch=${arch}&version=${version}" -o "${archive}" || return 1; actual_size="$(wc -c < "${archive}" | tr -d "[:space:]")"; actual="$(sha256sum "${archive}" | awk '\''{print $1}'\'')"; [[ "${actual_size}" == "${controller_size}" && "${actual}" == "${controller_sha}" ]] || return 1; extract_archive "${archive}"; }' \
-      'download() { local version="${1}" asset_prefix asset="" base archive checksum expected actual; download_controller "${version}" && return 0; IFS="," read -r -a bases <<< "${release_base_urls}"; for base in "${bases[@]}"; do base="${base%/}"; [[ "${base}" == https://* && "${base}" != *"@"* && "${base}" != *"?"* && "${base}" != *"#"* && "${base}" != *[[:space:]]* ]] || continue; for asset_prefix in xingchen-agent guanlan-agent; do asset="${asset_prefix}_${1#v}_${os}_${arch}.tar.gz"; archive="${temp_dir}/${asset}"; checksum="${temp_dir}/checksums.txt"; curl -fsSL --retry 3 --connect-timeout 10 --max-time 300 --max-filesize 536870912 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}" || continue; curl -fsSL --retry 3 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}" || continue; expected="$(awk -v n="${asset}" '\''$2 == n || substr($2, 2) == n { print $1; exit }'\'' "${checksum}")"; actual="$(sha256sum "${archive}" | awk '\''{print $1}'\'')"; [[ -n "${expected}" && "${expected}" == "${actual}" ]] || continue; extract_archive "${archive}" "${asset_prefix}" && return 0; done; done; return 1; }' \
-      'rollback_old() { local old="$1"; rm -f "${binary_path}"; mv "${old}" "${binary_path}" || return 1; systemctl start "${service_name}" >/dev/null 2>&1 && systemctl is-active --quiet "${service_name}"; }' \
-      'atomic_install() { local old="${binary_path}.previous.$$" backup_version="unknown" backup_path; mkdir -p "${backup_dir}"; backup_version="$("${binary_path}" --version 2>/dev/null | sed -n "s/.*\(v[0-9][0-9.]*\).*/\1/p" | head -n 1 || true)"; backup_path="${backup_dir}/xingchen-agent.${backup_version#v}.$(date -u +%Y%m%d%H%M%S).backup"; cp -p "${binary_path}" "${backup_path}" 2>/dev/null || true; find "${backup_dir}" -type f -name "xingchen-agent.*.backup" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | awk '\''NR > 5 { sub(/^[^ ]+ /, ""); print }'\'' | xargs -r rm -f; systemctl stop "${service_name}" >/dev/null 2>&1 || true; mv "${binary_path}" "${old}" || return 1; if ! mv "${temp_dir}/xingchen-agent.new" "${binary_path}"; then rollback_old "${old}" || { echo "Agent 替换失败，且旧版本恢复失败。" >&2; return 2; }; return 1; fi; if ! systemctl start "${service_name}" >/dev/null 2>&1 || ! systemctl is-active --quiet "${service_name}"; then rollback_old "${old}" || { echo "Agent 启动失败，且旧版本恢复后仍未存活。" >&2; return 2; }; return 1; fi; rm -f "${old}"; }' \
+      'download() { local version="${1}" asset_prefix asset="" base archive checksum expected actual; [[ "${network_mode}" != offline ]] || return 1; write_update_status DOWNLOADING "" || true; download_controller "${version}" && return 0; IFS="," read -r -a bases <<< "${release_base_urls}"; for base in "${bases[@]}"; do base="${base%/}"; [[ "${base}" == https://* && "${base}" != *"@"* && "${base}" != *"?"* && "${base}" != *"#"* && "${base}" != *[[:space:]]* ]] || continue; for asset_prefix in xingchen-agent guanlan-agent; do asset="${asset_prefix}_${1#v}_${os}_${arch}.tar.gz"; archive="${temp_dir}/${asset}"; checksum="${temp_dir}/checksums.txt"; curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --connect-timeout 10 --max-time 300 --max-filesize 536870912 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}" || continue; curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}" || continue; expected="$(awk -v n="${asset}" '\''$2 == n || substr($2, 2) == n { print $1; exit }'\'' "${checksum}")"; actual="$(sha256sum "${archive}" | awk '\''{print $1}'\'')"; [[ -n "${expected}" && "${expected}" == "${actual}" ]] || continue; extract_archive "${archive}" "${asset_prefix}" && return 0; done; done; return 1; }' \
+      'rollback_old() { local old="$1"; write_update_status ROLLING_BACK "Agent health check failed; restoring previous binary." || true; rm -f "${binary_path}"; mv "${old}" "${binary_path}" || return 1; systemctl start "${service_name}" >/dev/null 2>&1 && systemctl is-active --quiet "${service_name}"; }' \
+      'atomic_install() { local old="${binary_path}.previous.$$" backup_version="unknown" backup_path; write_update_status APPLYING "" || true; mkdir -p "${backup_dir}"; backup_version="$("${binary_path}" --version 2>/dev/null | sed -n "s/.*\(v[0-9][0-9.]*\).*/\1/p" | head -n 1 || true)"; backup_path="${backup_dir}/xingchen-agent.${backup_version#v}.$(date -u +%Y%m%d%H%M%S).backup"; cp -p "${binary_path}" "${backup_path}" 2>/dev/null || true; find "${backup_dir}" -type f -name "xingchen-agent.*.backup" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | awk '\''NR > 5 { sub(/^[^ ]+ /, ""); print }'\'' | xargs -r rm -f; systemctl stop "${service_name}" >/dev/null 2>&1 || true; mv "${binary_path}" "${old}" || return 1; if ! mv "${temp_dir}/xingchen-agent.new" "${binary_path}"; then rollback_old "${old}" || { echo "Agent 替换失败，且旧版本恢复失败。" >&2; return 2; }; return 1; fi; if ! systemctl start "${service_name}" >/dev/null 2>&1 || ! systemctl is-active --quiet "${service_name}"; then rollback_old "${old}" || { echo "Agent 启动失败，且旧版本恢复后仍未存活。" >&2; return 2; }; return 1; fi; rm -f "${old}"; }' \
       'command="${1:-update}"; requested_version="${2:-}"; platform || { echo "当前系统或架构不支持预编译 Agent。" >&2; exit 1; }' \
       'if [[ "${command}" == list-versions ]]; then if controller_metadata; then printf "%s\n" "${controller_version}"; exit 0; fi; version_for_update; exit $?; fi' \
       'version="$(version_for_update)" || { echo "无法获取 Agent Release 版本。" >&2; exit 1; }' \
@@ -1121,6 +1459,9 @@ install_local_agent_updater() {
   } > "${updater}"
   chmod 0755 "${updater}"
   if [[ "${auto_update}" != true ]]; then
+    systemctl disable --now "${agent_update_timer_name}" >/dev/null 2>&1 || true
+    rm -f "${service}" "${timer}"
+    systemctl daemon-reload >/dev/null 2>&1 || true
     return 0
   fi
   printf '%s\n' '[Unit]' 'Description=Update Xingchen Monitor Agent binary' 'After=network-online.target' 'Wants=network-online.target' '' '[Service]' 'Type=oneshot' 'TimeoutStartSec=15min' "ExecStart=${updater} --automatic" > "${service}"
@@ -1130,8 +1471,17 @@ install_local_agent_updater() {
 }
 
 install_local_agent() {
+  local source_root source_build_version
   if [[ -z "${binary_path}" ]]; then
+    if [[ "${network_mode}" == offline ]]; then
+      echo "offline 网络模式安装原生 Agent 必须通过 --binary 提供已校验的本地二进制。" >&2
+      exit 2
+    fi
     if ! download_release_binary "${release_version}" "${temp_dir}/release"; then
+      if [[ "${network_mode}" == internal ]]; then
+        echo "internal 网络模式下预编译 Agent Release 不可用，拒绝源码构建回退；请修复内部制品源或通过 --binary 提供已校验程序。" >&2
+        exit 1
+      fi
       echo "预编译 Agent Release 不可用，准备回退到源码构建。" >&2
       source_root="${project_root}"
       if [[ -z "${source_root}" || ! -f "${source_root}/agent/go.mod" ]]; then
@@ -1154,7 +1504,12 @@ install_local_agent() {
         echo "未提供预编译 Agent 时需要 Go 1.24+。也可以使用 --binary 指定已构建程序。" >&2
         exit 1
       fi
-      (cd "${source_root}/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${temp_dir}/xingchen-agent" ./cmd/agent)
+      source_build_version="$(normalize_release_version "${release_version}" 2>/dev/null || true)"
+      if [[ -z "${source_build_version}" ]]; then
+        source_build_version="$(normalize_release_version "${source_ref}" 2>/dev/null || true)"
+      fi
+      source_build_version="${source_build_version:-dev}"
+      (cd "${source_root}/agent" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${source_build_version}" -o "${temp_dir}/xingchen-agent" ./cmd/agent)
       binary_path="${temp_dir}/xingchen-agent"
     else
       binary_path="${temp_dir}/release/${release_downloaded_binary}"
@@ -1168,6 +1523,7 @@ install_local_agent() {
 
   exchange_enrollment_token
   write_agent_config
+  write_initial_update_status
 
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker container inspect "${container_name}" >/dev/null 2>&1; then
     docker rm -f "${container_name}" >/dev/null
@@ -1177,8 +1533,11 @@ install_local_agent() {
   useradd --system --home-dir "${agent_data_dir}" --shell /usr/sbin/nologin "${agent_user}"
   fi
   install -d -o "${agent_user}" -g "${agent_user}" -m 0750 "${agent_config_dir}" "${agent_spool_path}" "${agent_backup_dir}"
+  install -d -m 0755 "${manager_root}" "${agent_update_status_dir}"
+  install -d -o root -g "${agent_user}" -m 0770 "${agent_update_request_dir}"
   install -m 0755 "${binary_path}" "${agent_binary_target}"
   install -o "${agent_user}" -g "${agent_user}" -m 0600 "${config_tmp}" "${agent_config_path}"
+  [[ -f "${agent_update_status_path}" ]] || install -m 0644 "${temp_dir}/update-status.json" "${agent_update_status_path}"
 
 socket_group_line=""
 if [[ -n "${docker_socket}" && -S "${docker_socket}" ]] && command -v stat >/dev/null 2>&1; then
@@ -1215,6 +1574,7 @@ printf '%s\n' \
   'ProtectSystem=strict' \
   'ProtectHome=true' \
   "ReadWritePaths=${agent_data_dir}" \
+  "ReadWritePaths=${agent_update_request_dir}" \
   '' \
   '[Install]' \
   'WantedBy=multi-user.target' > "${unit_tmp}"
@@ -1224,6 +1584,7 @@ install -m 0644 "${unit_tmp}" "${systemd_dir}/${agent_service_name}"
 systemctl daemon-reload
 systemctl enable --now "${agent_service_name}"
 install_local_agent_updater
+install_agent_update_bridge
 }
 
 install_manager() {
@@ -1238,8 +1599,8 @@ install_manager() {
   if [[ "${source_path}" != "${manager_real_path}" ]]; then
     install -m 0755 "${script_source}" "${manager_path}"
   fi
-  printf 'AGENT_MODE=%s\nBINARY_PATH=%s\nBINARY_TARGET=%s\nAGENT_SERVICE=%s\nAGENT_USER=%s\nCONFIG_DIR=%s\nDATA_DIR=%s\nUPDATE_SERVICE=%s\nUPDATE_TIMER=%s\nRELEASE_REPO=%s\nRELEASE_BASE_URLS=%s\nCONTAINER_NAME=%s\nSPOOL_VOLUME=%s\n' \
-    "${agent_mode}" "${agent_binary_target}" "${agent_binary_target}" "${agent_service_name}" "${agent_user}" "${agent_config_dir}" "${agent_data_dir}" "${agent_update_service_name}" "${agent_update_timer_name}" "${release_repo}" "${release_base_urls}" "${container_name}" "${XINGCHEN_AGENT_VOLUME:-xingchen-agent-spool}" > "${manager_metadata_path}"
+  printf 'AGENT_MODE=%s\nBINARY_PATH=%s\nBINARY_TARGET=%s\nAGENT_SERVICE=%s\nAGENT_USER=%s\nCONFIG_DIR=%s\nDATA_DIR=%s\nUPDATE_SERVICE=%s\nUPDATE_TIMER=%s\nRELEASE_REPO=%s\nRELEASE_BASE_URLS=%s\nNETWORK_MODE=%s\nALLOW_GITEE=%s\nCONTAINER_NAME=%s\nSPOOL_VOLUME=%s\n' \
+    "${agent_mode}" "${agent_binary_target}" "${agent_binary_target}" "${agent_service_name}" "${agent_user}" "${agent_config_dir}" "${agent_data_dir}" "${agent_update_service_name}" "${agent_update_timer_name}" "${release_repo}" "${release_base_urls}" "${network_mode}" "${allow_gitee}" "${container_name}" "${XINGCHEN_AGENT_VOLUME:-xingchen-agent-spool}" > "${manager_metadata_path}"
   chmod 0600 "${manager_metadata_path}"
   rm -f "${legacy_updater_path}"
   echo "Agent 管理入口：${manager_path}"

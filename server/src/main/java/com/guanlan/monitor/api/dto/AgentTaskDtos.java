@@ -1,16 +1,21 @@
 package com.guanlan.monitor.api.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.guanlan.monitor.domain.AgentTask;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 public final class AgentTaskDtos {
     private AgentTaskDtos() {}
@@ -38,6 +43,48 @@ public final class AgentTaskDtos {
             @Min(1) @Max(300) Integer timeoutSeconds,
             @Min(1024) @Max(1_048_576) Integer maxOutputBytes
     ) {}
+
+    public static final class UpdateRequest {
+        @NotBlank @Size(max = 128)
+        private String deviceId;
+        @NotBlank @Size(max = 8)
+        private String action;
+        @NotBlank @Size(max = 32)
+        private String version;
+        @NotNull @Positive
+        private Long rolloutId;
+        @NotNull @Positive
+        private Long memberId;
+        private final Set<String> unknownFields = new LinkedHashSet<>();
+
+        public UpdateRequest() {}
+
+        public UpdateRequest(String deviceId, String action, String version, Long rolloutId, Long memberId) {
+            this.deviceId = deviceId;
+            this.action = action;
+            this.version = version;
+            this.rolloutId = rolloutId;
+            this.memberId = memberId;
+        }
+
+        public String deviceId() { return deviceId; }
+        public String action() { return action; }
+        public String version() { return version; }
+        public Long rolloutId() { return rolloutId; }
+        public Long memberId() { return memberId; }
+
+        public void setDeviceId(String deviceId) { this.deviceId = deviceId; }
+        public void setAction(String action) { this.action = action; }
+        public void setVersion(String version) { this.version = version; }
+        public void setRolloutId(Long rolloutId) { this.rolloutId = rolloutId; }
+        public void setMemberId(Long memberId) { this.memberId = memberId; }
+
+        @JsonAnySetter
+        public void unknown(String name, Object ignored) { unknownFields.add(name); }
+
+        @JsonIgnore
+        public Set<String> unknownFields() { return Set.copyOf(unknownFields); }
+    }
 
     public record ResultRequest(
             @NotBlank @Size(max = 20) String status,

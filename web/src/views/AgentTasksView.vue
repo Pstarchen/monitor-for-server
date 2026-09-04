@@ -26,10 +26,10 @@ const form = reactive({ deviceId: '', command: '', args: '', timeoutSeconds: 30,
 
 const operableDevices = computed(() => devices.value.filter((device) => auth.canRunTasks(device.id)))
 const canOperate = computed(() => (auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR') && operableDevices.value.length > 0)
-const canOperateTask = (task: AgentTask) => canOperate.value && auth.canRunTasks(task.deviceId)
+const canOperateTask = (task: AgentTask) => task.operation !== 'AGENT_UPDATE' && canOperate.value && auth.canRunTasks(task.deviceId)
 const filtered = computed(() => tasks.value.filter((task) => (!deviceFilter.value || task.deviceId === deviceFilter.value) && (!statusFilter.value || task.status === statusFilter.value)))
 const statusLabels: Record<AgentTaskStatus, string> = { QUEUED: '排队中', RUNNING: '执行中', SUCCEEDED: '成功', FAILED: '失败', TIMED_OUT: '超时', CANCELED: '已取消' }
-const operationLabels: Record<AgentTaskOperation, string> = { COMMAND: '命令', FILE_LIST: '列目录', FILE_READ: '读文件', FILE_WRITE: '写文件', FILE_DELETE: '删文件' }
+const operationLabels: Record<AgentTaskOperation, string> = { COMMAND: '命令', FILE_LIST: '列目录', FILE_READ: '读文件', FILE_WRITE: '写文件', FILE_DELETE: '删文件', AGENT_UPDATE: 'Agent 更新' }
 
 async function load() {
   error.value = ''

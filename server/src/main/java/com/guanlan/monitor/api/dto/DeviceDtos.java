@@ -73,7 +73,8 @@ public final class DeviceDtos {
             LocalDate purchaseDate, LocalDate warrantyExpiresAt, String description,
             boolean ddnsEnabled, Long ddnsConfigId, boolean publicVisible, Device.Status status,
             Instant lastSeenAt, String agentKeyPrefix, boolean controllerManaged, Instant createdAt, Map<String, Object> hardware, MetricView latest,
-            DeviceHealthDtos.View health
+            DeviceHealthDtos.View health, String agentVersion, Device.AgentUpdateStatus agentUpdateStatus,
+            String agentLastUpdateError, Instant agentUpdateStateChangedAt
     ) {}
 
     public record Credential(View device, String agentKey) {}

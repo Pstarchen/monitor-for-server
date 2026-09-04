@@ -21,6 +21,20 @@ grep -F '$sourceDockerfiles = @(' "${script_dir}/update-controller.ps1" >/dev/nu
 grep -F 'XINGCHEN_AGENT_IMAGE_MIRRORS:-}' "${installer}" >/dev/null
 grep -F '/api/setup/agent-release?os=${release_os}&arch=${release_arch}' "${installer}" >/dev/null
 grep -F 'XINGCHEN_AGENT_ALLOW_GITHUB_API:-false' "${installer}" >/dev/null
+grep -F 'XINGCHEN_NETWORK_MODE:-public' "${installer}" >/dev/null
+grep -F 'XINGCHEN_ALLOW_GITEE:-false' "${installer}" >/dev/null
+grep -F -- '--network-mode public|internal|offline' "${installer}" >/dev/null
+grep -F -- '-X main.version=${source_build_version}' "${installer}" >/dev/null
+grep -F 'agent_update_status_dir}" == /' "${installer}" >/dev/null
+grep -F '"update_request_path": "%s"' "${installer}" >/dev/null
+grep -F 'PathExists=${agent_update_request_path}' "${installer}" >/dev/null
+grep -F '"${updater_path}" "${action}" "${version}"' "${installer}" >/dev/null
+if grep -F 'eval ' "${installer}" >/dev/null; then
+  echo 'Agent update request bridge must not evaluate request content.' >&2
+  exit 1
+fi
+grep -F 'internal 网络模式拒绝 GitHub/GHCR' "${installer}" >/dev/null
+grep -F 'offline 网络模式使用已导入的本地 Agent 镜像' "${installer}" >/dev/null
 grep -F 'XINGCHEN_AGENT_RELEASE_BASE_URLS:-}' "${installer}" >/dev/null
 grep -F 'XINGCHEN_ENROLLMENT_TOKEN:-}' "${installer}" >/dev/null
 grep -F '/api/agent/v1/enroll' "${installer}" >/dev/null
@@ -29,6 +43,38 @@ grep -F 'XINGCHEN_ENROLLMENT_TOKEN' "${script_dir}/install-agent.ps1" >/dev/null
 grep -F '/api/agent/v1/enroll' "${script_dir}/install-agent.ps1" >/dev/null
 grep -F 'XINGCHEN_REPOSITORY_URLS:-}' "${installer}" >/dev/null
 grep -F 'version_less()' "${installer}" >/dev/null
+redirect_limit_count="$(grep -Fo -- '--max-redirs "${release_max_redirects}"' "${installer}" | wc -l | tr -d '[:space:]')"
+if (( redirect_limit_count < 7 )); then
+  echo 'Not every external Linux Agent Release request uses the network-mode redirect limit.' >&2
+  exit 1
+fi
+grep -F '[[ "${network_mode}" == public ]] || return 1' "${installer}" >/dev/null
+grep -F 'internal 网络模式下预编译 Agent Release 不可用，拒绝源码构建回退' "${installer}" >/dev/null
+(
+  source <(awk '/^normalize_release_version\(\)/ { capture = 1 } /^get_release_version\(\)/ { exit } capture { print }' "${installer}")
+  [[ "$(normalize_release_version 1.20.14)" == v1.20.14 ]]
+  if normalize_release_version v01.20.14 >/dev/null 2>&1; then
+    echo 'Agent installer accepted a leading-zero version.' >&2
+    exit 1
+  fi
+)
+(
+  source <(awk '/^network_url_host\(\)/ { capture = 1 } /^probe_server_url\(\)/ { exit } capture { print }' "${installer}")
+  network_mode=internal
+  allow_gitee=false
+  release_manifest_urls=''
+  release_base_urls=''
+  repository_urls=()
+  agent_image=ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15
+  XINGCHEN_AGENT_IMAGE_MIRRORS=''
+  agent_mode=native
+  validate_network_configuration
+  agent_mode=docker
+  if validate_network_configuration >/dev/null 2>&1; then
+    echo 'Internal Docker install accepted the default public Agent image.' >&2
+    exit 1
+  fi
+)
 if [[ "$(grep -Fc 'same_major()' "${installer}")" -ne 2 ]]; then
   echo 'Generated Bash updaters do not enforce the same-major automatic update policy.' >&2
   exit 1
@@ -68,6 +114,14 @@ for documentation in monitored-agent.md deployment.md user-guide.md; do
   fi
   if grep -F -- '-o xingchen-agent.sh' "${documentation_path}" >/dev/null; then
     echo "${documentation} uses a predictable Agent installer path." >&2
+    exit 1
+  fi
+done
+for documentation in deployment.md monitored-agent.md controller-server.md; do
+  documentation_path="${script_dir}/../docs/${documentation}"
+  grep -Eq '^(export )?XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release\.internal\.example/xingchen$' "${documentation_path}"
+  if grep -Eq '^(export )?XINGCHEN_AGENT_RELEASE_BASE_URLS=.*/v[0-9]+\.[0-9]+\.[0-9]+/?$' "${documentation_path}"; then
+    echo "${documentation} configures the Agent release base URL with a duplicated version directory." >&2
     exit 1
   fi
 done
@@ -113,6 +167,13 @@ mkdir -p "${rendered_dir}/systemd"
   systemd_dir="${rendered_dir}/systemd"
   agent_update_service_name=xingchen-agent-update.service
   agent_update_timer_name=xingchen-agent-update.timer
+  agent_update_status_path="${rendered_dir}/update-status.json"
+  agent_update_status_dir="${rendered_dir}"
+  agent_update_request_dir="${rendered_dir}/manager/requests"
+  agent_update_request_path="${agent_update_request_dir}/update-request"
+  agent_update_request_handler_path="${rendered_dir}/manager/handle-update-request.sh"
+  agent_update_request_service_name=xingchen-agent-update-request.service
+  agent_update_request_path_name=xingchen-agent-update-request.path
   agent_image=registry.internal.example/xingchen-agent:v1.20.14
   container_name=xingchen-agent
   agent_config_path="${rendered_dir}/agent.json"
@@ -126,6 +187,9 @@ mkdir -p "${rendered_dir}/systemd"
   server_url=https://monitor.example.com
   controller_releases=true
   allow_github_api=false
+  network_mode=internal
+  allow_gitee=false
+  release_max_redirects=0
   repository_urls=('https://git.example.com/monitor.git')
   docker_socket=''
   docker_socket_target=/run/xingchen-agent-docker.sock
@@ -135,6 +199,25 @@ mkdir -p "${rendered_dir}/systemd"
   grep -F 'version_for_update()' "${manager_updater_path}" >/dev/null
   grep -F 'Agent 自动更新不会跨主版本' "${manager_updater_path}" >/dev/null
   grep -F 'verify_image_version "${image}" "${target_version}"' "${manager_updater_path}" >/dev/null
+  grep -F "network_mode='internal'" "${manager_updater_path}" >/dev/null
+  grep -F "release_max_redirects='0'" "${manager_updater_path}" >/dev/null
+  grep -F -- '--max-redirs "${release_max_redirects}"' "${manager_updater_path}" >/dev/null
+  grep -F '[[ "${network_mode}" == public ]] || return 1' "${manager_updater_path}" >/dev/null
+  grep -F 'write_update_status CHECKING' "${manager_updater_path}" >/dev/null
+  uname() {
+    if [[ "${1:-}" == -s ]]; then
+      printf 'Linux\n'
+      return 0
+    fi
+    command uname "$@"
+  }
+  systemctl() { return 0; }
+  mkdir -p "${agent_update_request_dir}"
+  install_agent_update_bridge
+  bash -n "${agent_update_request_handler_path}"
+  grep -F 'sleep 10' "${agent_update_request_handler_path}" >/dev/null
+  grep -F '"${updater_path}" "${action}" "${version}"' "${agent_update_request_handler_path}" >/dev/null
+  grep -F "PathExists=${agent_update_request_path}" "${systemd_dir}/${agent_update_request_path_name}" >/dev/null
 
   source <(awk '/^install_local_agent_updater\(\)/ { capture = 1 } /^install_local_agent\(\)/ { exit } capture { print }' "${installer}")
   manager_updater_path="${rendered_dir}/native-update-agent.sh"
@@ -145,6 +228,9 @@ mkdir -p "${rendered_dir}/systemd"
   install_local_agent_updater
   bash -n "${manager_updater_path}"
   grep -F 'Agent 自动更新不会跨主版本' "${manager_updater_path}" >/dev/null
+  grep -F 'write_update_status APPLYING' "${manager_updater_path}" >/dev/null
+  grep -F "release_max_redirects='0'" "${manager_updater_path}" >/dev/null
+  grep -F -- '--max-redirs "${release_max_redirects}"' "${manager_updater_path}" >/dev/null
 )
 if [[ "${EUID}" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
   echo 'install-agent.sh behavior tests skipped: root or sudo is required.'
@@ -164,7 +250,7 @@ elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
   [[ "${TEST_CONTAINER_EXISTS:-0}" == "1" ]]
 elif [[ "${1:-}" == "image" && "${2:-}" == "inspect" && "${3:-}" == "--format" ]]; then
   if [[ "${4:-}" == *'org.opencontainers.image.version'* ]]; then
-    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.14}"
+    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.15}"
   else
     printf 'new-agent-image\n'
   fi
@@ -295,7 +381,9 @@ run_installer() {
   "TEST_RELEASE_SIZE=${TEST_RELEASE_SIZE:-0}"
   "TEST_RELEASE_ARCHIVE=${TEST_RELEASE_ARCHIVE:-}"
     "XINGCHEN_REPOSITORY_URLS=${TEST_REPOSITORY_URLS:-}"
-    "XINGCHEN_AGENT_IMAGE_MIRRORS=ghcr.io"
+    "XINGCHEN_AGENT_IMAGE_MIRRORS=${TEST_IMAGE_MIRRORS-ghcr.io}"
+    "XINGCHEN_NETWORK_MODE=${TEST_NETWORK_MODE:-public}"
+    "XINGCHEN_ALLOW_GITEE=${TEST_ALLOW_GITEE:-false}"
     "XINGCHEN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
     "XINGCHEN_SYSTEMD_DIR=${temp_dir}/systemd"
     "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
@@ -320,7 +408,9 @@ run_installer_stdin() {
     "TEST_DOCKER_AVAILABLE=${docker_available}"
     "TEST_HTTPS_PROBE=${TEST_HTTPS_PROBE:-1}"
     "TEST_HTTP_PROBE=${TEST_HTTP_PROBE:-0}"
-    "XINGCHEN_AGENT_IMAGE_MIRRORS=ghcr.io"
+    "XINGCHEN_AGENT_IMAGE_MIRRORS=${TEST_IMAGE_MIRRORS-ghcr.io}"
+    "XINGCHEN_NETWORK_MODE=${TEST_NETWORK_MODE:-public}"
+    "XINGCHEN_ALLOW_GITEE=${TEST_ALLOW_GITEE:-false}"
     "XINGCHEN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
     "XINGCHEN_SYSTEMD_DIR=${temp_dir}/systemd"
     "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
@@ -338,12 +428,16 @@ run_installer_stdin() {
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
-grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15' "${log_file}" >/dev/null
 grep -F 'docker run -d --name xingchen-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 grep -F '"docker_socket": "/run/xingchen-agent-docker.sock"' "${config_file}" >/dev/null
+grep -F '"update_status_path": "' "${config_file}" >/dev/null
+grep -F "\"update_request_path\": \"${temp_dir}/manager/requests/update-request\"" "${config_file}" >/dev/null
+grep -F -- "--mount type=bind,src=${temp_dir}/manager,dst=${temp_dir}/manager,readonly" "${log_file}" >/dev/null
+grep -F -- "--mount type=bind,src=${temp_dir}/manager/requests,dst=${temp_dir}/manager/requests" "${log_file}" >/dev/null
 grep -F '"allow_command_execution": false' "${config_file}" >/dev/null
 grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 run_as_root test -x "${temp_dir}/manager/update-agent.sh"
@@ -357,6 +451,30 @@ if run_as_root grep -F 'before="$(docker image inspect' "${temp_dir}/manager/upd
   exit 1
 fi
 run_as_root grep -F 'CONTAINER_NAME=xingchen-agent' "${temp_dir}/manager/install.env" >/dev/null
+run_as_root test -x "${temp_dir}/manager/handle-update-request.sh"
+run_as_root bash -n "${temp_dir}/manager/handle-update-request.sh"
+run_as_root grep -F "PathExists=${temp_dir}/manager/requests/update-request" "${temp_dir}/systemd/xingchen-agent-update-request.path" >/dev/null
+
+run_as_root cp "${temp_dir}/manager/update-agent.sh" "${temp_dir}/update-agent.saved"
+run_as_root sh -c 'printf '\''#!/usr/bin/env bash\nprintf "bridge %s\\n" "$*" >> "$TEST_LOG"\n'\'' > "$1"' sh "${temp_dir}/manager/update-agent.sh"
+run_as_root chmod 0755 "${temp_dir}/manager/update-agent.sh"
+run_as_root sh -c 'printf '\''action=update\nversion=v1.20.14\nrollout_id=7\nmember_id=11\n'\'' > "$1"' sh "${temp_dir}/manager/requests/update-request"
+run_as_root chmod 0600 "${temp_dir}/manager/requests/update-request"
+run_as_root env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" bash "${temp_dir}/manager/handle-update-request.sh"
+grep -F 'bridge update v1.20.14' "${log_file}" >/dev/null
+
+: > "${log_file}"
+run_as_root sh -c 'printf '\''action=update\nversion=v1.20.14;id\nrollout_id=7\nmember_id=11\n'\'' > "$1"' sh "${temp_dir}/manager/requests/update-request"
+run_as_root chmod 0600 "${temp_dir}/manager/requests/update-request"
+if run_as_root env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" bash "${temp_dir}/manager/handle-update-request.sh"; then
+  echo 'Agent update request handler accepted an injected version.' >&2
+  exit 1
+fi
+if grep -F 'bridge ' "${log_file}" >/dev/null; then
+  echo 'Rejected Agent update request reached the updater.' >&2
+  exit 1
+fi
+run_as_root mv "${temp_dir}/update-agent.saved" "${temp_dir}/manager/update-agent.sh"
 
 : > "${log_file}"
 server_url=https://monitor.example.com
@@ -397,12 +515,14 @@ server_url=https://monitor.example.com
 TEST_FAIL_AGENT_PULLS=1
 TEST_FAIL_GITEE_BUILD=1
 TEST_REPOSITORY_URLS='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git'
+TEST_ALLOW_GITEE=true
 run_installer 1
-grep -F 'docker build --pull --build-arg VERSION=v1.20.14 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14 https://gitee.com/starchen520/monitor-for-server.git#v1.20.14:agent' "${log_file}" >/dev/null
-grep -F 'docker build --pull --build-arg VERSION=v1.20.14 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14 https://github.com/Pstarchen/monitor-for-server.git#v1.20.14:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.15 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15 https://gitee.com/starchen520/monitor-for-server.git#v1.20.15:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.15 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15 https://github.com/Pstarchen/monitor-for-server.git#v1.20.15:agent' "${log_file}" >/dev/null
 TEST_FAIL_AGENT_PULLS=0
 TEST_FAIL_GITEE_BUILD=0
 TEST_REPOSITORY_URLS=''
+TEST_ALLOW_GITEE=false
 
 : > "${log_file}"
 server_url=https://monitor.example.com
@@ -461,6 +581,20 @@ if grep -F 'api.github.com' "${log_file}" >/dev/null || grep -q '^go ' "${log_fi
   echo 'Controller-served native install unexpectedly used GitHub API or a source build.' >&2
   exit 1
 fi
+
+: > "${log_file}"
+TEST_NETWORK_MODE=internal
+TEST_IMAGE_MIRRORS=''
+server_url=https://monitor.internal.example
+run_installer 0 --native
+grep -F 'api/setup/agent-release?os=linux&arch=amd64' "${log_file}" >/dev/null
+grep -F 'api/setup/agent-artifact?os=linux&arch=amd64&version=v1.20.14' "${log_file}" >/dev/null
+if grep -Eqi 'github\.com|githubusercontent\.com|ghcr\.io|^docker (pull|build) ' "${log_file}"; then
+  echo 'Internal native install contacted a public source or Docker registry.' >&2
+  exit 1
+fi
+TEST_NETWORK_MODE=public
+TEST_IMAGE_MIRRORS=ghcr.io
 TEST_CONTROLLER_RELEASE=0
 
 : > "${log_file}"
@@ -492,7 +626,7 @@ fi
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1 --binary "${binary_path}"
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15' "${log_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
@@ -507,7 +641,7 @@ grep -F '"allow_file_operations": true' "${config_file}" >/dev/null
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer_stdin 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 
 : > "${log_file}"
@@ -632,5 +766,94 @@ fi
 run_installer 1 --allow-insecure-http
 grep -F '"server_url": "http://monitor.example.com"' "${config_file}" >/dev/null
 grep -F '"allow_insecure_http": true' "${config_file}" >/dev/null
+
+: > "${log_file}"
+server_url=https://monitor.internal.example
+if TEST_NETWORK_MODE=internal TEST_IMAGE_MIRRORS='' run_installer 1; then
+  echo 'internal network mode accepted the default GHCR Agent image.' >&2
+  exit 1
+fi
+if grep -Eq '^(curl|docker pull|docker build) ' "${log_file}"; then
+  echo 'Rejected internal configuration performed a remote operation.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+TEST_NETWORK_MODE=internal TEST_IMAGE_MIRRORS='' run_installer 1 --image registry.internal.example/xingchen/agent:v1.20.14
+grep -F 'docker pull registry.internal.example/xingchen/agent:v1.20.14' "${log_file}" >/dev/null
+if grep -Eqi 'github\.com|githubusercontent\.com|ghcr\.io' "${log_file}"; then
+  echo 'internal network mode contacted a forbidden public source.' >&2
+  exit 1
+fi
+run_as_root grep -F 'NETWORK_MODE=internal' "${temp_dir}/manager/install.env" >/dev/null
+run_as_root grep -F "release_max_redirects='0'" "${temp_dir}/manager/update-agent.sh" >/dev/null
+
+: > "${log_file}"
+if TEST_NETWORK_MODE=internal TEST_IMAGE_MIRRORS='' TEST_FAIL_AGENT_PULLS=1 run_installer 1 --image registry.internal.example/xingchen/agent:v1.20.14; then
+  echo 'internal Agent image failure fell back to a source build.' >&2
+  exit 1
+fi
+if grep -Eq '^(docker build|git |go )' "${log_file}"; then
+  echo 'internal Agent image failure invoked a source build.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+if TEST_NETWORK_MODE=internal TEST_IMAGE_MIRRORS='' run_installer 0 --native; then
+  echo 'internal native Agent Release failure fell back to a source build.' >&2
+  exit 1
+fi
+if grep -Eq '^(docker build|git |go )' "${log_file}"; then
+  echo 'internal native Agent Release failure invoked a source build.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+if TEST_NETWORK_MODE=internal TEST_IMAGE_MIRRORS='' TEST_REPOSITORY_URLS=https://gitee.com/example/monitor.git run_installer 1 --image registry.internal.example/xingchen/agent:v1.20.14; then
+  echo 'internal network mode accepted Gitee without explicit opt-in.' >&2
+  exit 1
+fi
+TEST_NETWORK_MODE=internal TEST_ALLOW_GITEE=true TEST_IMAGE_MIRRORS='' TEST_REPOSITORY_URLS=https://gitee.com/example/monitor.git run_installer 1 --image registry.internal.example/xingchen/agent:v1.20.14
+
+: > "${log_file}"
+if TEST_IMAGE_MIRRORS='' run_installer 1 --image registry.gitee.com/example/agent:v1.20.14; then
+  echo 'public network mode accepted a Gitee Registry without explicit opt-in.' >&2
+  exit 1
+fi
+TEST_ALLOW_GITEE=true TEST_IMAGE_MIRRORS='' run_installer 1 --image registry.gitee.com/example/agent:v1.20.14
+
+: > "${log_file}"
+server_url=https://monitor.offline.example
+TEST_NETWORK_MODE=offline TEST_IMAGE_MIRRORS='' run_installer 1 --image ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14
+grep -F 'docker image inspect ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
+if grep -Eq '^(curl|docker pull|docker build|git) ' "${log_file}"; then
+  echo 'offline Agent installation performed an outbound-capable operation.' >&2
+  exit 1
+fi
+run_as_root grep -F 'NETWORK_MODE=offline' "${temp_dir}/manager/install.env" >/dev/null
+run_as_root grep -F "network_mode='offline'" "${temp_dir}/manager/update-agent.sh" >/dev/null
+
+: > "${log_file}"
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_AGENT_IMAGE_VERSION=v1.20.15" \
+  bash "${temp_dir}/manager/update-agent.sh" update v1.20.15
+if grep -Eq '^(curl|docker pull|docker build|git) ' "${log_file}"; then
+  echo 'offline Agent updater performed an outbound-capable operation.' >&2
+  exit 1
+fi
+grep -F '"status":"SUCCEEDED"' "${temp_dir}/manager/update-status.json" >/dev/null
+
+: > "${log_file}"
+set +e
+TEST_USE_ENROLLMENT=1 TEST_NETWORK_MODE=offline TEST_IMAGE_MIRRORS='' run_installer 1 --image ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14
+offline_enrollment_status=$?
+set -e
+if [[ "${offline_enrollment_status}" -eq 0 ]]; then
+  echo 'offline Agent installation accepted a one-time enrollment token.' >&2
+  exit 1
+fi
+if grep -Eq '^(curl|docker pull|docker build|git) ' "${log_file}"; then
+  echo 'Rejected offline enrollment performed an outbound-capable operation.' >&2
+  exit 1
+fi
 
 echo 'install-agent.sh behavior tests passed.'

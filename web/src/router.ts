@@ -28,6 +28,7 @@ const router = createRouter({
         { path: 'reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
         { path: 'ddns', name: 'ddns', component: () => import('@/views/DdnsView.vue') },
         { path: 'tasks', name: 'tasks', component: () => import('@/views/AgentTasksView.vue') },
+        { path: 'agent-rollouts', name: 'agent-rollouts', component: () => import('@/views/AgentRolloutsView.vue') },
         { path: 'tokens', name: 'tokens', component: () => import('@/views/ApiTokensView.vue') },
         { path: 'guide', name: 'guide', component: () => import('@/views/GuideView.vue') },
         { path: 'settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { role: 'ADMIN' } },

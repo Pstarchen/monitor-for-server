@@ -12,18 +12,20 @@
 
 ## Docker Compose 部署
 
-Linux 生产环境应使用总终端安装器启动。它先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置的受信内部 Registry，再尝试镜像自身地址；镜像不可用时按 `XINGCHEN_SOURCE_REPOSITORIES` 回退源码，默认列表只有 Gitee，GitHub 必须显式加入。安装器会自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境应使用总终端安装器启动。`public` 模式先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置的受信 Registry，再尝试固定版本的官方 GHCR 镜像；源码列表默认为空，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会回退源码，使用 Gitee 还必须设置 `XINGCHEN_ALLOW_GITEE=true`。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。安装器会自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
 bash ./deploy/install-controller.sh
 docker compose --profile host-monitoring ps
 ```
 
-离线或需要从当前源码构建总控镜像时：
+需要从当前工作区源码构建总控镜像时：
 
 ```bash
 bash ./deploy/install-controller.sh --build
 ```
+
+`--build` 仍可能访问 Docker 基础镜像和 Go/Maven/npm 包源，因此不是离线模式。完全断网必须使用已校验的离线 bundle；内部源码构建则要把所有基础镜像与包管理源一并配置为内部可达地址。
 
 需要跳过镜像仓库并直接从已配置源码仓库构建 Docker 镜像时：
 
@@ -90,7 +92,65 @@ sudo bash ./deploy/update-controller.sh --auto
 
 ### 内部源与完全离线安装
 
-内部 Registry 应同步 setup、server、web、agent、PostgreSQL 和 Redis 六个镜像；内部 HTTPS 制品服务应同步 `manifest.json`、四个平台 Agent 压缩包和校验文件。稳定版 Setup 镜像内置同版本的四个平台 Agent 制品，在内部服务暂不可用且没有缓存时可作为末级本地基线；配置的内部 manifest 和 last-known-good 缓存仍优先，以便发现后续版本。目标机在 `.env` 中配置对应的 `XINGCHEN_*_IMAGE`、`XINGCHEN_RELEASE_MANIFEST_URLS` 和 `XINGCHEN_AGENT_RELEASE_BASE_URLS` 后，可添加 `--no-source-fallback` 确保不会访问代码托管平台。
+内部 Registry 应同步 setup、server、web、agent、PostgreSQL 和 Redis 六个镜像；内部 HTTPS 制品服务应同步 `manifest.json`、`manifest.json.sha256`、四个平台 Agent 压缩包和 `checksums.txt`。稳定版 Setup 镜像内置同版本的四个平台 Agent 制品，在内部服务暂不可用且没有缓存时可作为末级本地基线；配置的内部 manifest 和 last-known-good 缓存仍优先，以便发现后续版本。
+
+推荐由可联网的受控发布机执行内部晋级。输入 image lock 中六个源镜像都必须固定 `sha256:` digest；`source` 只写显式 Registry 和 repository，不写 tag。PostgreSQL 和 Redis 也是发布契约的必填项，不存在时晋级会在访问 Registry 前失败。Registry 凭据由预先完成的 `docker login` 或 credential store 提供，不写进参数。输入结构如下，所有摘要占位符必须替换为真实的 64 位小写十六进制值：
+
+```json
+{
+  "schemaVersion": 1,
+  "version": "v1.20.15",
+  "images": {
+    "setup": { "source": "ghcr.io/example/xingchen-setup", "digest": "sha256:<64 lowercase hex>" },
+    "server": { "source": "ghcr.io/example/xingchen-server", "digest": "sha256:<64 lowercase hex>" },
+    "web": { "source": "ghcr.io/example/xingchen-web", "digest": "sha256:<64 lowercase hex>" },
+    "agent": { "source": "ghcr.io/example/xingchen-agent", "digest": "sha256:<64 lowercase hex>" },
+    "postgres": { "source": "docker.io/library/postgres", "digest": "sha256:<64 lowercase hex>" },
+    "redis": { "source": "docker.io/library/redis", "digest": "sha256:<64 lowercase hex>" }
+  }
+}
+```
+
+晋级命令：
+
+```powershell
+.\deploy\promote-internal-release.ps1 `
+  -Version v1.20.15 `
+  -TargetRegistry registry.internal.example/xingchen `
+  -ArtifactDir D:\release\agent `
+  -ArtifactBaseUrl https://release.internal.example/xingchen `
+  -ImageLockFile D:\release\source-images.lock.json `
+  -OutputDir D:\publish\xingchen\v1.20.15 `
+  -WriteEnvExample
+```
+
+`-Check` 只做本地 JSON、四平台 Agent 制品和 checksum 校验，`-DryRun` 另外输出六条 `source@digest -> target:vX.Y.Z` 计划；两者都不访问 Registry，不写输出目录。默认模式逐个晋级并复核目标 digest，最后生成 `controller-images.lock.json` 和可选的 `controller-images.env.example`；两者的六个运行时镜像引用均为内部 `target@sha256:...`，不包含 GHCR、Docker Hub 或 `latest`。`OutputDir` 的文件需由内部发布系统映射到 `$ArtifactBaseUrl/$Version/`；脚本不猜测对象存储 API，也不会把文件上传到未声明的终端。
+
+生产目标机的 `.env` 至少应把以下值替换成晋级工具生成的真实 digest、内部 URL 和 manifest 摘要。不要照抄占位符：
+
+```dotenv
+XINGCHEN_NETWORK_MODE=internal
+XINGCHEN_ALLOW_GITEE=false
+XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false
+XINGCHEN_SETUP_IMAGE=registry.internal.example/xingchen/setup@sha256:<digest>
+XINGCHEN_SERVER_IMAGE=registry.internal.example/xingchen/server@sha256:<digest>
+XINGCHEN_WEB_IMAGE=registry.internal.example/xingchen/web@sha256:<digest>
+XINGCHEN_AGENT_IMAGE=registry.internal.example/xingchen/agent@sha256:<digest>
+XINGCHEN_POSTGRES_IMAGE=registry.internal.example/xingchen/postgres@sha256:<digest>
+XINGCHEN_REDIS_IMAGE=registry.internal.example/xingchen/redis@sha256:<digest>
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.15/manifest.json
+XINGCHEN_RELEASE_MANIFEST_SHA256=<manifest.json 的 SHA256>
+XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
+XINGCHEN_SOURCE_REPOSITORIES=
+```
+
+先检查再安装或更新；`internal` 会在任何拉取前拒绝 GitHub、GHCR、Docker Hub 和未显式开启的 Gitee：
+
+```bash
+bash ./deploy/install-controller.sh --network-mode internal --no-source-fallback
+sudo bash ./deploy/update-controller.sh --check --no-source-fallback
+sudo bash ./deploy/update-controller.sh --apply --no-source-fallback
+```
 
 完全断网时，在联网发布机下载并校验 `xingchen-monitor-offline-vX.Y.Z-amd64.tar.gz` 或 `-arm64.tar.gz` 及同名 `.sha256`，通过受控介质传入目标机后执行：
 
@@ -102,6 +162,20 @@ sudo ./install-offline.sh
 ```
 
 包内安装器会再次校验全部文件、导入六个镜像、固定目标版本，并以 `--offline --no-source-fallback` 启动；缺少任何镜像或 Agent 制品都会在启动前失败。
+
+已有 `v1.20.14` 部署升级到 `v1.20.15` 时不要运行 `install-offline.*`。先验证外层 `.sha256` 并解压，再从包内执行存量升级入口，其中 `--project-root` / `-ProjectRoot` 必须是已有部署的绝对目录：
+
+```bash
+sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --check
+sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --apply
+```
+
+```powershell
+.\upgrade-offline.ps1 -ProjectRoot 'D:\xingchen-monitor' -Check
+.\upgrade-offline.ps1 -ProjectRoot 'D:\xingchen-monitor' -Apply
+```
+
+该入口先复核包内 `SHA256SUMS`，再校验现有 Compose 与 `.env`、导入并检查六个本地镜像、备份 PostgreSQL、原子替换 updater/Compose/release，最后以 `offline` 和 `--pull never` 切换服务。它不会生成或替换原数据库密码。数据库迁移仍是前向迁移，生产执行前必须验证备份可恢复。
 
 ### 数据库备份与恢复
 
@@ -232,6 +306,14 @@ Get-Content "$env:ProgramData\XingchenMonitor\agent.json" | ConvertFrom-Json | S
 ```
 
 不要输出或展示 `agent_key` 字段。
+
+## Agent 灰度发布与回滚
+
+管理员可在“Agent 发布”创建草稿，显式选择已上报稳定版本且非 Controller 内置的 Agent。Controller 内置 Agent 始终随 Controller 镜像更新，不进入独立 rollout。发布按设备稳定 ID 确定性排序，支持首批灰度比例、1-20 个批次、维护窗口、最大并发、确定性抖动、版本确认超时和当前批次失败率阈值。
+
+下发使用专用 `AGENT_UPDATE` operation，`command` 固定为 `agent.update`，`args` 必须为空，payload 只包含 `action=update|rollback`、稳定版本以及成对的正整数 `rolloutId/memberId`。该路径不依赖通用 `allow_command_execution`；Agent 不能从任务中接收 URL、文件路径、Shell 或任意参数。Linux 通过 root-owned `systemd.path` handler 调用固定 updater，Windows 通过受 SYSTEM/Administrators ACL 保护的固定 launcher 调用 updater。
+
+任务返回 `SUCCEEDED` 仅代表更新请求已原子入队。成员只有在任务下发时间之后（含同一时间戳）的实时报告中出现目标 `agentVersion` 才进入 `CONFIRMED`；超时或任务失败会计入当前批次失败率并可自动暂停。取消后已被 Agent 领取的任务仍会对账 late report，后续回滚只选择实际确认升级的成员。管理员应先在小批量非关键节点验证，再扩大批次；回滚目标是每台设备在创建 rollout 时记录的 `previousVersion`。
 
 ## 通知配置
 

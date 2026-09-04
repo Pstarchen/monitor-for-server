@@ -20,6 +20,9 @@ type Config struct {
 	Interval                 time.Duration
 	RequestTimeout           time.Duration
 	SpoolDir                 string
+	UpdateStatusPath         string
+	UpdateRequestPath        string
+	UpdateLauncherPath       string
 	MaxBufferedReports       int
 	AllowInsecureHTTP        bool
 	MonitoredServices        []string
@@ -52,6 +55,9 @@ type fileConfig struct {
 	Interval                 string         `json:"interval"`
 	RequestTimeout           string         `json:"request_timeout"`
 	SpoolDir                 string         `json:"spool_dir"`
+	UpdateStatusPath         string         `json:"update_status_path"`
+	UpdateRequestPath        string         `json:"update_request_path"`
+	UpdateLauncherPath       string         `json:"update_launcher_path"`
 	MaxBufferedReports       int            `json:"max_buffered_reports"`
 	AllowInsecureHTTP        bool           `json:"allow_insecure_http"`
 	MonitoredServices        []string       `json:"monitored_services"`
@@ -133,6 +139,9 @@ func Load(args []string) (Config, error) {
 		Interval:            interval,
 		RequestTimeout:      timeout,
 		SpoolDir:            spoolDir,
+		UpdateStatusPath:    strings.TrimSpace(file.UpdateStatusPath),
+		UpdateRequestPath:   strings.TrimSpace(file.UpdateRequestPath),
+		UpdateLauncherPath:  strings.TrimSpace(file.UpdateLauncherPath),
 		MaxBufferedReports:  maxBuffered,
 		AllowInsecureHTTP:   file.AllowInsecureHTTP,
 		MonitoredServices:   file.MonitoredServices,
@@ -260,6 +269,15 @@ func (c Config) Validate() error {
 	if c.MaxBufferedReports < 1 || c.MaxBufferedReports > 100000 {
 		return errors.New("max_buffered_reports must be between 1 and 100000")
 	}
+	if err := validateOptionalAbsolutePath("update_request_path", c.UpdateRequestPath); err != nil {
+		return err
+	}
+	if err := validateOptionalAbsolutePath("update_launcher_path", c.UpdateLauncherPath); err != nil {
+		return err
+	}
+	if c.UpdateLauncherPath != "" && c.UpdateRequestPath == "" {
+		return errors.New("update_launcher_path requires update_request_path")
+	}
 	if c.ProcessCollectionLimit < 1 || c.ProcessCollectionLimit > 256 {
 		return errors.New("process_collection_limit must be between 1 and 256")
 	}
@@ -284,6 +302,16 @@ func (c Config) Validate() error {
 				return errors.New("custom metric argument is invalid")
 			}
 		}
+	}
+	return nil
+}
+
+func validateOptionalAbsolutePath(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.ContainsRune(value, '\x00') || !filepath.IsAbs(value) || filepath.Clean(value) == filepath.VolumeName(value)+string(filepath.Separator) {
+		return fmt.Errorf("%s must be an absolute file path below a non-root directory", name)
 	}
 	return nil
 }

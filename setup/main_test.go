@@ -168,9 +168,21 @@ func TestConfiguredEnvRequiresPostgreSQLAndApplicationSecrets(t *testing.T) {
 func TestComposeApplyDoesNotRecreateSetupService(t *testing.T) {
 	t.Setenv("CONTROLLER_AGENT_ENABLED", "false")
 	got := strings.Join(composeApplyArgs(), " ")
-	want := "compose -f " + filepath.Join(workspace, "docker-compose.yml") + " --project-directory " + hostWorkspace + " --env-file " + envPath + " up -d --build --no-deps --wait --wait-timeout 300 server web"
+	want := "compose -f " + filepath.Join(workspace, "docker-compose.yml") + " --project-directory " + hostWorkspace + " --env-file " + envPath + " up -d --no-build --pull never --no-deps --wait --wait-timeout 300 server web"
 	if got != want {
 		t.Fatalf("composeApplyArgs() = %q, want %q", got, want)
+	}
+}
+
+func TestOfflineComposeApplyUsesOnlyPreparedImages(t *testing.T) {
+	t.Setenv("CONTROLLER_AGENT_ENABLED", "false")
+	t.Setenv("XINGCHEN_NETWORK_MODE", networkModeOffline)
+	got := strings.Join(composeApplyArgs(), " ")
+	if !strings.Contains(got, " up -d --no-build --pull never ") {
+		t.Fatalf("offline composeApplyArgs() may build or pull a missing image: %q", got)
+	}
+	if strings.Contains(got, " --build ") {
+		t.Fatalf("offline composeApplyArgs() requires source build contexts: %q", got)
 	}
 }
 
@@ -228,7 +240,7 @@ func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
 	t.Setenv("CONTROLLER_AGENT_ENABLED", "true")
 	t.Setenv("CONTROLLER_AGENT_DEVICE_ID", "controller-device-id")
 	t.Setenv("CONTROLLER_AGENT_KEY", "controller-agent-key")
-	if err := os.WriteFile(envPath, []byte("CONTROLLER_AUTO_UPDATE=\"true\"\nXINGCHEN_POSTGRES_IMAGE=\"registry.internal.example/postgres:16\"\nXINGCHEN_REDIS_IMAGE=\"registry.internal.example/redis:7.4\"\nXINGCHEN_SETUP_IMAGE=\"registry.internal.example/setup:v1.20.11\"\nXINGCHEN_RELEASE_MANIFEST_PATH=\"/workspace/release/manifest.json\"\nXINGCHEN_UPDATE_MIN_FREE_BYTES=\"2147483648\"\n"), 0600); err != nil {
+	if err := os.WriteFile(envPath, []byte("CONTROLLER_AUTO_UPDATE=\"true\"\nXINGCHEN_NETWORK_MODE=\"internal\"\nXINGCHEN_ALLOW_GITEE=\"false\"\nXINGCHEN_POSTGRES_IMAGE=\"registry.internal.example/postgres:16\"\nXINGCHEN_REDIS_IMAGE=\"registry.internal.example/redis:7.4\"\nXINGCHEN_SETUP_IMAGE=\"registry.internal.example/setup:v1.20.11\"\nXINGCHEN_RELEASE_MANIFEST_PATH=\"/workspace/release/manifest.json\"\nXINGCHEN_UPDATE_MIN_FREE_BYTES=\"2147483648\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -247,6 +259,9 @@ func TestWriteEnvironmentPreservesInstallerWebListener(t *testing.T) {
 	}
 	if values["CONTROLLER_AUTO_UPDATE"] != "true" {
 		t.Fatal("controller automatic update setting was not preserved")
+	}
+	if values["XINGCHEN_NETWORK_MODE"] != "internal" || values["XINGCHEN_ALLOW_GITEE"] != "false" {
+		t.Fatal("controller network policy settings were not preserved")
 	}
 	if values["XINGCHEN_SETUP_IMAGE"] != "registry.internal.example/setup:v1.20.11" || values["XINGCHEN_RELEASE_MANIFEST_PATH"] != "/workspace/release/manifest.json" {
 		t.Fatal("controller release and image settings were not preserved")

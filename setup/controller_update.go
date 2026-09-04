@@ -20,6 +20,11 @@ import (
 const controllerUpdateRunnerName = "xingchen-controller-update-run"
 const controllerUpdateRunnerProjectSuffix = "-update-runner"
 
+// This opt-in is intentionally not exposed by the production Compose service.
+const controllerUpdateWorkspaceFallbackEnvironment = "XINGCHEN_CONTROLLER_UPDATE_ALLOW_WORKSPACE_FALLBACK"
+
+var packagedControllerUpdaterPath = "/usr/local/share/xingchen/updaters/update-controller.sh"
+
 const (
 	controllerUpdateCheckTimeout       = controllerReleaseCheckTimeout
 	controllerUpdateApplyTimeout       = 4 * time.Hour
@@ -42,6 +47,8 @@ type controllerUpdateService struct {
 	apiBase        string
 	releases       *agentReleaseService
 	allowGitHubAPI bool
+	networkMode    string
+	allowGitee     bool
 	startRunner    func() ([]byte, error)
 	waitRunner     func() bool
 }
@@ -64,6 +71,7 @@ type controllerUpdateState struct {
 	ReleaseWarning        string                    `json:"releaseWarning,omitempty"`
 	ReleaseSource         string                    `json:"releaseSource,omitempty"`
 	ReleaseVerification   string                    `json:"releaseVerification,omitempty"`
+	NetworkMode           string                    `json:"networkMode"`
 	CheckedAt             string                    `json:"checkedAt,omitempty"`
 	UpdatedAt             string                    `json:"updatedAt,omitempty"`
 	StartedAt             string                    `json:"startedAt,omitempty"`
@@ -94,6 +102,16 @@ var controllerInspectionCache struct {
 	value controllerInspection
 }
 
+var controllerUpdateStateProcessLock sync.Mutex
+
+type controllerAutomaticStateWrite int
+
+const (
+	preserveControllerAutomaticState controllerAutomaticStateWrite = iota
+	recordControllerAutomaticFailure
+	resetControllerAutomaticFailures
+)
+
 type controllerServiceStatus struct {
 	Name     string `json:"name"`
 	Revision string `json:"revision,omitempty"`
@@ -112,9 +130,9 @@ type controllerImage struct {
 }
 
 var controllerImages = []controllerImage{
-	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.14"},
-	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.14"},
-	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.14"},
+	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.15"},
+	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.15"},
+	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.15"},
 }
 
 func newControllerUpdateService() *controllerUpdateService {
@@ -125,6 +143,8 @@ func newControllerUpdateService() *controllerUpdateService {
 		apiBase:        controllerGitHubAPIBase,
 		releases:       newAgentReleaseService(),
 		allowGitHubAPI: strings.EqualFold(strings.TrimSpace(os.Getenv("XINGCHEN_CONTROLLER_ALLOW_GITHUB_API")), "true"),
+		networkMode:    configuredNetworkMode(),
+		allowGitee:     configuredGiteeAllowed(),
 	}
 }
 
@@ -204,19 +224,35 @@ func (s *controllerUpdateService) auto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "自动更新设置格式不正确")
 		return
 	}
+	mode := s.effectiveNetworkMode()
+	if !validNetworkMode(mode) {
+		writeError(w, http.StatusBadRequest, "XINGCHEN_NETWORK_MODE 配置无效")
+		return
+	}
+	if request.Enabled && mode == networkModeOffline {
+		writeError(w, http.StatusBadRequest, "完全离线模式不能启用自动更新")
+		return
+	}
 	if err := updateEnvironmentSetting("CONTROLLER_AUTO_UPDATE", fmt.Sprintf("%t", request.Enabled)); err != nil {
 		log.Printf("controller auto-update setting failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "自动更新设置保存失败")
 		return
 	}
-	state := s.readState()
-	state.AutoUpdate = request.Enabled
-	if request.Enabled {
-		s.resetAutomaticFailures(&state)
+	state, err := mutateControllerUpdateState(func(state *controllerUpdateState) {
+		state.AutoUpdate = request.Enabled
+		if request.Enabled {
+			s.resetAutomaticFailures(state)
+		}
+		if state.State != "CHECKING" && state.State != "UPDATING" {
+			state.Message = map[bool]string{true: "已启用每日自动更新", false: "已关闭自动更新"}[request.Enabled]
+		}
+	})
+	if err != nil {
+		log.Printf("controller auto-update state failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "自动更新状态保存失败")
+		return
 	}
-	state.Message = map[bool]string{true: "已启用每日自动更新", false: "已关闭自动更新"}[request.Enabled]
 	s.decorate(&state)
-	_ = writeControllerUpdateState(state)
 	writeJSON(w, http.StatusOK, state)
 }
 
@@ -225,20 +261,27 @@ var errUpdateRunning = errors.New("已有更新任务正在执行")
 func (s *controllerUpdateService) begin(stateName, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state := s.readState()
-	if s.running || ((state.State == "CHECKING" || state.State == "UPDATING") && !s.isStale(state)) {
+	if s.running {
+		return errUpdateRunning
+	}
+	alreadyRunning := false
+	_, err := mutateControllerUpdateState(func(state *controllerUpdateState) {
+		if (state.State == "CHECKING" || state.State == "UPDATING") && !s.isStale(*state) {
+			alreadyRunning = true
+			return
+		}
+		state.State = stateName
+		state.StartedAt = s.currentTime().UTC().Format(time.RFC3339)
+		state.Message = message
+		state.UpdateAvailable = false
+	})
+	if err != nil {
+		return err
+	}
+	if alreadyRunning {
 		return errUpdateRunning
 	}
 	s.running = true
-	state.State = stateName
-	state.StartedAt = s.currentTime().UTC().Format(time.RFC3339)
-	state.Message = message
-	state.UpdateAvailable = false
-	s.decorate(&state)
-	if err := writeControllerUpdateState(state); err != nil {
-		s.running = false
-		return err
-	}
 	return nil
 }
 
@@ -272,21 +315,29 @@ func (s *controllerUpdateService) runCheck() {
 		}
 	}
 	state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
-	if err := writeControllerUpdateState(state); err != nil {
+	if err := s.writeRuntimeState(state, preserveControllerAutomaticState); err != nil {
 		log.Printf("controller update state write failed: %v", err)
 	}
 }
 
 func (s *controllerUpdateService) startUpdate(automatic bool) error {
+	mode := s.effectiveNetworkMode()
+	if !validNetworkMode(mode) {
+		return errors.New("XINGCHEN_NETWORK_MODE 必须是 public、internal 或 offline")
+	}
+	if automatic && mode == networkModeOffline {
+		return errors.New("完全离线模式不能执行自动更新")
+	}
 	if automatic && s.automaticUpdatePaused(s.readState()) {
 		return errors.New("自动更新已暂停，可手动更新或重新启用自动更新")
 	}
 	if err := s.begin("UPDATING", "正在更新总控服务，控制台将短暂重启"); err != nil {
 		return err
 	}
-	state := s.readState()
-	s.prepareUpdateState(&state, automatic)
-	if err := writeControllerUpdateState(state); err != nil {
+	_, err := mutateControllerUpdateState(func(state *controllerUpdateState) {
+		s.prepareUpdateState(state, automatic)
+	})
+	if err != nil {
 		s.finish()
 		if automatic {
 			return fmt.Errorf("save automatic update state: %w", err)
@@ -318,8 +369,7 @@ func (s *controllerUpdateService) launchUpdateRunner() {
 	state.State = "ERROR"
 	state.StartedAt = ""
 	state.Message = "更新任务启动失败，请检查 Docker 状态"
-	s.recordAutomaticFailure(&state)
-	_ = writeControllerUpdateState(state)
+	_ = s.writeRuntimeState(state, recordControllerAutomaticFailure)
 }
 
 func (s *controllerUpdateService) startUpdateRunner() ([]byte, error) {
@@ -373,8 +423,7 @@ func (s *controllerUpdateService) runUpdate() error {
 		state.State = "ERROR"
 		state.StartedAt = ""
 		state.Message = "无法确认最新稳定版本，更新未执行"
-		s.recordAutomaticFailure(&state)
-		_ = writeControllerUpdateState(state)
+		_ = s.writeRuntimeState(state, recordControllerAutomaticFailure)
 		return errors.New(state.Message)
 	}
 	cancelCheck()
@@ -382,8 +431,7 @@ func (s *controllerUpdateService) runUpdate() error {
 		state.State = "ERROR"
 		state.StartedAt = ""
 		state.Message = "无法识别当前运行版本，更新未执行"
-		s.recordAutomaticFailure(&state)
-		_ = writeControllerUpdateState(state)
+		_ = s.writeRuntimeState(state, recordControllerAutomaticFailure)
 		return errors.New(state.Message)
 	}
 	if state.CurrentVersion != "" && state.LatestVersion != "" && !state.UpdateAvailable {
@@ -391,8 +439,7 @@ func (s *controllerUpdateService) runUpdate() error {
 		state.StartedAt = ""
 		state.Message = "当前已经是最新版本"
 		state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
-		s.resetAutomaticFailures(&state)
-		return writeControllerUpdateState(state)
+		return s.writeRuntimeState(state, resetControllerAutomaticFailures)
 	}
 	targetVersion := state.LatestVersion
 	if state.Trigger == "automatic" && !controllerVersionsShareMajor(state.CurrentVersion, targetVersion) {
@@ -403,13 +450,25 @@ func (s *controllerUpdateService) runUpdate() error {
 		state.StartedAt = ""
 		state.Message = "发现新的主版本，已阻止自动更新；请评估兼容性后手动更新"
 		state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
-		return writeControllerUpdateState(state)
+		return s.writeRuntimeState(state, preserveControllerAutomaticState)
+	}
+	updaterPath, err := resolveControllerUpdaterPath()
+	if err != nil {
+		log.Printf("controller updater preflight failed: %v", err)
+		state.State = "ERROR"
+		state.Phase = "FAILED"
+		state.RollbackState = "NOT_REQUIRED"
+		state.DatabaseCompatibility = "NOT_EVALUATED"
+		state.StartedAt = ""
+		state.Message = "Setup 镜像内总控更新器不可用，更新未执行"
+		_ = s.writeRuntimeState(state, recordControllerAutomaticFailure)
+		return errors.New(state.Message)
 	}
 	state.Phase = "BACKUP"
 	state.RollbackState = "NOT_REQUIRED"
 	state.DatabaseCompatibility = "NOT_EVALUATED"
 	state.Message = "正在创建更新前数据库备份"
-	_ = writeControllerUpdateState(state)
+	_ = s.writeRuntimeState(state, preserveControllerAutomaticState)
 	backupName := "xingchen-monitor-" + s.currentTime().UTC().Format("20060102T150405Z") + ".sql"
 	backupContext, cancelBackup := context.WithTimeout(context.Background(), controllerBackupCreateTimeout)
 	_, backupErr := createControllerBackup(backupContext, backupName)
@@ -420,18 +479,21 @@ func (s *controllerUpdateService) runUpdate() error {
 		state.Phase = "BACKUP_FAILED"
 		state.StartedAt = ""
 		state.Message = "更新前数据库备份失败，更新未执行"
-		s.recordAutomaticFailure(&state)
-		_ = writeControllerUpdateState(state)
+		_ = s.writeRuntimeState(state, recordControllerAutomaticFailure)
 		return errors.New(state.Message)
 	}
 	state.BackupName = backupName
 	state.Phase = "APPLYING"
 	state.Message = "已创建数据库备份，正在暂存 " + targetVersion + " 镜像并更新服务"
-	_ = writeControllerUpdateState(state)
+	_ = s.writeRuntimeState(state, preserveControllerAutomaticState)
 
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateApplyTimeout)
 	defer cancel()
-	command := updateControllerCommand(ctx, "--apply")
+	arguments := []string{"--apply"}
+	if s.effectiveNetworkMode() == networkModeOffline {
+		arguments = append(arguments, "--offline", "--no-source-fallback")
+	}
+	command := updateControllerCommand(ctx, updaterPath, arguments...)
 	command.Env = controllerUpdateEnvironment(targetVersion)
 	output, err := command.CombinedOutput()
 	state = s.readState()
@@ -453,8 +515,7 @@ func (s *controllerUpdateService) runUpdate() error {
 				state.Message = "总控更新与镜像恢复均失败，需要立即人工处理"
 			}
 		}
-		s.recordAutomaticFailure(&state)
-		_ = writeControllerUpdateState(state)
+		_ = s.writeRuntimeState(state, recordControllerAutomaticFailure)
 		return errors.New(state.Message)
 	}
 	state.State = "IDLE"
@@ -473,8 +534,7 @@ func (s *controllerUpdateService) runUpdate() error {
 	}
 	state.LatestRevision = state.CurrentRevision
 	state.UpdateAvailable = false
-	s.resetAutomaticFailures(&state)
-	return writeControllerUpdateState(state)
+	return s.writeRuntimeState(state, resetControllerAutomaticFailures)
 }
 
 func controllerVersionsShareMajor(left, right string) bool {
@@ -490,13 +550,11 @@ func (s *controllerUpdateService) snapshot() controllerUpdateState {
 	s.mu.Unlock()
 	runnerMissing := !running && s.updateRunnerMissing(state)
 	if !running && (s.isStale(state) || runnerMissing) {
-		state.State = "ERROR"
-		state.StartedAt = ""
-		state.UpdateAvailable = false
-		state.Message = updateRecoveryMessage(runnerMissing)
-		s.recordAutomaticFailure(&state)
-		if err := writeControllerUpdateState(state); err != nil {
+		recovered, err := s.recoverObservedState(state, runnerMissing)
+		if err != nil {
 			log.Printf("controller stale update state write failed: %v", err)
+		} else {
+			state = recovered
 		}
 	}
 	s.decorate(&state)
@@ -509,14 +567,25 @@ func (s *controllerUpdateService) recoverStaleState() {
 	if !s.isStale(state) && !runnerMissing {
 		return
 	}
-	state.State = "ERROR"
-	state.StartedAt = ""
-	state.UpdateAvailable = false
-	state.Message = updateRecoveryMessage(runnerMissing)
-	s.recordAutomaticFailure(&state)
-	if err := writeControllerUpdateState(state); err != nil {
+	if _, err := s.recoverObservedState(state, runnerMissing); err != nil {
 		log.Printf("controller startup state recovery failed: %v", err)
 	}
+}
+
+func (s *controllerUpdateService) recoverObservedState(observed controllerUpdateState, runnerMissing bool) (controllerUpdateState, error) {
+	return mutateControllerUpdateState(func(current *controllerUpdateState) {
+		if current.State != observed.State || current.StartedAt != observed.StartedAt {
+			return
+		}
+		if !s.isStale(*current) && !runnerMissing {
+			return
+		}
+		current.State = "ERROR"
+		current.StartedAt = ""
+		current.UpdateAvailable = false
+		current.Message = updateRecoveryMessage(runnerMissing)
+		s.recordAutomaticFailure(current)
+	})
 }
 
 func updateRecoveryMessage(runnerMissing bool) string {
@@ -571,6 +640,7 @@ func (s *controllerUpdateService) currentTime() time.Time {
 }
 
 func (s *controllerUpdateService) decorate(state *controllerUpdateState) {
+	state.NetworkMode = s.effectiveNetworkMode()
 	state.AutoUpdate = strings.EqualFold(configuredEnvironmentValue("CONTROLLER_AUTO_UPDATE"), "true")
 	state.AutoPaused = s.automaticUpdatePaused(*state)
 	state.NextAutoUpdateAt = s.nextAutoUpdateForState(*state).UTC().Format(time.RFC3339)
@@ -593,6 +663,10 @@ func (s *controllerUpdateService) decorate(state *controllerUpdateState) {
 }
 
 func (s *controllerUpdateService) readState() controllerUpdateState {
+	return readControllerUpdateState()
+}
+
+func readControllerUpdateState() controllerUpdateState {
 	state := controllerUpdateState{State: "IDLE", Message: "尚未检查更新", Services: []controllerServiceStatus{}}
 	content, err := os.ReadFile(controllerUpdateStatePath)
 	if err == nil {
@@ -604,11 +678,71 @@ func (s *controllerUpdateService) readState() controllerUpdateState {
 }
 
 func writeControllerUpdateState(state controllerUpdateState) error {
+	_, err := mutateControllerUpdateState(func(current *controllerUpdateState) {
+		*current = state
+	})
+	return err
+}
+
+func mutateControllerUpdateState(mutate func(*controllerUpdateState)) (state controllerUpdateState, err error) {
+	controllerUpdateStateProcessLock.Lock()
+	defer controllerUpdateStateProcessLock.Unlock()
+	if err := os.MkdirAll(filepath.Dir(controllerUpdateStatePath), 0700); err != nil {
+		return state, err
+	}
+	lock, err := acquireControllerUpdateStateFileLock(controllerUpdateStatePath + ".lock")
+	if err != nil {
+		return state, err
+	}
+	defer func() {
+		if closeErr := lock.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	state = readControllerUpdateState()
+	mutate(&state)
+	err = writeControllerUpdateStateUnlocked(state)
+	return state, err
+}
+
+func (s *controllerUpdateService) writeRuntimeState(state controllerUpdateState, automaticWrite controllerAutomaticStateWrite) error {
+	_, err := mutateControllerUpdateState(func(current *controllerUpdateState) {
+		replaceControllerRuntimeState(current, state)
+		switch automaticWrite {
+		case recordControllerAutomaticFailure:
+			s.recordAutomaticFailure(current)
+		case resetControllerAutomaticFailures:
+			s.resetAutomaticFailures(current)
+		}
+	})
+	return err
+}
+
+func replaceControllerRuntimeState(current *controllerUpdateState, runtime controllerUpdateState) {
+	autoUpdate := current.AutoUpdate
+	autoFailureCount := current.AutoFailureCount
+	autoPaused := current.AutoPaused
+	autoPausedUntil := current.AutoPausedUntil
+	nextAutoUpdateAt := current.NextAutoUpdateAt
+	lastAutoRunDate := current.LastAutoRunDate
+	*current = runtime
+	current.AutoUpdate = autoUpdate
+	current.AutoFailureCount = autoFailureCount
+	current.AutoPaused = autoPaused
+	current.AutoPausedUntil = autoPausedUntil
+	current.NextAutoUpdateAt = nextAutoUpdateAt
+	current.LastAutoRunDate = lastAutoRunDate
+}
+
+func writeControllerUpdateStateUnlocked(state controllerUpdateState) error {
 	content, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(workspace, ".controller-update-state-*")
+	if err := os.MkdirAll(filepath.Dir(controllerUpdateStatePath), 0700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(controllerUpdateStatePath), ".controller-update-state-*")
 	if err != nil {
 		return err
 	}
@@ -744,14 +878,37 @@ func commandOutput(name string, args ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func updateControllerCommand(ctx context.Context, mode string) *exec.Cmd {
-	// The script is bind-mounted from the host and may not retain its executable bit.
-	return exec.CommandContext(ctx, "bash", filepath.Join(workspace, "deploy", "update-controller.sh"), mode)
+func resolveControllerUpdaterPath() (string, error) {
+	if controllerUpdaterIsRegular(packagedControllerUpdaterPath) {
+		return packagedControllerUpdaterPath, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv(controllerUpdateWorkspaceFallbackEnvironment)), "true") {
+		return "", fmt.Errorf("packaged controller updater is unavailable: %s", packagedControllerUpdaterPath)
+	}
+	workspacePath := filepath.Join(workspace, "deploy", "update-controller.sh")
+	if !controllerUpdaterIsRegular(workspacePath) {
+		return "", fmt.Errorf("workspace controller updater is unavailable: %s", workspacePath)
+	}
+	return workspacePath, nil
+}
+
+func (s *controllerUpdateService) effectiveNetworkMode() string {
+	return normalizeNetworkMode(s.networkMode)
+}
+
+func controllerUpdaterIsRegular(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
+func updateControllerCommand(ctx context.Context, updaterPath string, arguments ...string) *exec.Cmd {
+	// Invoke through Bash so a root-owned packaged script does not need a writable mount.
+	return exec.CommandContext(ctx, "bash", append([]string{updaterPath}, arguments...)...)
 }
 
 func controllerUpdateRunnerArgs() []string {
 	projectName := environmentValue("COMPOSE_PROJECT_NAME", "xingchen-monitor")
-	return []string{"--project-name", projectName + controllerUpdateRunnerProjectSuffix, "run", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "-e", "COMPOSE_PROJECT_NAME=" + projectName, "--name", controllerUpdateRunnerName, "setup", "update-runner"}
+	return []string{"--project-name", projectName + controllerUpdateRunnerProjectSuffix, "run", "--pull", "never", "-d", "--rm", "--no-deps", "-e", "CONTROLLER_UPDATE_RUNNER=true", "-e", "COMPOSE_PROJECT_NAME=" + projectName, "--name", controllerUpdateRunnerName, "setup", "update-runner"}
 }
 
 func controllerUpdateRunnerStatus() (string, bool) {

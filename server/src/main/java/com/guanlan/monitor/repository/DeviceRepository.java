@@ -1,12 +1,15 @@
 package com.guanlan.monitor.repository;
 
 import com.guanlan.monitor.domain.Device;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -15,6 +18,10 @@ public interface DeviceRepository extends JpaRepository<Device, String> {
     List<Device> findByStatusNotAndLastSeenAtBefore(Device.Status status, Instant cutoff);
     Optional<Device> findByIdAndAgentEnrollmentTokenHashAndAgentEnrollmentTokenExpiresAtAfterAndControllerManagedFalse(
             String id, String tokenHash, Instant now);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select device from Device device where device.id in :ids order by device.id")
+    List<Device> lockAllById(@Param("ids") Collection<String> ids);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""

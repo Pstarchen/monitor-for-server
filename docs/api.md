@@ -154,16 +154,21 @@ X-Agent-Key: <agent-key>
 Content-Type: application/json
 ```
 
-请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes` 与 `services`。Agent 的 `monitored_processes` 配置会让指定进程即使不在默认 CPU 前 12 名也保留在 `processes` 列表中（最多额外 32 个）；显式开启 `collect_all_processes` 后最多采集 256 个进程，`process_collection_limit` 可降低上限。进程对象的 `commandLine` 最长 2048 字符，读取失败时为空。端口和容器明细分别受 `port_collection_limit`（最多 512）与 `container_collection_limit`（最多 100）限制，也可以通过 `skip_port_collection`、`skip_container_collection` 独立关闭。`host.fans`、`host.batteries` 和 `host.gpus` 是可选硬件健康数据：Linux 从 hwmon/power_supply 读取风扇与电池，安装 `nvidia-smi` 时采集 NVIDIA GPU；不支持或无权限时为空数组，不影响其他指标。磁盘可包含可选 `smart` 健康对象；Agent 在 Linux 上检测到 `smartctl` 且设备权限允许时读取 SMART/NVMe 自检、温度、寿命与错误计数，否则状态为 `UNKNOWN` 或不附带对象。`containers` 是可选的 Docker/Podman 容器摘要；无法访问运行时 socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
+请求体包含 `collectedAt`、`host`、`cpu`、`memory`、`disks`、`network`、`networkInterfaces`、`ports`、`containers`、`processes`、`services`，以及 Agent 自身的 `agentVersion`、`agentUpdateStatus`、`agentLastUpdateError`、`agentUpdateStateChangedAt`。`agentVersion` 必须是稳定 `vX.Y.Z`；状态支持 `IDLE`、`CHECKING`、`DOWNLOADING`、`APPLYING`、`SUCCEEDED`、`FAILED`、`PAUSED`、`ROLLING_BACK`。最近错误会限长并展示给管理员，不得包含凭据、原始异常堆栈或敏感路径。
+
+Agent 的 `monitored_processes` 配置会让指定进程即使不在默认 CPU 前 12 名也保留在 `processes` 列表中（最多额外 32 个）；显式开启 `collect_all_processes` 后最多采集 256 个进程，`process_collection_limit` 可降低上限。进程对象的 `commandLine` 最长 2048 字符，读取失败时为空。端口和容器明细分别受 `port_collection_limit`（最多 512）与 `container_collection_limit`（最多 100）限制，也可以通过 `skip_port_collection`、`skip_container_collection` 独立关闭。`host.fans`、`host.batteries` 和 `host.gpus` 是可选硬件健康数据：Linux 从 hwmon/power_supply 读取风扇与电池，安装 `nvidia-smi` 时采集 NVIDIA GPU；不支持或无权限时为空数组，不影响其他指标。磁盘可包含可选 `smart` 健康对象；Agent 在 Linux 上检测到 `smartctl` 且设备权限允许时读取 SMART/NVMe 自检、温度、寿命与错误计数，否则状态为 `UNKNOWN` 或不附带对象。`containers` 是可选的 Docker/Podman 容器摘要；无法访问运行时 socket 时为空数组。成功返回 `202 Accepted` 和归一化后的指标快照，并返回 `X-Agent-Interval-Seconds` 响应头。Agent 会在下一次成功上报后应用总控设置的周期；网络中断时继续使用本地周期。
 
 ## Agent 任务
 
-任务用于向受控 Agent 下发非交互的一次性命令。Agent 配置中的 `allow_command_execution` 默认是 `false`，只有显式开启后才会轮询任务并执行；命令按可执行文件和参数直接启动，不经过 Shell。安装器可使用 `--allow-command-execution`（Windows 为 `-AllowCommandExecution`）写入此开关。服务端限制命令参数数量、超时时间（1-300 秒）和 stdout/stderr 大小（1KiB-1MiB），任务创建、取消和结果都会写入审计日志。
+普通任务用于向受控 Agent 下发非交互的一次性命令。Agent 配置中的 `allow_command_execution` 默认是 `false`，只有显式开启后才执行 `COMMAND`；命令按可执行文件和参数直接启动，不经过 Shell。安装器可使用 `--allow-command-execution`（Windows 为 `-AllowCommandExecution`）写入此开关。服务端限制命令参数数量、超时时间（1-300 秒）和 stdout/stderr 大小（1KiB-1MiB），任务创建、取消和结果都会写入审计日志。
+
+`AGENT_UPDATE` 是独立的受控 operation，不依赖 `allow_command_execution` 或文件操作权限。它只能使用固定 `command=agent.update`、空 `args` 和严格 payload；普通命令入口不能伪造该 operation，普通取消入口也不能绕过 rollout 状态机。
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/api/tasks?deviceId=&limit=50` | 登录 / PAT `nezha:server:read` | 查看任务及结果；PAT 受服务器白名单约束 |
 | POST | `/api/tasks` | ADMIN / OPERATOR / PAT `nezha:server:exec` | 创建任务 |
+| POST | `/api/tasks/update` | ADMIN | 为已校验 rollout/member 创建固定 Agent 更新任务；主要由 rollout worker 调用 |
 | GET | `/api/tasks/{id}` | 登录 / PAT `nezha:server:read` | 查看单个任务 |
 | POST | `/api/tasks/{id}/cancel` | ADMIN / OPERATOR / PAT `nezha:server:exec` | 取消排队或执行中的任务 |
 | GET | `/api/agent/v1/tasks/next` | Agent 设备密钥 | Agent 领取一个排队任务；无任务返回 `204` |
@@ -182,6 +187,55 @@ Agent 端配置：
 ```
 
 生产环境只应对明确授权的设备开启命令执行，并为 PAT 设置服务器 ID 白名单和最小 scope。
+
+固定更新任务示例：
+
+```json
+{
+  "deviceId": "device-uuid",
+  "action": "update",
+  "version": "v1.20.15",
+  "rolloutId": 123,
+  "memberId": 456
+}
+```
+
+`action` 仅为 `update` 或 `rollback`，版本只接受无 prerelease/build 且无前导零的 `vX.Y.Z`，两个 ID 必须成对出现并与数据库中的 rollout/member/device 关系一致。Agent 收到的 assignment 为 `operation=AGENT_UPDATE`、`command=agent.update`、`args=[]`；payload 不接受 URL、路径、命令或未知字段。
+
+## Agent 灰度发布
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/agent-rollouts?limit=50` | 登录 | 列表；OPERATOR/VIEWER 只返回具有设备查看权限的成员，无可见成员的发布会隐藏 |
+| GET | `/api/agent-rollouts/{id}` | 登录 | 详情；没有任何可见成员时返回 `403` |
+| POST | `/api/agent-rollouts` | ADMIN | 创建发布草稿 |
+| POST | `/api/agent-rollouts/{id}/start` | ADMIN | 启动草稿 |
+| POST | `/api/agent-rollouts/{id}/pause` | ADMIN | 暂停运行中更新或回滚 |
+| POST | `/api/agent-rollouts/{id}/resume` | ADMIN | 继续已暂停发布 |
+| POST | `/api/agent-rollouts/{id}/cancel` | ADMIN | 停止派发并继续对账已领取任务 |
+| POST | `/api/agent-rollouts/{id}/rollback` | ADMIN | 将实际确认升级的成员回滚到各自发布前版本 |
+
+创建请求：
+
+```json
+{
+  "targetVersion": "v1.20.15",
+  "deviceIds": ["device-a", "device-b"],
+  "maintenanceWindowId": null,
+  "canaryPercent": 10,
+  "ringCount": 3,
+  "maxConcurrent": 5,
+  "jitterSeconds": 30,
+  "failureThreshold": 20,
+  "verificationTimeoutSeconds": 600
+}
+```
+
+必须显式选择 1-500 台已上报稳定版本的非 Controller-managed Agent，且目标版本高于每台当前版本。可选参数省略时使用上例数值；范围依次为灰度 `0-100`、批次 `1-20`、并发 `1-100`、抖动 `0-86400` 秒、失败阈值 `1-100`、确认超时 `30-86400` 秒。
+
+动作请求体可省略，也可传 `{"reason":"变更单或操作原因"}`。发布状态为 `DRAFT`、`RUNNING`、`PAUSED`、`CANCELED`、`SUCCEEDED`、`FAILED`、`ROLLING_BACK`、`ROLLED_BACK`；成员状态区分排队、已接受、版本确认、失败和对应回滚阶段。
+
+任务结果 `SUCCEEDED` 只会把成员置为等待版本确认。确认必须满足 `device.lastSeenAt >= member.queuedAt` 且 `device.agentVersion` 等于目标版本；回滚使用每个成员创建时保存的 `previousVersion`。当前 ring 的已完成成员中失败率达到阈值后自动暂停。取消时无法撤回的已领取任务会继续对账 late report，显式回滚只纳入后来确认为已升级的成员。
 
 ## 告警
 

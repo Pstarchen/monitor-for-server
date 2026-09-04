@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage: install-controller.sh [--cleanup] [--build|--source-build] [--offline] [--auto-update] [--no-mirror] [--no-source-fallback]
+                             [--network-mode public|internal|offline] [--allow-gitee]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -17,6 +18,8 @@ browser guide at /setup.
   --auto-update  enable the controller's daily 04:00 automatic update.
   --no-mirror  skip mainland-China mirror registries and use official GHCR.
   --no-source-fallback  do not build from source when all image registries fail.
+  --network-mode  select public, internal, or fully offline source policy.
+  --allow-gitee  explicitly permit Gitee when network mode is internal.
 USAGE
 }
 
@@ -27,6 +30,8 @@ auto_update=false
 no_mirror=false
 source_fallback=true
 offline=false
+network_mode="${XINGCHEN_NETWORK_MODE:-public}"
+allow_gitee="${XINGCHEN_ALLOW_GITEE:-false}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cleanup) cleanup=true; shift ;;
@@ -36,14 +41,45 @@ while [[ $# -gt 0 ]]; do
     --auto-update) auto_update=true; shift ;;
     --no-mirror) no_mirror=true; shift ;;
     --no-source-fallback) source_fallback=false; shift ;;
+    --network-mode)
+      [[ $# -ge 2 && -n "${2:-}" ]] || { echo "--network-mode 需要模式值。" >&2; exit 2; }
+      network_mode="$2"
+      shift 2
+      ;;
+    --allow-gitee) allow_gitee=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
+network_mode="${network_mode,,}"
+if [[ ! "${network_mode}" =~ ^(public|internal|offline)$ ]]; then
+  echo "--network-mode 必须是 public、internal 或 offline。" >&2
+  exit 2
+fi
+allow_gitee="${allow_gitee,,}"
+if [[ "${allow_gitee}" != true && "${allow_gitee}" != false ]]; then
+  echo "XINGCHEN_ALLOW_GITEE 必须是 true 或 false。" >&2
+  exit 2
+fi
+if [[ "${offline}" == true ]]; then
+  network_mode=offline
+elif [[ "${network_mode}" == offline ]]; then
+  offline=true
+fi
+export XINGCHEN_NETWORK_MODE="${network_mode}"
+export XINGCHEN_ALLOW_GITEE="${allow_gitee}"
+
 if [[ "${offline}" == true && ( "${build}" == true || "${source_build}" == true || "${auto_update}" == true ) ]]; then
   echo "--offline 不能与 --build、--source-build 或 --auto-update 同时使用。" >&2
   exit 2
+fi
+if [[ "${network_mode}" == internal ]]; then
+  if [[ "${build}" == true || "${source_build}" == true ]]; then
+    echo "internal 网络模式禁止 --build 和 --source-build；请使用已导入镜像或内部 Registry。" >&2
+    exit 2
+  fi
+  source_fallback=false
 fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -158,6 +194,7 @@ persist_installer_settings() {
     XINGCHEN_TARGET_VERSION XINGCHEN_RELEASE_MANIFEST_PATH XINGCHEN_RELEASE_MANIFEST_URLS XINGCHEN_RELEASE_MANIFEST_SHA256
     XINGCHEN_AGENT_RELEASE_BASE_URLS XINGCHEN_AGENT_CACHE_DIR XINGCHEN_AGENT_OFFLINE_DIR
     XINGCHEN_CONTROLLER_ALLOW_GITHUB_API XINGCHEN_CONTROLLER_IMAGE_MIRRORS XINGCHEN_AGENT_IMAGE_MIRRORS
+    XINGCHEN_NETWORK_MODE XINGCHEN_ALLOW_GITEE
     XINGCHEN_SOURCE_REPOSITORIES XINGCHEN_SOURCE_REF XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS
     XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS XINGCHEN_UPDATE_MIN_FREE_BYTES
   )
@@ -233,7 +270,11 @@ else
   fi
   bash "${script_dir}/update-controller.sh" "${update_args[@]}"
 fi
-docker compose "${profile_args[@]}" up -d --remove-orphans
+compose_up_args=(-d --remove-orphans)
+if [[ "${offline}" == true ]]; then
+  compose_up_args+=(--pull never)
+fi
+docker compose "${profile_args[@]}" up "${compose_up_args[@]}"
 
 web_port="18080"
 if [[ -f .env ]]; then

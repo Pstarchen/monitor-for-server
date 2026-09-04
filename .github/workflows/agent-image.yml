@@ -10,7 +10,24 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  test-windows-installer:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test installer with Windows PowerShell 5.1
+        shell: powershell
+        run: .\deploy\install-agent_test.ps1
+
+      - name: Test installer with PowerShell 7
+        shell: pwsh
+        run: .\deploy\install-agent_test.ps1
+
   publish:
+    needs: test-windows-installer
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,6 +38,9 @@ jobs:
 
       - name: Test Linux installer
         run: sudo bash deploy/install-agent_test.sh
+
+      - name: Test GitHub Release mutability guard
+        run: bash deploy/check-github-release-mutable_test.sh
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -64,6 +84,12 @@ jobs:
             type=ref,event=tag
             type=sha
 
+      - name: Protect published GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -87,6 +113,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Protect published GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -121,7 +152,7 @@ jobs:
       - name: Generate release manifest
         working-directory: setup
         run: |
-          go run ./cmd/release-manifest -version "${GITHUB_REF_NAME}" -assets ../dist -output ../dist/manifest.json -minimum-controller v1.20.0
+          go run ./cmd/release-manifest -version "${GITHUB_REF_NAME}" -assets ../dist -output ../dist/manifest.json -minimum-controller v1.20.0 -artifact-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download"
           (cd ../dist && sha256sum manifest.json > manifest.json.sha256)
 
       - name: Publish Agent Release assets
@@ -129,5 +160,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft --generate-notes --title "星辰监控 ${GITHUB_REF_NAME}"
+          release_state="$(bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}")"
+          if [[ "${release_state}" == missing ]]; then
+            gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft --generate-notes --title "星辰监控 ${GITHUB_REF_NAME}"
+          fi
           gh release upload "${GITHUB_REF_NAME}" dist/xingchen-agent_* dist/checksums.txt dist/manifest.json dist/manifest.json.sha256 --repo "${GITHUB_REPOSITORY}" --clobber

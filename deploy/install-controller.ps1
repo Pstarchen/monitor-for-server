@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch] $Help,
     [switch] $Cleanup,
@@ -7,7 +7,10 @@ param(
     [switch] $Offline,
     [switch] $AutoUpdate,
     [switch] $NoMirror,
-    [switch] $NoSourceFallback
+    [switch] $NoSourceFallback,
+    [ValidateSet('public', 'internal', 'offline')]
+    [string] $NetworkMode = $(if ($env:XINGCHEN_NETWORK_MODE) { $env:XINGCHEN_NETWORK_MODE } else { 'public' }),
+    [switch] $AllowGitee
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +18,7 @@ $ErrorActionPreference = 'Stop'
 if ($Help) {
     @'
 Usage: install-controller.ps1 [-Cleanup] [-Build | -SourceBuild] [-Offline]
+                              [-NetworkMode public|internal|offline] [-AllowGitee]
 
 Pulls prebuilt controller images and starts the controller with an internal
 PostgreSQL database. Site and administrator configuration are completed in the
@@ -28,13 +32,23 @@ browser guide at /setup.
 -AutoUpdate enables the controller's daily 04:00 automatic update.
 -NoMirror skips mainland-China mirror registries and uses official GHCR.
 -NoSourceFallback does not build from source when all image registries fail.
+-NetworkMode selects public, internal, or fully offline source policy.
+-AllowGitee explicitly permits Gitee when network mode is internal.
 '@
     exit 0
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if ($Offline) { $NetworkMode = 'offline' }
+elseif ($NetworkMode -eq 'offline') { $Offline = $true }
+$env:XINGCHEN_NETWORK_MODE = $NetworkMode
+$env:XINGCHEN_ALLOW_GITEE = if ($AllowGitee -or $env:XINGCHEN_ALLOW_GITEE -eq 'true') { 'true' } else { 'false' }
 if ($Build -and $SourceBuild) { throw '-Build 与 -SourceBuild 不能同时使用。' }
 if ($Offline -and ($Build -or $SourceBuild -or $AutoUpdate)) { throw '-Offline 不能与 -Build、-SourceBuild 或 -AutoUpdate 同时使用。' }
+if ($NetworkMode -eq 'internal') {
+    if ($Build -or $SourceBuild) { throw 'internal 网络模式禁止 -Build 和 -SourceBuild；请使用已导入镜像或内部 Registry。' }
+    $NoSourceFallback = $true
+}
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安装 Docker Engine。' }
 & docker compose version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
@@ -101,6 +115,7 @@ try {
         'XINGCHEN_TARGET_VERSION', 'XINGCHEN_RELEASE_MANIFEST_PATH', 'XINGCHEN_RELEASE_MANIFEST_URLS', 'XINGCHEN_RELEASE_MANIFEST_SHA256',
         'XINGCHEN_AGENT_RELEASE_BASE_URLS', 'XINGCHEN_AGENT_CACHE_DIR', 'XINGCHEN_AGENT_OFFLINE_DIR',
         'XINGCHEN_CONTROLLER_ALLOW_GITHUB_API', 'XINGCHEN_CONTROLLER_IMAGE_MIRRORS', 'XINGCHEN_AGENT_IMAGE_MIRRORS',
+        'XINGCHEN_NETWORK_MODE', 'XINGCHEN_ALLOW_GITEE',
         'XINGCHEN_SOURCE_REPOSITORIES', 'XINGCHEN_SOURCE_REF', 'XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS',
         'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS', 'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS', 'XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS', 'XINGCHEN_UPDATE_MIN_FREE_BYTES'
     )
@@ -148,7 +163,9 @@ try {
         & $updateScript @updateArgs
     }
     if ($LASTEXITCODE -ne 0) { throw '总控镜像准备失败；如需本地构建请重试 -Build。' }
-    & docker compose up -d --remove-orphans
+    $composeUpArgs = @('up', '-d', '--remove-orphans')
+    if ($Offline) { $composeUpArgs += @('--pull', 'never') }
+    & docker compose @composeUpArgs
     if ($LASTEXITCODE -ne 0) { throw '总终端服务器启动失败。' }
 
     $webPort = 18080

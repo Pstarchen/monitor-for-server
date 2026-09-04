@@ -27,14 +27,22 @@ type Result struct {
 	Error    string
 }
 
-func Run(ctx context.Context, task model.TaskAssignment, outputLimit int, allowCommandExecution bool, allowFileOperations bool, hostRoot string) Result {
-	if task.Command == "" || outputLimit < 1 {
+func Run(ctx context.Context, task model.TaskAssignment, outputLimit int, allowCommandExecution bool, allowFileOperations bool, hostRoot, updateRequestPath, updateLauncherPath string) Result {
+	if outputLimit < 1 {
 		return Result{Status: "FAILED", Error: "invalid task"}
 	}
 	if task.TimeoutSeconds < 1 {
 		return Result{Status: "FAILED", Error: "invalid task timeout"}
 	}
-	if task.Operation != "" && task.Operation != "COMMAND" {
+	if task.Operation == model.TaskOperationAgentUpdate {
+		taskContext, cancel := context.WithTimeout(ctx, time.Duration(task.TimeoutSeconds)*time.Second)
+		defer cancel()
+		return runAgentUpdate(taskContext, task, updateRequestPath, updateLauncherPath)
+	}
+	if task.Command == "" {
+		return Result{Status: "FAILED", Error: "invalid task"}
+	}
+	if task.Operation != "" && task.Operation != model.TaskOperationCommand {
 		if !allowFileOperations {
 			return Result{Status: "FAILED", Error: "file operations disabled"}
 		}

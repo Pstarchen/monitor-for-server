@@ -1,5 +1,6 @@
 package com.guanlan.monitor.api.dto;
 
+import com.guanlan.monitor.domain.Device;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -30,8 +31,27 @@ public record AgentReportRequest(
         @Size(max = 64) List<@Valid LogFile> logs,
         @Size(max = 8) List<@Valid LogFile> systemLogs,
         @Size(max = 512) List<@Valid IntegrityItem> integrity,
-        @Size(max = 32) List<@Valid CustomMetricResult> customMetrics
+        @Size(max = 32) List<@Valid CustomMetricResult> customMetrics,
+        @Valid AgentInfo agent
 ) {
+    public AgentReportRequest(
+            Instant collectedAt, HostInfo host, CpuStats cpu, MemoryStats memory, List<DiskStats> disks,
+            NetworkStats network, List<NetworkInterface> networkInterfaces, List<PortStats> ports,
+            List<ContainerStats> containers, List<ProcessStats> processes, List<ServiceStatus> services,
+            FirewallStatus firewall, List<CronJob> cronJobs, List<LogFile> logs, List<LogFile> systemLogs,
+            List<IntegrityItem> integrity, List<CustomMetricResult> customMetrics
+    ) {
+        this(collectedAt, host, cpu, memory, disks, network, networkInterfaces, ports, containers, processes,
+                services, firewall, cronJobs, logs, systemLogs, integrity, customMetrics, null);
+    }
+
+    public record AgentInfo(
+            @NotBlank @Size(max = 80) String version,
+            @NotNull Device.AgentUpdateStatus updateStatus,
+            @Size(max = 500) String lastUpdateError,
+            Instant updateStateChangedAt
+    ) {}
+
     public record HostInfo(
             @NotBlank @Size(max = 255) String hostname, @Size(max = 80) String os, @Size(max = 80) String platform,
             @Size(max = 120) String platformVersion, @Size(max = 255) String kernelVersion,

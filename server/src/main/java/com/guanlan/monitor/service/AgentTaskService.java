@@ -6,8 +6,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guanlan.monitor.api.ApiException;
 import com.guanlan.monitor.api.dto.AgentTaskDtos;
 import com.guanlan.monitor.domain.AgentTask;
+import com.guanlan.monitor.domain.AgentRollout;
+import com.guanlan.monitor.domain.AgentRolloutMember;
 import com.guanlan.monitor.domain.Device;
+import com.guanlan.monitor.repository.AgentRolloutMemberRepository;
+import com.guanlan.monitor.repository.AgentRolloutRepository;
 import com.guanlan.monitor.repository.AgentTaskRepository;
+import com.guanlan.monitor.repository.DeviceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -23,6 +28,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -33,11 +39,21 @@ public class AgentTaskService {
     private static final int MAX_COMMAND_LENGTH = 128;
     private static final int MAX_FILE_PATH_LENGTH = 4096;
     private static final int MAX_FILE_CONTENT_LENGTH = 1_500_000;
+    private static final int UPDATE_TIMEOUT_SECONDS = 300;
+    private static final int UPDATE_MAX_OUTPUT_BYTES = 16_384;
+    private static final Pattern STABLE_VERSION = Pattern.compile("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$");
+    private static final Set<AgentRolloutMember.Status> ACTIVE_UPDATE_STATUSES = Set.of(
+            AgentRolloutMember.Status.QUEUED, AgentRolloutMember.Status.ACCEPTED,
+            AgentRolloutMember.Status.ROLLBACK_QUEUED, AgentRolloutMember.Status.ROLLBACK_ACCEPTED);
     private final AgentTaskRepository tasks;
+    private final AgentRolloutRepository rollouts;
+    private final AgentRolloutMemberRepository rolloutMembers;
+    private final DeviceRepository deviceRepository;
     private final DeviceService devices;
     private final ObjectMapper mapper;
     private final AuditService audit;
     private final DeviceAccessService access;
+    private final MaintenanceWindowService maintenanceWindows;
 
     @Transactional
     public AgentTaskDtos.View create(AgentTaskDtos.CreateRequest request, String actor, Authentication authentication) {
@@ -66,7 +82,7 @@ public class AgentTaskService {
     public AgentTaskDtos.View createFile(String deviceId, AgentTask.Operation operation, Map<String, Object> payload,
                                          Integer timeoutSeconds, Integer maxOutputBytes, String actor,
                                          Authentication authentication) {
-        if (operation == null || operation == AgentTask.Operation.COMMAND) {
+        if (operation == null || operation == AgentTask.Operation.COMMAND || operation == AgentTask.Operation.AGENT_UPDATE) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "文件任务类型无效");
         }
         Device device = devices.require(deviceId);
@@ -87,6 +103,98 @@ public class AgentTaskService {
         task.setCreatedBy(actor);
         tasks.save(task);
         audit.record("AGENT_FILE_TASK_CREATE", "task:" + task.getId(), "为设备 " + device.getName() + " 创建文件任务 " + operation.name());
+        return view(task);
+    }
+
+    @Transactional
+    public AgentTaskDtos.View createUpdate(AgentTaskDtos.UpdateRequest request, String actor,
+                                           Authentication authentication) {
+        if (request != null) access.requireTask(authentication, request.deviceId());
+        return createUpdateAt(request, actor, Instant.now());
+    }
+
+    @Transactional
+    public AgentTaskDtos.View createUpdateAt(AgentTaskDtos.UpdateRequest request, String actor, Instant now) {
+        if (request == null || !request.unknownFields().isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Agent 更新请求包含未知字段");
+        }
+        String action = request.action();
+        String version = request.version();
+        if ((!"update".equals(action) && !"rollback".equals(action))
+                || version == null || !STABLE_VERSION.matcher(version).matches()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Agent 更新动作或版本无效");
+        }
+        if (request.rolloutId() == null || request.memberId() == null
+                || request.rolloutId() < 1 || request.memberId() < 1
+                || request.deviceId() == null || request.deviceId().isBlank()
+                || !request.deviceId().equals(request.deviceId().trim())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Agent 更新目标无效");
+        }
+
+        AgentRollout rollout = rollouts.lockById(request.rolloutId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Agent rollout 不存在"));
+        Device lockedDevice = deviceRepository.lockAllById(List.of(request.deviceId())).stream().findFirst()
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "设备不存在"));
+        AgentRolloutMember member = rolloutMembers.lockById(request.memberId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Agent rollout 成员不存在"));
+        if (!member.getRollout().getId().equals(rollout.getId())
+                || !member.getDevice().getId().equals(request.deviceId())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Agent rollout 成员与目标不匹配");
+        }
+
+        boolean rollback = action.equals("rollback");
+        AgentRollout.Status requiredRolloutStatus = rollback
+                ? AgentRollout.Status.ROLLING_BACK : AgentRollout.Status.RUNNING;
+        AgentRolloutMember.Status requiredMemberStatus = rollback
+                ? AgentRolloutMember.Status.ROLLBACK_PENDING : AgentRolloutMember.Status.PENDING;
+        String expectedVersion = rollback ? member.getPreviousVersion() : rollout.getTargetVersion();
+        if (rollout.getStatus() != requiredRolloutStatus
+                || member.getStatus() != requiredMemberStatus
+                || member.getRingNumber() != rollout.getCurrentRing()
+                || !expectedVersion.equals(version)) {
+            throw new ApiException(HttpStatus.CONFLICT, "Agent rollout 当前不允许派发该任务");
+        }
+        if (rollback && !rollout.getTargetVersion().equals(lockedDevice.getAgentVersion())) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "设备 Agent 版本已变化，拒绝派发旧 rollout 的降级回滚任务");
+        }
+        if (member.getEligibleAt() == null || member.getEligibleAt().isAfter(now)) {
+            throw new ApiException(HttpStatus.CONFLICT, "Agent rollout 成员尚未到达派发时间");
+        }
+        if (rollout.getMaintenanceWindow() != null
+                && !maintenanceWindows.isActive(rollout.getMaintenanceWindow(), now)) {
+            throw new ApiException(HttpStatus.CONFLICT, "当前不在 Agent rollout 维护窗口内");
+        }
+        long active = rolloutMembers.countByRolloutIdAndStatusIn(rollout.getId(), ACTIVE_UPDATE_STATUSES);
+        if (active >= rollout.getMaxConcurrent()) {
+            throw new ApiException(HttpStatus.CONFLICT, "Agent rollout 已达到并发上限");
+        }
+
+        Device device = lockedDevice;
+        AgentTask task = new AgentTask();
+        task.setDevice(device);
+        task.setOperation(AgentTask.Operation.AGENT_UPDATE);
+        task.setCommand("agent.update");
+        task.setArgsJson("[]");
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("action", action);
+        payload.put("version", version);
+        payload.put("rolloutId", rollout.getId());
+        payload.put("memberId", member.getId());
+        task.setPayloadJson(jsonObject(payload));
+        task.setTimeoutSeconds(UPDATE_TIMEOUT_SECONDS);
+        task.setMaxOutputBytes(UPDATE_MAX_OUTPUT_BYTES);
+        task.setCreatedBy(normalizeActor(actor));
+        tasks.save(task);
+
+        member.setTask(task);
+        member.setStatus(rollback ? AgentRolloutMember.Status.ROLLBACK_QUEUED : AgentRolloutMember.Status.QUEUED);
+        member.setQueuedAt(now);
+        member.setAttempt(member.getAttempt() + 1);
+        member.setError(null);
+        member.setConfirmedAt(null);
+        audit.record("AGENT_UPDATE_TASK_CREATE", "task:" + task.getId(),
+                "为 rollout " + rollout.getId() + " 的设备 " + device.getName() + " 派发 " + action + " 任务");
         return view(task);
     }
 
@@ -124,6 +232,9 @@ public class AgentTaskService {
     public void cancel(Long id, String actor, Authentication authentication) {
         AgentTask task = require(id);
         access.requireTask(authentication, task.getDevice().getId());
+        if (task.getOperation() == AgentTask.Operation.AGENT_UPDATE) {
+            throw new ApiException(HttpStatus.CONFLICT, "Agent 更新任务必须通过 rollout 管理，不能单独取消");
+        }
         if (task.getStatus() == AgentTask.Status.QUEUED || task.getStatus() == AgentTask.Status.RUNNING) {
             task.setStatus(AgentTask.Status.CANCELED);
             task.setFinishedAt(Instant.now());
@@ -185,6 +296,9 @@ public class AgentTaskService {
         String command = value == null ? "" : value.trim();
         if (command.isBlank() || command.length() > MAX_COMMAND_LENGTH || command.indexOf('\u0000') >= 0) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "命令不能为空或超出长度限制");
+        }
+        if (command.equalsIgnoreCase("agent.update")) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "该命令仅允许通过专用 Agent 更新协议派发");
         }
         return command;
     }
@@ -276,6 +390,11 @@ public class AgentTaskService {
     private String trim(String value, int max) {
         if (value == null) return "";
         return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    private String normalizeActor(String actor) {
+        String value = actor == null || actor.isBlank() ? "system" : actor.trim();
+        return value.length() <= 64 ? value : value.substring(0, 64);
     }
 
     private AgentTaskDtos.View view(AgentTask task) {

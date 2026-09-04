@@ -76,6 +76,9 @@ func (s *controllerUpdateService) refreshReleaseState(ctx context.Context, state
 }
 
 func (s *controllerUpdateService) latestRelease(ctx context.Context, state controllerUpdateState, force bool) (controllerRelease, bool, string, error) {
+	if !validNetworkMode(s.effectiveNetworkMode()) {
+		return controllerRelease{}, false, "", errors.New("XINGCHEN_NETWORK_MODE 必须是 public、internal 或 offline")
+	}
 	if !force && s.releaseCacheFresh(state) {
 		return releaseFromState(state), true, "", nil
 	}
@@ -168,13 +171,23 @@ func (s *controllerUpdateService) versionForRevision(ctx context.Context, revisi
 }
 
 func (s *controllerUpdateService) githubReleaseEnabled() bool {
-	return s.allowGitHubAPI || (strings.TrimSpace(s.apiBase) != "" && strings.TrimRight(s.apiBase, "/") != controllerGitHubAPIBase)
+	apiBase := strings.TrimRight(strings.TrimSpace(s.apiBase), "/")
+	if apiBase == "" {
+		apiBase = controllerGitHubAPIBase
+	}
+	if !networkModeAllowsURL(s.effectiveNetworkMode(), apiBase, s.allowGitee) {
+		return false
+	}
+	return s.allowGitHubAPI || apiBase != controllerGitHubAPIBase
 }
 
 func (s *controllerUpdateService) githubJSON(ctx context.Context, path string, destination any) error {
 	apiBase := strings.TrimRight(s.apiBase, "/")
 	if apiBase == "" {
 		apiBase = controllerGitHubAPIBase
+	}
+	if !networkModeAllowsURL(s.effectiveNetworkMode(), apiBase, s.allowGitee) {
+		return errors.New("当前网络模式禁止访问配置的版本 API")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+path, nil)
 	if err != nil {
@@ -258,7 +271,7 @@ func parseControllerVersion(value string) ([3]int, bool) {
 		return parsed, false
 	}
 	for index, part := range parts {
-		if part == "" {
+		if part == "" || (len(part) > 1 && part[0] == '0') {
 			return parsed, false
 		}
 		number, err := strconv.Atoi(part)

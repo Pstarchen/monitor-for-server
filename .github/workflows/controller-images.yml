@@ -32,7 +32,7 @@ jobs:
         run: sudo bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/*.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
+        run: bash -n deploy/*.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
 
       - name: Check PowerShell scripts and generated updater
         shell: pwsh
@@ -64,6 +64,10 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      - name: Test internal release promotion
+        shell: pwsh
+        run: ./deploy/promote-internal-release_test.ps1
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -88,8 +92,34 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile && pnpm test && pnpm build
 
+  test-windows-updater:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: setup/go.mod
+          cache-dependency-path: setup/go.sum
+
+      - name: Test Controller updater with Windows PowerShell 5.1
+        shell: powershell
+        run: .\deploy\update-controller_test.ps1
+
+      - name: Test Controller updater with PowerShell 7
+        shell: pwsh
+        run: .\deploy\update-controller_test.ps1
+
+      - name: Test offline bundle wrappers on Windows
+        shell: bash
+        run: bash deploy/package-offline-bundle_test.sh
+
   publish:
-    needs: test
+    needs: [test, test-windows-updater]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -138,6 +168,12 @@ jobs:
             type=ref,event=tag
             type=sha
 
+      - name: Protect published GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -157,11 +193,37 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Protect published GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+
+      - name: Wait for matching Agent workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          agent_run_id=''
+          for attempt in {1..60}; do
+            agent_run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow agent-image.yml \
+              --branch "${GITHUB_REF_NAME}" --commit "${GITHUB_SHA}" --event push --limit 5 \
+              --json databaseId --jq '.[0].databaseId // empty')"
+            [[ -z "${agent_run_id}" ]] || break
+            if [[ "${attempt}" -eq 60 ]]; then
+              echo 'Matching Agent workflow was not created in time.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          gh run watch "${agent_run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status --interval 20
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -194,25 +256,15 @@ jobs:
               sleep 30
             done
           done
-      - name: Wait for Agent release assets
+      - name: Download and verify Agent release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist/agent
-          for attempt in {1..30}; do
-            rm -f dist/agent/*
-            if gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir dist/agent \
-              --pattern 'xingchen-agent_*' --pattern checksums.txt --pattern manifest.json --pattern manifest.json.sha256 >/dev/null 2>&1; then
-              break
-            fi
-            if [[ "${attempt}" -eq 30 ]]; then
-              echo 'Agent release assets were not published in time.' >&2
-              exit 1
-            fi
-            sleep 20
-          done
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir dist/agent \
+            --pattern 'xingchen-agent_*' --pattern checksums.txt --pattern manifest.json --pattern manifest.json.sha256
           test "$(find dist/agent -maxdepth 1 -type f -name 'xingchen-agent_*' | wc -l)" -eq 4
           (cd dist/agent && sha256sum -c checksums.txt && sha256sum -c manifest.json.sha256)
 
@@ -254,19 +306,13 @@ jobs:
       - name: Upload offline bundles to draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${GITHUB_REF_NAME}" dist/offline/*.tar.gz dist/offline/*.sha256 --repo "${GITHUB_REPOSITORY}" --clobber
-
-      - name: Promote verified release images
-        shell: bash
         run: |
-          set -euo pipefail
-          repository="${GITHUB_REPOSITORY,,}"
-          for component in setup server web agent; do
-            image="${REGISTRY}/${repository}-${component}"
-            docker buildx imagetools create --tag "${image}:latest" "${image}:${GITHUB_REF_NAME}"
-          done
+          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" >/dev/null
+          gh release upload "${GITHUB_REF_NAME}" dist/offline/*.tar.gz dist/offline/*.sha256 --repo "${GITHUB_REPOSITORY}" --clobber
 
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
+        run: |
+          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" >/dev/null
+          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false

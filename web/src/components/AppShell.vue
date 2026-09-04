@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Archive, BarChart3, BellRing, CalendarClock, CheckCircle2, ChevronDown, CircleGauge, CircleHelp, ClipboardList, GitBranch, Globe2, Github, LogOut, Radar,
-  Menu, Moon, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
+  Menu, Moon, PackageCheck, Server, Settings, ShieldCheck, SlidersHorizontal, Sun, Terminal, Users, X, KeyRound,
 } from 'lucide-vue-next'
 import { ElMessage } from 'element-plus'
 import { api, errorMessage } from '@/lib/api'
@@ -57,6 +57,7 @@ const navigation = [
   { label: '运行报告', path: '/reports', icon: BarChart3 },
   { label: '动态域名解析', path: '/ddns', icon: Globe2 },
   { label: '任务执行', path: '/tasks', icon: Terminal },
+  { label: 'Agent 发布', path: '/agent-rollouts', icon: PackageCheck },
   { label: 'API Token', path: '/tokens', icon: KeyRound },
 ]
 const administration = [

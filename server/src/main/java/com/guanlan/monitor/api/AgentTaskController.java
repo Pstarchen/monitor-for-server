@@ -39,6 +39,14 @@ public class AgentTaskController {
         return tasks.create(request, authentication.getName(), authentication);
     }
 
+    @PostMapping("/api/tasks/update")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
+    AgentTaskDtos.View createUpdate(Authentication authentication,
+                                    @Valid @RequestBody AgentTaskDtos.UpdateRequest request) {
+        return tasks.createUpdate(request, authentication.getName(), authentication);
+    }
+
     @PostMapping("/api/tasks/{id}/cancel")
     @PreAuthorize("hasAnyRole('ADMIN','OPERATOR')")
     AgentTaskDtos.View cancel(Authentication authentication, @PathVariable Long id) {

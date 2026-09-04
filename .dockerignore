@@ -17,3 +17,4 @@
 !deploy/
 !deploy/install-agent.sh
 !deploy/install-agent.ps1
+!deploy/update-controller.sh

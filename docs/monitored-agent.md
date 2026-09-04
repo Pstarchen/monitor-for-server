@@ -6,7 +6,7 @@
 
 ## Linux
 
-在线安装器默认识别操作系统和 CPU 架构，从总控同源的 release/artifact 接口下载预编译 Agent，校验 manifest 声明的大小和 SHA256 后安装 systemd 服务。只有显式配置制品基址、GitHub API或源码仓库时才使用相应回退。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
+在线安装器默认识别操作系统和 CPU 架构，从总控同源的 release/artifact 接口下载预编译 Agent，校验 manifest 声明的大小和 SHA256 后安装 systemd 服务。只有 `public` 模式显式配置制品基址、GitHub API 或源码仓库时才使用相应公共回退。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
 
 控制台只使用总控同域入口，目标服务器无需访问 GitHub、Gitee 或公共 CDN。复制按钮输出的是纯文本命令，不包含接入令牌、长期密钥、Markdown 链接、历史版本号或多级下载回退；脚本与 SHA256 分别下载，校验匹配后才会执行。
 
@@ -15,6 +15,25 @@ installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && (trap 'rm -f "
 ```
 
 不要将安装器 URL 改成代码托管平台的 `main` 分支。需要外部回退时，在总控侧配置受信上游或内部镜像，由总控完成版本固定、缓存和制品校验。
+
+目标机不能访问 GitHub 时使用 `internal`，并保持 Gitee 与 GitHub API 关闭。Controller 地址和额外制品 URL 都必须属于组织批准的内部域；策略会在发送请求前拒绝公共地址：
+
+```bash
+export XINGCHEN_NETWORK_MODE=internal
+export XINGCHEN_ALLOW_GITEE=false
+export XINGCHEN_AGENT_ALLOW_GITHUB_API=false
+export XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
+bash ./deploy/install-agent.sh --network-mode internal --version v1.20.15
+```
+
+完全断网的新节点不能交换一次性接入令牌。管理员应通过秘密管理器或受控执行器把旧兼容变量 `XINGCHEN_AGENT_KEY` 直接注入安装器进程环境，并使用离线包中的本平台二进制；不要在命令行或脚本中给长期密钥赋值：
+
+```bash
+export XINGCHEN_NETWORK_MODE=offline
+bash ./deploy/install-agent.sh --offline --binary /srv/xingchen/xingchen-agent --version v1.20.15 --no-auto-update
+```
+
+离线模式不会执行 DNS、远程下载、镜像拉取、源码构建或自动更新。示例中的内部域、路径和凭据占位符必须替换；不要把真实密钥写入 shell 历史、脚本或工单。
 
 `XINGCHEN_SERVER` 可以填写域名、`域名:端口` 或完整 `http(s)://` 地址。安装器优先访问 HTTPS，远程 HTTP 只有传入 `--allow-insecure-http` 才会启用；本地回环地址仍可用于开发。生产环境必须配置 HTTPS。原生模式会把配置写到 `/etc/xingchen-agent/agent.json`，离线上报缓冲写入 `/var/lib/xingchen-agent/spool`，程序安装到 `/usr/local/bin/xingchen-agent`。
 
@@ -99,11 +118,21 @@ Windows Agent 默认注册每日自动更新任务；需要关闭时在安装命
 
 Windows 管理命令：`-Action update` 更新到最新版本，`-Action rollback -Version v1.20.4` 回退到指定版本，`-Action list-versions` 查看可用版本，`-Action uninstall` 卸载（加 `-Purge` 同时删除配置和缓存）。
 
+Windows 受限网络使用 `-NetworkMode internal` 与内部 `-ReleaseBaseUrl`；完全离线时使用 `-Offline -BinaryPath <本地 exe> -NoAutoUpdate`。长期 Agent key 只能通过受控进程环境注入，安装后立即清除，不要作为 PowerShell 参数保存。
+
+## 受控批量更新
+
+管理员在总控“Agent 发布”页面创建 rollout 后，服务端只会生成固定的 `AGENT_UPDATE` operation：`command` 必须精确为 `agent.update`，`args` 为空，payload 只接受 `action=update|rollback`、稳定 `vX.Y.Z` 以及成对的正整数 `rolloutId/memberId`。其中不允许 URL、文件路径、Shell 命令或自由参数，也不依赖 `allow_command_execution` 和 `allow_file_operations`。
+
+Linux Agent 将请求原子写入 `/opt/xingchen/agent/requests/update-request`；root-owned `xingchen-agent-update-request.path` 触发二次校验，并只调用固定 updater。Docker 模式只给该请求目录增加读写 bind，manager 和状态目录仍保持只读。Windows 使用 `%ProgramData%\XingchenMonitor\update-requests` 和固定 launcher，目录、launcher 与 updater ACL 仅允许 SYSTEM/Administrators。两端都会延迟启动并用互斥锁防止与其他更新并发。
+
+Agent 返回 `{"status":"ACCEPTED"}` 只表示请求已入队。总控必须等任务下发后的实时报告同时满足时间条件和目标 `agentVersion` 才标记确认；失败、超时或 late report 都由 rollout 状态机继续对账。关闭每日自动更新不会关闭这条管理员控制的更新桥；`offline` 模式则不会注册可产生远程访问的自动更新任务。
+
 ## 更新和改信息
 
 - 修改设备名称、分组、位置和主 IP：在总终端“设备管理”编辑，不需要重装 Agent。
 - 修改采集周期、磁盘白名单或服务检查：重新生成安装命令，在目标机重新运行安装器；安装器会更新现有容器或本机服务。
 - 轮换密钥：总终端管理员执行“轮换密钥”，旧密钥立即失效，然后在目标机重新运行安装器。
-- 更新 Agent 版本：运行 `/opt/xingchen/agent/agent.sh update`，或用 `./xingchen-agent.sh --version v1.20.6` 安装固定版本。原生更新会下载 Release、校验 SHA256、备份旧程序并在新服务启动失败时自动恢复；只有需要 Docker 采集模式时才添加 `--docker --image ghcr.io/pstarchen/monitor-for-server-agent:v1.20.6`。
+- 更新 Agent 版本：单机可运行 `/opt/xingchen/agent/agent.sh update`，批量更新使用总控“Agent 发布”。原生更新会从总控或已配置内部制品源下载、校验大小与 SHA256、备份旧程序，并在新服务启动失败时自动恢复；Docker 模式必须使用内部 Registry 的固定版本或 digest，例如 `--docker --image registry.internal.example/xingchen/agent@sha256:<digest>`，不要让目标机直连 GHCR。
 
 安装器传入域名时会优先探测 HTTPS；探测失败不会自动降级到远程 HTTP，只有明确传入 `--allow-insecure-http` 才允许明文连接。总控修改“Agent 上报周期”后，已安装 Agent 会在下一次成功上报时自动同步，无需重装。不要把 Agent 密钥放入 URL、日志、工单或鸿蒙 App。

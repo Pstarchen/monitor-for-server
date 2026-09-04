@@ -19,6 +19,7 @@ import java.util.UUID;
 })
 public class Device {
     public enum Status { PENDING, ONLINE, OFFLINE }
+    public enum AgentUpdateStatus { IDLE, CHECKING, DOWNLOADING, APPLYING, SUCCEEDED, FAILED, PAUSED, ROLLING_BACK }
 
     @Id
     @Column(length = 36)
@@ -98,6 +99,19 @@ public class Device {
 
     @Column(name = "agent_enrollment_token_expires_at")
     private Instant agentEnrollmentTokenExpiresAt;
+
+    @Column(name = "agent_version", length = 80)
+    private String agentVersion;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "agent_update_status", nullable = false, length = 20)
+    private AgentUpdateStatus agentUpdateStatus = AgentUpdateStatus.IDLE;
+
+    @Column(name = "agent_last_update_error", length = 500)
+    private String agentLastUpdateError;
+
+    @Column(name = "agent_update_state_changed_at")
+    private Instant agentUpdateStateChangedAt;
 
     @Column(name = "controller_managed", nullable = false)
     private boolean controllerManaged;

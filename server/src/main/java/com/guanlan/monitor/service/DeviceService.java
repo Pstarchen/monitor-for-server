@@ -184,7 +184,8 @@ public class DeviceService {
                 device.getPurchaseDate(), device.getWarrantyExpiresAt(), device.getDescription(),
                 device.isDdnsEnabled(), device.getDdnsConfigId(), device.isPublicVisible(), device.getStatus(), device.getLastSeenAt(),
                 device.getAgentKeyPrefix(), device.isControllerManaged(), device.getCreatedAt(), hardware(device.getHardwareJson()), latest,
-                health.describe(device, latest));
+                health.describe(device, latest), device.getAgentVersion(), device.getAgentUpdateStatus(),
+                device.getAgentLastUpdateError(), device.getAgentUpdateStateChangedAt());
     }
 
     private void applyAssetFields(Device device, String assetTag, String ownerName, String vendor, String model,

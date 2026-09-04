@@ -11,7 +11,7 @@ import (
 	"xingchen-monitor/agent/internal/model"
 )
 
-func Run(ctx context.Context, logger *slog.Logger, client *api.Client, pollInterval time.Duration, maxOutputBytes int, allowCommandExecution bool, allowFileOperations bool, hostRoot string) {
+func Run(ctx context.Context, logger *slog.Logger, client *api.Client, pollInterval time.Duration, maxOutputBytes int, allowCommandExecution bool, allowFileOperations bool, hostRoot, updateRequestPath, updateLauncherPath string) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -33,7 +33,7 @@ func Run(ctx context.Context, logger *slog.Logger, client *api.Client, pollInter
 			timer.Reset(pollInterval)
 			continue
 		}
-		result := executor.Run(ctx, *task, maxOutputBytes, allowCommandExecution, allowFileOperations, hostRoot)
+		result := executor.Run(ctx, *task, maxOutputBytes, allowCommandExecution, allowFileOperations, hostRoot, updateRequestPath, updateLauncherPath)
 		taskResult := model.TaskResult{
 			Status: result.Status, ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr, Error: result.Error,
 		}

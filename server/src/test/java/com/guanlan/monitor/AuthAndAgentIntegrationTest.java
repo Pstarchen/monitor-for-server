@@ -583,6 +583,46 @@ class AuthAndAgentIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "test-admin", roles = "ADMIN")
+    void agentUpdateMetadataIsPersistedAndExposed() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("update-node", "lab", "tests", "127.0.0.10"));
+        String changedAt = "2026-09-04T00:09:10Z";
+
+        reportMetric(credential, sampleReportWithAgent("v1.20.14", "FAILED", "health check failed", changedAt));
+
+        Device stored = deviceRepository.findById(credential.device().id()).orElseThrow();
+        assertThat(stored.getAgentVersion()).isEqualTo("v1.20.14");
+        assertThat(stored.getAgentUpdateStatus()).isEqualTo(Device.AgentUpdateStatus.FAILED);
+        assertThat(stored.getAgentLastUpdateError()).isEqualTo("health check failed");
+        assertThat(stored.getAgentUpdateStateChangedAt()).isEqualTo(Instant.parse(changedAt));
+        mvc.perform(get("/api/devices/" + credential.device().id()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.agentVersion").value("v1.20.14"))
+                .andExpect(jsonPath("$.agentUpdateStatus").value("FAILED"))
+                .andExpect(jsonPath("$.agentLastUpdateError").value("health check failed"))
+                .andExpect(jsonPath("$.agentUpdateStateChangedAt").value(changedAt));
+    }
+
+    @Test
+    void agentRejectsInvalidUpdateMetadata() throws Exception {
+        DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("invalid-update-node", "lab", "tests", "127.0.0.11"));
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sampleReportWithAgent("v1.20.14", "RETRYING", "", "2026-09-04T00:09:10Z")))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/agent/v1/reports")
+                        .header("X-Device-Id", credential.device().id())
+                        .header("X-Agent-Key", credential.agentKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(sampleReportWithAgent("v1.20.14", "FAILED", "x".repeat(501), "2026-09-04T00:09:10Z")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void agentAcceptsMultiCoreProcessCpuUsage() throws Exception {
         DeviceDtos.Credential credential = devices.create(new DeviceDtos.CreateRequest("multicore-node", "lab", "tests", "127.0.0.3"));
         String report = sampleReport().replace("\"processes\":[]", "\"processes\":[{\"pid\":42,\"name\":\"worker\",\"username\":\"root\",\"cpuPercent\":185.5,\"memoryPercent\":2.5,\"status\":\"running\"}]");
@@ -1035,6 +1075,16 @@ class AuthAndAgentIntegrationTest {
         com.fasterxml.jackson.databind.node.ObjectNode report = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(sampleReport());
         report.put("collectedAt", collectedAt.toString());
         ((com.fasterxml.jackson.databind.node.ObjectNode) report.path("host")).put("hostname", hostname);
+        return mapper.writeValueAsString(report);
+    }
+
+    private String sampleReportWithAgent(String version, String status, String lastError, String changedAt) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode report = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(sampleReport());
+        com.fasterxml.jackson.databind.node.ObjectNode agent = report.putObject("agent");
+        agent.put("version", version);
+        agent.put("updateStatus", status);
+        agent.put("lastUpdateError", lastError);
+        agent.put("updateStateChangedAt", changedAt);
         return mapper.writeValueAsString(report);
     }
 

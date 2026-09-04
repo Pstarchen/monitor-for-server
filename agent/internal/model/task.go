@@ -2,6 +2,12 @@ package model
 
 import "encoding/json"
 
+const (
+	TaskOperationCommand     = "COMMAND"
+	TaskOperationAgentUpdate = "AGENT_UPDATE"
+	TaskCommandAgentUpdate   = "agent.update"
+)
+
 type TaskAssignment struct {
 	ID             int64           `json:"id"`
 	Operation      string          `json:"operation,omitempty"`
@@ -18,4 +24,11 @@ type TaskResult struct {
 	Stdout   string `json:"stdout,omitempty"`
 	Stderr   string `json:"stderr,omitempty"`
 	Error    string `json:"error,omitempty"`
+}
+
+type AgentUpdatePayload struct {
+	Action    string `json:"action"`
+	Version   string `json:"version"`
+	RolloutID *int64 `json:"rolloutId,omitempty"`
+	MemberID  *int64 `json:"memberId,omitempty"`
 }

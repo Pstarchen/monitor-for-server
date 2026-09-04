@@ -54,6 +54,7 @@ public class MetricService {
             device.setOs(join(report.host().platform(), report.host().platformVersion()));
             device.setArchitecture(report.host().architecture());
             device.setHardwareJson(json(Map.of("host", report.host(), "cpu", report.cpu(), "memory", report.memory())));
+            if (report.agent() != null) applyAgentInfo(device, report.agent());
         }
         device.setStatus(Device.Status.ONLINE);
         device.setLastSeenAt(receivedAt);
@@ -171,6 +172,19 @@ public class MetricService {
     private String json(Object value) {
         try { return mapper.writeValueAsString(value); }
         catch (JsonProcessingException exception) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "监控数据序列化失败"); }
+    }
+
+    private void applyAgentInfo(Device device, AgentReportRequest.AgentInfo agent) {
+        String agentVersion = agent.version() == null ? null : agent.version().trim();
+        String lastError = agent.lastUpdateError() == null ? null : agent.lastUpdateError().trim();
+        if (agentVersion == null || agentVersion.isEmpty() || agentVersion.length() > 80
+                || agent.updateStatus() == null || (lastError != null && lastError.length() > 500)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Agent 更新状态无效");
+        }
+        device.setAgentVersion(agentVersion);
+        device.setAgentUpdateStatus(agent.updateStatus());
+        device.setAgentLastUpdateError(lastError == null || lastError.isEmpty() ? null : lastError);
+        device.setAgentUpdateStateChangedAt(agent.updateStateChangedAt());
     }
 
     private double clampPercent(double value) { return Double.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0; }

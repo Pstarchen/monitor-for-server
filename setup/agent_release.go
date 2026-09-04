@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -53,6 +55,8 @@ type cachedAgentManifest struct {
 	ManifestBase64 string               `json:"manifestBase64"`
 	Source         string               `json:"source"`
 	FetchedAt      string               `json:"fetchedAt"`
+	Verification   string               `json:"verification"`
+	ArtifactsReady bool                 `json:"artifactsReady"`
 	decoded        agentReleaseManifest `json:"-"`
 }
 
@@ -69,6 +73,7 @@ type agentReleaseSelection struct {
 	Source                      string `json:"source"`
 	Cached                      bool   `json:"cached"`
 	Verification                string `json:"verification"`
+	ManifestVerification        string `json:"manifestVerification"`
 }
 
 type agentReleaseService struct {
@@ -84,6 +89,8 @@ type agentReleaseService struct {
 	packagedOfflineDir   string
 	cacheDir             string
 	manifestSHA256       string
+	networkMode          string
+	allowGitee           bool
 }
 
 func newAgentReleaseService() *agentReleaseService {
@@ -98,10 +105,9 @@ func newAgentReleaseService() *agentReleaseService {
 		cacheDir = filepath.Join(workspace, ".cache", "agent-release")
 	}
 	offlineDir := strings.TrimSpace(os.Getenv("XINGCHEN_AGENT_OFFLINE_DIR"))
-	packagedOfflineDir := ""
+	packagedOfflineDir := filepath.Join(packagedReleaseDir, "assets")
 	if offlineDir == "" {
 		offlineDir = filepath.Join(workspace, "release", "assets")
-		packagedOfflineDir = filepath.Join(packagedReleaseDir, "assets")
 	}
 	return &agentReleaseService{
 		client:               &http.Client{Timeout: agentReleaseRequestTimeout},
@@ -115,6 +121,8 @@ func newAgentReleaseService() *agentReleaseService {
 		packagedOfflineDir:   packagedOfflineDir,
 		cacheDir:             filepath.Clean(cacheDir),
 		manifestSHA256:       strings.ToLower(strings.TrimSpace(os.Getenv("XINGCHEN_RELEASE_MANIFEST_SHA256"))),
+		networkMode:          configuredNetworkMode(),
+		allowGitee:           configuredGiteeAllowed(),
 	}
 }
 
@@ -135,6 +143,12 @@ func (s *agentReleaseService) release(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	manifest, source, cached, err := s.loadManifest(r.Context())
+	manifestVerification := s.manifestVerification(source)
+	if cached && s.manifestSHA256 == "" {
+		if active, cacheErr := s.readManifestCache(); cacheErr == nil {
+			manifestVerification = active.Verification
+		}
+	}
 	s.mu.Unlock()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Agent 版本清单不可用："+err.Error())
@@ -150,7 +164,7 @@ func (s *agentReleaseService) release(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, releaseSelection(manifest, asset, source, cached))
+	writeJSON(w, http.StatusOK, releaseSelection(manifest, asset, source, cached, manifestVerification))
 }
 
 func (s *agentReleaseService) artifact(w http.ResponseWriter, r *http.Request) {
@@ -261,7 +275,7 @@ func agentPlatform(r *http.Request) (string, string, error) {
 	return osName, arch, nil
 }
 
-func releaseSelection(manifest agentReleaseManifest, asset agentReleaseAsset, source string, cached bool) agentReleaseSelection {
+func releaseSelection(manifest agentReleaseManifest, asset agentReleaseAsset, source string, cached bool, manifestVerification string) agentReleaseSelection {
 	query := url.Values{"os": {asset.OS}, "arch": {asset.Arch}, "version": {manifest.Version}}
 	return agentReleaseSelection{
 		Version:                     manifest.Version,
@@ -276,10 +290,24 @@ func releaseSelection(manifest agentReleaseManifest, asset agentReleaseAsset, so
 		Source:                      source,
 		Cached:                      cached,
 		Verification:                "sha256",
+		ManifestVerification:        manifestVerification,
 	}
 }
 
+func (s *agentReleaseService) manifestVerification(source string) string {
+	if s.manifestSHA256 != "" {
+		return "pinned-sha256"
+	}
+	if source == "local" {
+		return "local"
+	}
+	return "https"
+}
+
 func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseManifest, string, bool, error) {
+	if !validNetworkMode(s.networkMode) {
+		return agentReleaseManifest{}, "", false, fmt.Errorf("XINGCHEN_NETWORK_MODE 必须是 public、internal 或 offline")
+	}
 	if content, err := os.ReadFile(s.manifestPath); err == nil {
 		manifest, validationErr := s.decodeManifest(content)
 		if validationErr != nil {
@@ -289,10 +317,15 @@ func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseMan
 	} else if s.manifestPathRequired || !errors.Is(err, os.ErrNotExist) {
 		return agentReleaseManifest{}, "", false, fmt.Errorf("读取本地清单: %w", err)
 	}
+	active, activeErr := s.readManifestCache()
 	var failures []string
 	for _, sourceURL := range s.manifestURLs {
 		if err := validateHTTPSURL(sourceURL); err != nil {
 			failures = append(failures, "清单源配置无效")
+			continue
+		}
+		if !networkModeAllowsURL(s.networkMode, sourceURL, s.allowGitee) {
+			failures = append(failures, sourceLabel(sourceURL)+": 当前网络模式拒绝该清单源")
 			continue
 		}
 		content, err := s.downloadBytes(ctx, sourceURL, agentManifestMaxSize)
@@ -305,16 +338,37 @@ func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseMan
 			failures = append(failures, sourceLabel(sourceURL)+": "+err.Error())
 			continue
 		}
-		cached := cachedAgentManifest{ManifestBase64: base64.StdEncoding.EncodeToString(content), Source: sourceLabel(sourceURL), FetchedAt: time.Now().UTC().Format(time.RFC3339)}
+		if err := s.ensureControllerCompatible(manifest); err != nil {
+			failures = append(failures, sourceLabel(sourceURL)+": "+err.Error())
+			continue
+		}
+		sameActive, err := validateManifestAdvance(content, manifest, active, activeErr)
+		if err != nil {
+			failures = append(failures, sourceLabel(sourceURL)+": "+err.Error())
+			continue
+		}
+		if sameActive {
+			return manifest, sourceLabel(sourceURL), false, nil
+		}
+		if err := s.ensureManifestArtifacts(ctx, manifest, sourceLabel(sourceURL)); err != nil {
+			failures = append(failures, sourceLabel(sourceURL)+": 制品预检失败: "+err.Error())
+			continue
+		}
+		cached := cachedAgentManifest{
+			ManifestBase64: base64.StdEncoding.EncodeToString(content),
+			Source:         sourceLabel(sourceURL),
+			FetchedAt:      time.Now().UTC().Format(time.RFC3339),
+			Verification:   s.manifestVerification(sourceLabel(sourceURL)),
+			ArtifactsReady: true,
+		}
 		if err := s.writeManifestCache(cached); err != nil {
 			return agentReleaseManifest{}, "", false, fmt.Errorf("保存最后已知可用清单: %w", err)
 		}
 		return manifest, cached.Source, false, nil
 	}
 
-	cached, err := s.readManifestCache()
-	if err == nil {
-		return cached.decoded, cached.Source, true, nil
+	if activeErr == nil {
+		return active.decoded, active.Source, true, nil
 	}
 	if s.packagedManifestPath != "" {
 		if content, packagedErr := os.ReadFile(s.packagedManifestPath); packagedErr == nil {
@@ -331,6 +385,35 @@ func (s *agentReleaseService) loadManifest(ctx context.Context) (agentReleaseMan
 		return agentReleaseManifest{}, "", false, errors.New("未配置可用清单源，且没有最后已知可用缓存")
 	}
 	return agentReleaseManifest{}, "", false, fmt.Errorf("所有清单源均失败（%s），且没有最后已知可用缓存", strings.Join(failures, "; "))
+}
+
+func validateManifestAdvance(content []byte, manifest agentReleaseManifest, active cachedAgentManifest, activeErr error) (bool, error) {
+	if activeErr != nil {
+		return false, nil
+	}
+	if controllerVersionLess(manifest.Version, active.decoded.Version) {
+		return false, fmt.Errorf("拒绝回放旧版清单 %s，当前最后已知可用版本为 %s", manifest.Version, active.decoded.Version)
+	}
+	if manifest.Version != active.decoded.Version {
+		return false, nil
+	}
+	activeContent, err := base64.StdEncoding.DecodeString(active.ManifestBase64)
+	if err != nil {
+		return false, fmt.Errorf("读取当前最后已知可用清单: %w", err)
+	}
+	if !bytes.Equal(content, activeContent) {
+		return false, fmt.Errorf("拒绝替换同版本 %s 的已验证清单", manifest.Version)
+	}
+	return true, nil
+}
+
+func (s *agentReleaseService) ensureManifestArtifacts(ctx context.Context, manifest agentReleaseManifest, manifestSource string) error {
+	for _, asset := range manifest.Assets {
+		if _, _, _, err := s.resolveArtifact(ctx, manifest, asset, manifestSource); err != nil {
+			return fmt.Errorf("%s/%s: %w", asset.OS, asset.Arch, err)
+		}
+	}
+	return nil
 }
 
 func (s *agentReleaseService) decodeManifest(content []byte) (agentReleaseManifest, error) {
@@ -385,10 +468,11 @@ func validateAgentManifest(manifest agentReleaseManifest) error {
 	if _, err := time.Parse(time.RFC3339, manifest.PublishedAt); err != nil {
 		return errors.New("publishedAt 必须是 RFC3339 时间")
 	}
-	if len(manifest.Assets) == 0 || len(manifest.Assets) > 16 {
-		return errors.New("清单必须包含 1 到 16 个制品")
+	if len(manifest.Assets) != 4 {
+		return errors.New("清单必须包含 linux/windows 与 amd64/arm64 的四个制品")
 	}
 	seen := make(map[string]bool, len(manifest.Assets))
+	seenFiles := make(map[string]bool, len(manifest.Assets))
 	for _, asset := range manifest.Assets {
 		osName := strings.ToLower(strings.TrimSpace(asset.OS))
 		arch := strings.ToLower(strings.TrimSpace(asset.Arch))
@@ -401,6 +485,18 @@ func validateAgentManifest(manifest agentReleaseManifest) error {
 		if !agentAssetFilePattern.MatchString(asset.File) || asset.File == "." || asset.File == ".." {
 			return fmt.Errorf("制品文件名 %q 无效", asset.File)
 		}
+		if seenFiles[asset.File] {
+			return fmt.Errorf("制品文件名 %q 重复", asset.File)
+		}
+		seenFiles[asset.File] = true
+		if (osName == "linux" && !strings.HasSuffix(asset.File, ".tar.gz")) || (osName == "windows" && !strings.HasSuffix(asset.File, ".zip")) {
+			return fmt.Errorf("制品 %q 的归档格式与操作系统不匹配", asset.File)
+		}
+		if asset.URL != "" {
+			if err := validateArtifactURL(asset.URL, asset.File); err != nil {
+				return fmt.Errorf("制品 %q 的 URL 无效: %w", asset.File, err)
+			}
+		}
 		if !sha256Pattern.MatchString(asset.SHA256) {
 			return fmt.Errorf("制品 %q 的 SHA256 无效", asset.File)
 		}
@@ -412,6 +508,11 @@ func validateAgentManifest(manifest agentReleaseManifest) error {
 			return fmt.Errorf("平台 %s 存在重复制品", key)
 		}
 		seen[key] = true
+	}
+	for _, key := range []string{"linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"} {
+		if !seen[key] {
+			return fmt.Errorf("清单缺少平台 %s", key)
+		}
 	}
 	return nil
 }
@@ -477,20 +578,23 @@ func (s *agentReleaseService) resolveArtifact(ctx context.Context, manifest agen
 }
 
 func (s *agentReleaseService) artifactCandidates(version string, asset agentReleaseAsset) []string {
-	result := make([]string, 0, len(s.artifactBaseURLs)+1)
-	seen := map[string]bool{}
-	if asset.URL != "" && artifactURLAllowed(asset.URL, s.artifactBaseURLs) {
-		result = append(result, asset.URL)
-		seen[asset.URL] = true
+	if normalizeNetworkMode(s.networkMode) == networkModeOffline {
+		return nil
 	}
+	result := make([]string, 0, len(s.artifactBaseURLs)*2)
+	seen := map[string]bool{}
 	for _, base := range s.artifactBaseURLs {
-		if validateHTTPSURL(base) != nil {
+		if validateArtifactBaseURL(base) != nil || !networkModeAllowsURL(s.networkMode, base, s.allowGitee) {
 			continue
 		}
 		candidate := strings.TrimRight(base, "/") + "/" + url.PathEscape(version) + "/" + url.PathEscape(asset.File)
 		if !seen[candidate] {
 			result = append(result, candidate)
 			seen[candidate] = true
+		}
+		if asset.URL != "" && artifactURLAllowed(asset.URL, []string{base}) && networkModeAllowsURL(s.networkMode, asset.URL, s.allowGitee) && !seen[asset.URL] {
+			result = append(result, asset.URL)
+			seen[asset.URL] = true
 		}
 	}
 	return result
@@ -501,16 +605,76 @@ func artifactURLAllowed(candidate string, bases []string) bool {
 	if err != nil || parsedCandidate.Scheme != "https" || parsedCandidate.User != nil || parsedCandidate.Fragment != "" {
 		return false
 	}
+	candidatePath, err := canonicalArtifactPath(parsedCandidate)
+	if err != nil {
+		return false
+	}
 	for _, base := range bases {
+		if validateArtifactBaseURL(base) != nil {
+			continue
+		}
 		parsedBase, err := url.Parse(strings.TrimRight(base, "/") + "/")
 		if err != nil || parsedBase.Scheme != "https" || !strings.EqualFold(parsedCandidate.Host, parsedBase.Host) {
 			continue
 		}
-		if strings.HasPrefix(parsedCandidate.EscapedPath(), parsedBase.EscapedPath()) {
+		basePath, err := canonicalArtifactPath(parsedBase)
+		if err != nil {
+			continue
+		}
+		basePath = strings.TrimRight(basePath, "/")
+		if basePath == "" {
+			basePath = "/"
+		}
+		if (basePath == "/" && candidatePath != "/") || (candidatePath != basePath && strings.HasPrefix(candidatePath, basePath+"/")) {
 			return true
 		}
 	}
 	return false
+}
+
+func validateArtifactBaseURL(value string) error {
+	if err := validateHTTPSURL(value); err != nil {
+		return err
+	}
+	parsed, _ := url.Parse(value)
+	if parsed.RawQuery != "" || parsed.ForceQuery {
+		return errors.New("制品根 URL 不能包含查询参数")
+	}
+	_, err := canonicalArtifactPath(parsed)
+	return err
+}
+
+func validateArtifactURL(value, file string) error {
+	if err := validateHTTPSURL(value); err != nil {
+		return err
+	}
+	parsed, _ := url.Parse(value)
+	if parsed.RawQuery != "" || parsed.ForceQuery {
+		return errors.New("制品 URL 不能包含查询参数")
+	}
+	canonicalPath, err := canonicalArtifactPath(parsed)
+	if err != nil {
+		return err
+	}
+	if path.Base(canonicalPath) != file {
+		return errors.New("URL 路径与制品文件名不一致")
+	}
+	return nil
+}
+
+func canonicalArtifactPath(parsed *url.URL) (string, error) {
+	decodedPath, err := url.PathUnescape(parsed.EscapedPath())
+	if decodedPath == "" {
+		decodedPath = "/"
+	}
+	if err != nil || !strings.HasPrefix(decodedPath, "/") || strings.Contains(decodedPath, "\\") || strings.IndexFunc(decodedPath, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return "", errors.New("URL 路径无效")
+	}
+	cleaned := path.Clean(decodedPath)
+	if cleaned != strings.TrimRight(decodedPath, "/") && !(cleaned == "/" && decodedPath == "/") {
+		return "", errors.New("URL 路径必须是规范路径")
+	}
+	return cleaned, nil
 }
 
 func (s *agentReleaseService) downloadBytes(ctx context.Context, sourceURL string, limit int64) ([]byte, error) {
@@ -548,7 +712,9 @@ func (s *agentReleaseService) downloadArtifact(ctx context.Context, sourceURL st
 	}
 	request.Header.Set("User-Agent", "xingchen-agent-release-service")
 	response, err := s.doRequest(request, func(target *url.URL) bool {
-		return artifactURLAllowed(target.String(), s.artifactBaseURLs)
+		return artifactURLAllowed(target.String(), s.artifactBaseURLs) &&
+			networkModeAllowsURL(s.networkMode, target.String(), s.allowGitee) &&
+			validateArtifactURL(target.String(), asset.File) == nil
 	})
 	if err != nil {
 		return err
@@ -618,9 +784,30 @@ func (s *agentReleaseService) writeManifestCache(value cachedAgentManifest) erro
 	if err := os.MkdirAll(s.cacheDir, 0700); err != nil {
 		return err
 	}
+	if !value.ArtifactsReady {
+		return errors.New("拒绝缓存尚未完成全部制品校验的清单")
+	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
+	}
+	content = append(content, '\n')
+	activePath := filepath.Join(s.cacheDir, "manifest.json")
+	previousPath := filepath.Join(s.cacheDir, "manifest.previous.json")
+	current, readErr := os.ReadFile(activePath)
+	if readErr == nil && bytes.Equal(current, content) {
+		return nil
+	}
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return readErr
+	}
+	rotateActive := false
+	if readErr == nil {
+		if _, validationErr := s.decodeManifestCache(current, false); validationErr == nil {
+			rotateActive = true
+		} else if err := os.Remove(activePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	temporary, err := os.CreateTemp(s.cacheDir, ".manifest-*")
 	if err != nil {
@@ -632,21 +819,55 @@ func (s *agentReleaseService) writeManifestCache(value cachedAgentManifest) erro
 		temporary.Close()
 		return err
 	}
-	if _, err := temporary.Write(append(content, '\n')); err != nil {
+	if _, err := temporary.Write(content); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
 		temporary.Close()
 		return err
 	}
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	return os.Rename(temporaryName, filepath.Join(s.cacheDir, "manifest.json"))
+	if rotateActive {
+		if err := os.Remove(previousPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := os.Rename(activePath, previousPath); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(temporaryName, activePath); err != nil {
+		if rotateActive {
+			_ = os.Rename(previousPath, activePath)
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *agentReleaseService) readManifestCache() (cachedAgentManifest, error) {
-	content, err := os.ReadFile(filepath.Join(s.cacheDir, "manifest.json"))
+	active, activeErr := s.readManifestCacheFile(filepath.Join(s.cacheDir, "manifest.json"))
+	if activeErr == nil {
+		return active, nil
+	}
+	previous, previousErr := s.readManifestCacheFile(filepath.Join(s.cacheDir, "manifest.previous.json"))
+	if previousErr == nil {
+		return previous, nil
+	}
+	return cachedAgentManifest{}, activeErr
+}
+
+func (s *agentReleaseService) readManifestCacheFile(cachePath string) (cachedAgentManifest, error) {
+	content, err := os.ReadFile(cachePath)
 	if err != nil {
 		return cachedAgentManifest{}, err
 	}
+	return s.decodeManifestCache(content, true)
+}
+
+func (s *agentReleaseService) decodeManifestCache(content []byte, enforcePin bool) (cachedAgentManifest, error) {
 	var cached cachedAgentManifest
 	decoder := json.NewDecoder(strings.NewReader(string(content)))
 	decoder.DisallowUnknownFields()
@@ -657,7 +878,11 @@ func (s *agentReleaseService) readManifestCache() (cachedAgentManifest, error) {
 	if err != nil {
 		return cachedAgentManifest{}, err
 	}
-	cached.decoded, err = s.decodeManifest(manifest)
+	if enforcePin {
+		cached.decoded, err = s.decodeManifest(manifest)
+	} else {
+		cached.decoded, err = decodeAgentManifest(manifest)
+	}
 	if err != nil {
 		return cachedAgentManifest{}, err
 	}
@@ -666,6 +891,12 @@ func (s *agentReleaseService) readManifestCache() (cachedAgentManifest, error) {
 	}
 	if _, err := time.Parse(time.RFC3339, cached.FetchedAt); err != nil {
 		return cachedAgentManifest{}, errors.New("缓存清单时间无效")
+	}
+	if !cached.ArtifactsReady {
+		return cachedAgentManifest{}, errors.New("缓存清单未完成全部制品校验")
+	}
+	if cached.Verification != "https" && cached.Verification != "pinned-sha256" {
+		return cachedAgentManifest{}, errors.New("缓存清单校验状态无效")
 	}
 	return cached, nil
 }

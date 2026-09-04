@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet('install', 'update', 'rollback', 'list-versions', 'status', 'uninstall')] [string] $Action = 'install',
     [string] $ServerUrl,
@@ -12,6 +12,9 @@ param(
     [string[]] $ReleaseBaseUrl = @(),
     [string[]] $ReleaseManifestUrl = @(),
     [switch] $AllowGitHubApi,
+    [ValidateSet('public', 'internal', 'offline')] [string] $NetworkMode = $(if ($env:XINGCHEN_NETWORK_MODE) { $env:XINGCHEN_NETWORK_MODE } else { 'public' }),
+    [switch] $AllowGitee,
+    [switch] $Offline,
     [string[]] $MonitoredService = @(),
     [string[]] $MonitoredProcess = @(),
     [string[]] $DiskMountpoint = @(),
@@ -51,6 +54,10 @@ if ((Get-Service -Name $serviceName -ErrorAction SilentlyContinue) -eq $null -an
     $configPath = $legacyConfigPath
     $binaryName = 'guanlan-agent.exe'
 }
+$updateStatusPath = Join-Path $dataDir 'update-status.json'
+$updateRequestDir = Join-Path $dataDir 'update-requests'
+$updateRequestPath = Join-Path $updateRequestDir 'update-request'
+$updateLauncherPath = Join-Path $dataDir 'invoke-update-request.ps1'
 if (-not $PSBoundParameters.ContainsKey('ReleaseBaseUrl') -and -not [string]::IsNullOrWhiteSpace($env:XINGCHEN_AGENT_RELEASE_BASE_URLS)) {
     $ReleaseBaseUrl = @($env:XINGCHEN_AGENT_RELEASE_BASE_URLS.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
@@ -68,6 +75,14 @@ if (-not $PSBoundParameters.ContainsKey('ReleaseManifestUrl') -and -not [string]
 if (-not $PSBoundParameters.ContainsKey('AllowGitHubApi') -and $env:XINGCHEN_AGENT_ALLOW_GITHUB_API -eq 'true') {
     $AllowGitHubApi = $true
 }
+if (-not $PSBoundParameters.ContainsKey('AllowGitee') -and $env:XINGCHEN_ALLOW_GITEE -eq 'true') {
+    $AllowGitee = $true
+}
+if ($Offline) { $NetworkMode = 'offline' }
+if ($NetworkMode -ne 'public' -and $AllowGitHubApi) {
+    throw "$NetworkMode 网络模式禁止 GitHub API；请移除 -AllowGitHubApi/XINGCHEN_AGENT_ALLOW_GITHUB_API。"
+}
+if ($NetworkMode -eq 'offline') { $NoAutoUpdate = $true }
 $agentKey = $env:XINGCHEN_AGENT_KEY
 $enrollmentToken = $env:XINGCHEN_ENROLLMENT_TOKEN
 Remove-Item Env:XINGCHEN_AGENT_KEY -ErrorAction SilentlyContinue
@@ -102,6 +117,46 @@ function Test-LocalHost([string] $HostName) {
     return $HostName -match '^(localhost|127\.0\.0\.1|\[::1\]|::1)(:\d+)?$'
 }
 
+function Test-NetworkHostMatches([string] $HostName, [string] $Suffix) {
+    $hostValue = $HostName.Trim().TrimEnd('.').ToLowerInvariant()
+    $suffixValue = $Suffix.Trim().TrimEnd('.').ToLowerInvariant()
+    return $hostValue -eq $suffixValue -or $hostValue.EndsWith(".$suffixValue", [StringComparison]::Ordinal)
+}
+
+function Test-ForbiddenPublicHost([string] $HostName) {
+    foreach ($suffix in @('github.com', 'githubusercontent.com', 'githubassets.com', 'ghcr.io', 'docker.io', 'docker.com')) {
+        if (Test-NetworkHostMatches $HostName $suffix) { return $true }
+    }
+    return $false
+}
+
+function Test-NetworkSourceAllowed([string] $Value) {
+    if ($NetworkMode -eq 'offline') { return $false }
+    $parsed = $null
+    $isAbsolute = [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref] $parsed)
+    $sourceHost = if ($isAbsolute -and -not [string]::IsNullOrWhiteSpace($parsed.Host)) {
+        $parsed.Host
+    }
+    elseif ($Value -match '^[^@\s]+@([^:/\s]+):') {
+        $Matches[1]
+    }
+    else { '' }
+    if ($sourceHost -and (Test-NetworkHostMatches $sourceHost 'gitee.com') -and -not $AllowGitee) { return $false }
+    if ($NetworkMode -eq 'public') { return $true }
+    if (-not $isAbsolute -or $parsed.Scheme -ne 'https' -or $parsed.UserInfo -or $parsed.Fragment) { return $false }
+    if (Test-ForbiddenPublicHost $parsed.Host) { return $false }
+    return $true
+}
+
+function Assert-NetworkSourcePolicy([string] $Value, [string] $Label) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return }
+    if ($NetworkMode -eq 'offline') { throw "offline 网络模式拒绝远程${Label}：$Value" }
+    if (-not (Test-NetworkSourceAllowed $Value)) {
+        if ($NetworkMode -eq 'public') { throw "Gitee ${Label}仅在 XINGCHEN_ALLOW_GITEE=true 时允许：$Value" }
+        throw "internal 网络模式拒绝非 HTTPS、GitHub/GHCR 或未经授权的 Gitee ${Label}：$Value"
+    }
+}
+
 function Test-ServerEndpoint([string] $Candidate) {
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri ($Candidate.TrimEnd('/') + '/healthz') -Method Get -TimeoutSec 10 -MaximumRedirection 0
@@ -131,6 +186,10 @@ function Resolve-ServerUrl {
         return [pscustomobject]@{ Url = $raw; AllowInsecure = ($parsed.Scheme -eq 'http' -and -not $isLocal) }
     }
 
+    if ($NetworkMode -eq 'offline') {
+        throw 'offline 网络模式不会探测 DNS/协议；请通过 -ServerUrl 提供完整 HTTP(S) URL。'
+    }
+
     if ($raw -match '[\s/?#@]' -or $raw -match '://') {
         throw '监控平台地址必须是域名、域名:端口或完整 HTTP(S) 地址。'
     }
@@ -151,9 +210,13 @@ function Resolve-ServerUrl {
     }
     throw "无法访问 $raw 的 HTTPS 或 HTTP 健康检查。请检查 DNS、端口和服务状态。"
 }
+if ($Action -eq 'install' -and $NetworkMode -eq 'offline' -and [string]::IsNullOrWhiteSpace($agentKey)) {
+    throw 'offline 网络模式不能交换一次性接入令牌；请仅通过 XINGCHEN_AGENT_KEY 环境变量提供已签发长期密钥。'
+}
 
 function Get-AgentEnrollmentCredential {
     if (-not [string]::IsNullOrWhiteSpace($agentKey)) { return }
+    if ($NetworkMode -eq 'offline') { throw 'offline 网络模式不能交换一次性接入令牌。' }
     $body = @{ deviceId = $DeviceId; token = $enrollmentToken } | ConvertTo-Json -Compress
     try {
         $credential = Invoke-RestMethod -Uri ($ServerUrl.TrimEnd('/') + '/api/agent/v1/enroll') -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 30 -MaximumRedirection 0
@@ -171,19 +234,24 @@ function Get-AgentEnrollmentCredential {
 }
 
 function Normalize-ReleaseVersion([string] $Value) {
-    $normalized = $Value.Trim().TrimStart('v')
-    if ($normalized -notmatch '^\d+\.\d+\.\d+$') { throw "版本号必须是稳定语义版本，例如 v1.20.6。" }
-    return "v$normalized"
+    if ($Value.Trim() -notmatch '^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw "版本号必须是稳定语义版本，例如 v1.20.6。" }
+    return "v$($Matches[1]).$($Matches[2]).$($Matches[3])"
 }
 
 function Test-TrustedHttpsSource([string] $Value, [switch] $AllowQuery) {
     $parsed = $null
     if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref] $parsed) -or $parsed.Scheme -ne 'https' -or $parsed.UserInfo -or $parsed.Fragment) { return $false }
+    if (-not (Test-NetworkSourceAllowed $Value)) { return $false }
     return $AllowQuery -or [string]::IsNullOrWhiteSpace($parsed.Query)
 }
 
+foreach ($source in $ReleaseManifestUrl) { Assert-NetworkSourcePolicy $source 'manifest 源' }
+foreach ($source in $ReleaseBaseUrl) { Assert-NetworkSourcePolicy $source '制品源' }
+foreach ($source in $RepositoryUrl) { Assert-NetworkSourcePolicy $source '源码源' }
+
 function Get-ControllerReleaseMetadata([string] $Arch) {
-    if ([string]::IsNullOrWhiteSpace($ServerUrl)) { return $null }
+    if ($NetworkMode -eq 'offline' -or [string]::IsNullOrWhiteSpace($ServerUrl)) { return $null }
+    if ($NetworkMode -eq 'internal' -and -not (Test-NetworkSourceAllowed $ServerUrl)) { return $null }
     try {
         $metadata = Invoke-RestMethod -Uri ($ServerUrl.TrimEnd('/') + "/api/setup/agent-release?os=windows&arch=$Arch") -TimeoutSec 30 -MaximumRedirection 0
         $metadata.version = Normalize-ReleaseVersion ([string] $metadata.version)
@@ -222,7 +290,7 @@ function Get-ReleaseVersion([string] $Requested) {
         }
         catch { }
     }
-    if ($AllowGitHubApi) {
+    if ($NetworkMode -eq 'public' -and $AllowGitHubApi) {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30 -MaximumRedirection 0
         return Normalize-ReleaseVersion ([string] $release.tag_name)
     }
@@ -282,14 +350,18 @@ function Get-ReleaseBinary([string] $Requested, [string] $Destination) {
 }
 
 function Install-AgentUpdater {
-    if ($NoAutoUpdate) { return }
     $updaterPath = Join-Path $dataDir 'update-agent.ps1'
     $taskName = if ($usingLegacyInstallation) { 'GuanlanAgentUpdate' } else { 'XingchenAgentUpdate' }
     $releaseBaseList = ($ReleaseBaseUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
     $releaseManifestList = ($ReleaseManifestUrl | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ', '
     $controllerUrlLiteral = $ServerUrl.TrimEnd('/').Replace("'", "''")
     $updateStateDirLiteral = $dataDir.Replace("'", "''")
+    $updateStatusPathLiteral = $updateStatusPath.Replace("'", "''")
+    $updateRequestPathLiteral = $updateRequestPath.Replace("'", "''")
+    $updaterPathLiteral = $updaterPath.Replace("'", "''")
     $allowGitHubApiLiteral = if ($AllowGitHubApi) { '$true' } else { '$false' }
+    $allowGiteeLiteral = if ($AllowGitee) { '$true' } else { '$false' }
+    $networkModeLiteral = $NetworkMode.Replace("'", "''")
     $script = @"
 param([string] `$Command = 'update', [string] `$RequestedVersion, [switch] `$Automatic)
 `$ErrorActionPreference = 'Stop'
@@ -298,13 +370,27 @@ param([string] `$Command = 'update', [string] `$RequestedVersion, [switch] `$Aut
 `$releaseManifests = @($releaseManifestList)
 `$controllerUrl = '$controllerUrlLiteral'
 `$allowGitHubApi = $allowGitHubApiLiteral
+`$allowGitee = $allowGiteeLiteral
+`$networkMode = '$networkModeLiteral'
 `$updateStateDir = '$updateStateDirLiteral'
+`$updateStatusPath = '$updateStatusPathLiteral'
 `$failureFile = Join-Path `$updateStateDir 'update-failures'
 `$pauseFile = Join-Path `$updateStateDir 'update-paused-until'
 `$failureThreshold = 5
 `$pauseSeconds = 86400
+function Write-AgentUpdateStatus([string] `$Status, [string] `$LastError = '') {
+    if (`$LastError.Length -gt 500) { `$LastError = `$LastError.Substring(0, 500) }
+    `$payload = [ordered]@{ status = `$Status; lastError = `$LastError; changedAt = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ') } | ConvertTo-Json -Compress
+    `$temporary = "`$updateStatusPath.`$PID.tmp"
+    try {
+        [IO.File]::WriteAllText(`$temporary, `$payload, [Text.UTF8Encoding]::new(`$false))
+        Move-Item -LiteralPath `$temporary -Destination `$updateStatusPath -Force
+    }
+    finally { Remove-Item -LiteralPath `$temporary -Force -ErrorAction SilentlyContinue }
+}
 `$pausedUntil = 0L
 if (`$Automatic -and (Test-Path -LiteralPath `$pauseFile) -and [long]::TryParse(([string](Get-Content -Raw -LiteralPath `$pauseFile)).Trim(), [ref] `$pausedUntil) -and `$pausedUntil -gt [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) {
+    try { Write-AgentUpdateStatus 'PAUSED' 'Automatic updates paused after repeated failures.' } catch { }
     Write-Host "Agent 自动更新已暂停到 Unix 时间 `$pausedUntil；可手动执行 update 重试。"
     exit 0
 }
@@ -317,9 +403,8 @@ function Write-UpdateState([string] `$Path, [string] `$Value) {
     Move-Item -LiteralPath `$temporary -Destination `$Path -Force
 }
 function Normalize-Version([string] `$Value) {
-    `$normalized = `$Value.Trim().TrimStart('v')
-    if (`$normalized -notmatch '^\d+\.\d+\.\d+$') { throw '无效的 Agent Release 版本。' }
-    return "v`$normalized"
+    if (`$Value.Trim() -notmatch '^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw '无效的 Agent Release 版本。' }
+    return "v`$(`$Matches[1]).`$(`$Matches[2]).`$(`$Matches[3])"
 }
 function Compare-Version([string] `$Left, [string] `$Right) {
     return ([Version]`$Left.TrimStart('v')).CompareTo([Version]`$Right.TrimStart('v'))
@@ -327,12 +412,23 @@ function Compare-Version([string] `$Left, [string] `$Right) {
 function Test-SameMajor([string] `$Left, [string] `$Right) {
     return ([Version]`$Left.TrimStart('v')).Major -eq ([Version]`$Right.TrimStart('v')).Major
 }
+function Host-Matches([string] `$HostName, [string] `$Suffix) {
+    `$hostValue = `$HostName.Trim().TrimEnd('.').ToLowerInvariant()
+    `$suffixValue = `$Suffix.Trim().TrimEnd('.').ToLowerInvariant()
+    return `$hostValue -eq `$suffixValue -or `$hostValue.EndsWith(".`$suffixValue", [StringComparison]::Ordinal)
+}
 function Trusted-Https([string] `$Value, [switch] `$AllowQuery) {
+    if (`$networkMode -eq 'offline') { return `$false }
     `$parsed = `$null
     if (-not [Uri]::TryCreate(`$Value, [UriKind]::Absolute, [ref] `$parsed) -or `$parsed.Scheme -ne 'https' -or `$parsed.UserInfo -or `$parsed.Fragment) { return `$false }
+    if ((Host-Matches `$parsed.Host 'gitee.com') -and -not `$allowGitee) { return `$false }
+    if (`$networkMode -eq 'internal') {
+        foreach (`$suffix in @('github.com', 'githubusercontent.com', 'githubassets.com', 'ghcr.io', 'docker.io', 'docker.com')) { if (Host-Matches `$parsed.Host `$suffix) { return `$false } }
+    }
     return `$AllowQuery -or [string]::IsNullOrWhiteSpace(`$parsed.Query)
 }
 function Controller-Metadata([string] `$Arch) {
+    if (`$networkMode -eq 'offline' -or (`$networkMode -eq 'internal' -and -not (Trusted-Https `$controllerUrl -AllowQuery))) { return `$null }
     try {
         `$metadata = Invoke-RestMethod -Uri "`$controllerUrl/api/setup/agent-release?os=windows&arch=`$Arch" -TimeoutSec 30 -MaximumRedirection 0
         `$metadata.version = Normalize-Version ([string] `$metadata.version)
@@ -358,6 +454,8 @@ function Expand-Safe([string] `$Archive, [string] `$Destination, [string[]] `$Ex
 }
 `$updateSucceeded = `$false
 try {
+    try { Write-AgentUpdateStatus 'CHECKING' } catch { }
+    if (`$networkMode -eq 'offline') { throw 'offline 网络模式不会联网更新；请使用已校验离线制品重新运行安装器。' }
     `$command = `$Command
     `$requested = `$RequestedVersion
     `$arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq 'Arm64') { 'arm64' } else { 'amd64' }
@@ -369,7 +467,7 @@ try {
             try { `$manifest = Invoke-RestMethod -Uri `$manifestUrl -Headers @{ 'User-Agent' = 'xingchen-agent-updater' } -TimeoutSec 30 -MaximumRedirection 0; `$requested = [string] `$manifest.version; break } catch { }
         }
     }
-    if ([string]::IsNullOrWhiteSpace(`$requested) -and `$allowGitHubApi) { `$release = Invoke-RestMethod -Uri "https://api.github.com/repos/`$releaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-updater' } -TimeoutSec 30 -MaximumRedirection 0; `$requested = [string]`$release.tag_name }
+    if ([string]::IsNullOrWhiteSpace(`$requested) -and `$networkMode -eq 'public' -and `$allowGitHubApi) { `$release = Invoke-RestMethod -Uri "https://api.github.com/repos/`$releaseRepo/releases/latest" -Headers @{ 'User-Agent' = 'xingchen-agent-updater' } -TimeoutSec 30 -MaximumRedirection 0; `$requested = [string]`$release.tag_name }
     if ([string]::IsNullOrWhiteSpace(`$requested)) { throw '无法从总控或配置的 manifest 获取 Agent 版本。' }
     `$version = Normalize-Version `$requested
     `$currentOutput = try { [string](& '$targetBinary' --version 2>`$null | Select-Object -First 1) } catch { '' }
@@ -378,6 +476,7 @@ try {
     if (`$Automatic -and `$command -ne 'rollback' -and `$currentVersion -and -not (Test-SameMajor `$currentVersion `$version)) { `$updateSucceeded = `$true; Write-Host "Agent 自动更新不会跨主版本：当前 `$currentVersion，目标 `$version；请人工评估后手动更新。"; exit 0 }
     if (`$command -ne 'rollback' -and `$currentVersion -and (Compare-Version `$version `$currentVersion) -lt 0) { throw "拒绝从 `$currentVersion 降级到 `$version；请显式使用 rollback。" }
     New-Item -ItemType Directory -Force -Path `$temp | Out-Null
+    try { Write-AgentUpdateStatus 'DOWNLOADING' } catch { }
     `$downloaded = `$false
     if (`$null -ne `$metadata -and `$metadata.version -eq `$version) {
         try {
@@ -412,10 +511,12 @@ try {
     `$newBinary = if (Test-Path -LiteralPath (Join-Path `$temp 'xingchen-agent.exe')) { Join-Path `$temp 'xingchen-agent.exe' } else { Join-Path `$temp 'guanlan-agent.exe' }
     `$backup = '$targetBinary.backup'
     `$staged = '$targetBinary.new'
+    try { Write-AgentUpdateStatus 'APPLYING' } catch { }
     Stop-Service -Name '$serviceName' -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath '$targetBinary') { Copy-Item -LiteralPath '$targetBinary' -Destination `$backup -Force }
     try { Copy-Item -LiteralPath `$newBinary -Destination `$staged -Force; Move-Item -LiteralPath `$staged -Destination '$targetBinary' -Force; Start-Service -Name '$serviceName'; (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20)); Remove-Item -LiteralPath `$backup -Force -ErrorAction SilentlyContinue }
     catch {
+        try { Write-AgentUpdateStatus 'ROLLING_BACK' 'Agent health check failed; restoring previous binary.' } catch { }
         Remove-Item -LiteralPath `$staged -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath `$backup) { Copy-Item -LiteralPath `$backup -Destination '$targetBinary' -Force }
         Start-Service -Name '$serviceName' -ErrorAction SilentlyContinue
@@ -423,10 +524,16 @@ try {
         throw 'Agent 更新失败，已恢复旧版本。'
     }
     `$updateSucceeded = `$true
-} finally {
+}
+catch {
+    try { Write-AgentUpdateStatus 'FAILED' 'Agent update failed.' } catch { }
+    throw 'Agent 更新失败；请检查总控或内部制品源。'
+}
+finally {
     try {
         if (`$updateSucceeded) {
             Remove-Item -LiteralPath `$failureFile, `$pauseFile -Force -ErrorAction SilentlyContinue
+            Write-AgentUpdateStatus 'SUCCEEDED'
         }
         elseif (`$Automatic) {
             `$failureCount = 0
@@ -436,22 +543,85 @@ try {
             if (`$failureCount -ge `$failureThreshold) {
                 `$newPause = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + `$pauseSeconds
                 Write-UpdateState `$pauseFile ([string] `$newPause)
+                Write-AgentUpdateStatus 'PAUSED' 'Automatic updates paused after repeated failures.'
                 Write-Warning "Agent 自动更新连续失败 `$failureCount 次，已暂停 24 小时。"
             }
         }
-    } catch { Write-Warning "Agent 更新状态写入失败：`$(`$_.Exception.Message)" }
+    } catch { Write-Warning 'Agent 更新状态写入失败。' }
     `$mutex.ReleaseMutex()
     `$mutex.Dispose()
     if (Test-Path -LiteralPath `$temp) { Remove-Item -LiteralPath `$temp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 "@
     [IO.File]::WriteAllText($updaterPath, $script, [Text.UTF8Encoding]::new($false))
+    $launcherScript = @"
+`$ErrorActionPreference = 'Stop'
+`$requestPath = '$updateRequestPathLiteral'
+`$updaterPath = '$updaterPathLiteral'
+`$updateStatusPath = '$updateStatusPathLiteral'
+`$processingPath = "`$requestPath.processing.`$PID"
+`$mutex = [Threading.Mutex]::new(`$false, 'Global\XingchenAgentUpdateRequest')
+if (-not `$mutex.WaitOne([TimeSpan]::FromMinutes(20))) { exit 75 }
+function Write-RejectedUpdateStatus {
+    `$payload = [ordered]@{ status = 'FAILED'; lastError = 'Agent update request rejected.'; changedAt = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ') } | ConvertTo-Json -Compress
+    `$temporary = "`$updateStatusPath.`$PID.tmp"
+    try {
+        [IO.File]::WriteAllText(`$temporary, `$payload, [Text.UTF8Encoding]::new(`$false))
+        Move-Item -LiteralPath `$temporary -Destination `$updateStatusPath -Force
+    }
+    finally { Remove-Item -LiteralPath `$temporary -Force -ErrorAction SilentlyContinue }
+}
+`$invoked = `$false
+try {
+    if (-not (Test-Path -LiteralPath `$requestPath -PathType Leaf)) { exit 0 }
+    Move-Item -LiteralPath `$requestPath -Destination `$processingPath
+    `$item = Get-Item -LiteralPath `$processingPath
+    if ((`$item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or `$item.Length -lt 1 -or `$item.Length -gt 512) { throw 'invalid request file' }
+    `$utf8 = [Text.UTF8Encoding]::new(`$false, `$true)
+    `$lines = @([IO.File]::ReadAllLines(`$processingPath, `$utf8))
+    if (`$lines.Count -ne 4 -or `$lines[0] -notmatch '^action=(update|rollback)$') { throw 'invalid action' }
+    `$action = `$Matches[1]
+    if (`$lines[1] -notmatch '^version=(v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$' -or `$Matches[1].Length -gt 64) { throw 'invalid version' }
+    `$version = `$Matches[1]
+    if (`$lines[2] -notmatch '^rollout_id=([1-9][0-9]*)?$') { throw 'invalid rollout id' }
+    `$rolloutId = `$Matches[1]
+    if (`$lines[3] -notmatch '^member_id=([1-9][0-9]*)?$') { throw 'invalid member id' }
+    `$memberId = `$Matches[1]
+    if ([string]::IsNullOrEmpty(`$rolloutId) -ne [string]::IsNullOrEmpty(`$memberId)) { throw 'unpaired rollout identifiers' }
+    Start-Sleep -Seconds 10
+    `$invoked = `$true
+    `$powerShell = Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & `$powerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `$updaterPath `$action `$version
+    if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+}
+catch {
+    if (-not `$invoked) { try { Write-RejectedUpdateStatus } catch { } }
+    throw 'Agent update request rejected.'
+}
+finally {
+    Remove-Item -LiteralPath `$processingPath -Force -ErrorAction SilentlyContinue
+    `$mutex.ReleaseMutex()
+    `$mutex.Dispose()
+}
+"@
+    [IO.File]::WriteAllText($updateLauncherPath, $launcherScript, [Text.UTF8Encoding]::new($false))
+    foreach ($protectedPath in @($updaterPath, $updateLauncherPath)) {
+        & icacls.exe $protectedPath /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "无法收紧 Agent 更新组件权限：$protectedPath" }
+    }
+    if ($NoAutoUpdate -or $NetworkMode -eq 'offline') {
+        if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+        }
+        return
+    }
     $action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$updaterPath`" -Automatic"
     $trigger = New-ScheduledTaskTrigger -Daily -At 4:15am -RandomDelay (New-TimeSpan -Minutes 30)
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -RunLevel Highest -Force | Out-Null
 }
 
 function Get-AgentSource([string] $Destination) {
+    if ($NetworkMode -ne 'public') { return $false }
     foreach ($repository in $RepositoryUrl) {
         if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Recurse -Force }
         Write-Host "正在尝试 Agent 源码仓库：$repository ($SourceRef)"
@@ -482,7 +652,7 @@ if ($Action -ne 'install') {
                     if (-not $seen.ContainsKey($manifestVersion)) { $seen[$manifestVersion] = $true; $manifestVersion }
                 } catch { }
             }
-            if ($AllowGitHubApi) {
+            if ($NetworkMode -eq 'public' -and $AllowGitHubApi) {
                 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$ReleaseRepo/releases?per_page=20" -Headers @{ 'User-Agent' = 'xingchen-agent-installer' } -TimeoutSec 30 -MaximumRedirection 0
                 $release | ForEach-Object { $_.tag_name } | Where-Object { -not $seen.ContainsKey($_) }
             }
@@ -494,6 +664,12 @@ if ($Action -ne 'install') {
         'uninstall' {
             Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
             & sc.exe delete $serviceName | Out-Null
+            $updateTaskName = if ($usingLegacyInstallation) { 'GuanlanAgentUpdate' } else { 'XingchenAgentUpdate' }
+            if (Get-ScheduledTask -TaskName $updateTaskName -ErrorAction SilentlyContinue) {
+                Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false
+            }
+            Remove-Item -LiteralPath $updateLauncherPath, (Join-Path $dataDir 'update-agent.ps1') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $updateRequestDir -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
             if ($Purge) { Remove-Item -LiteralPath $dataDir -Recurse -Force -ErrorAction SilentlyContinue }
             Write-Host '星辰监控 Agent 已卸载。'
@@ -511,6 +687,10 @@ if ($Action -ne 'install') {
 $resolvedServer = Resolve-ServerUrl
 $ServerUrl = $resolvedServer.Url
 $configAllowInsecureHttp = $resolvedServer.AllowInsecure
+if ($NetworkMode -eq 'internal') { Assert-NetworkSourcePolicy $ServerUrl 'Controller 地址' }
+if ($NetworkMode -eq 'offline' -and [string]::IsNullOrWhiteSpace($BinaryPath)) {
+    throw 'offline 网络模式安装 Windows Agent 必须通过 -BinaryPath 提供已校验的本地二进制。'
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $temporaryBinary = $null
@@ -526,6 +706,9 @@ try {
             $Version = $release.Version
         }
         catch {
+            if ($NetworkMode -eq 'internal') {
+                throw 'internal 网络模式下预编译 Agent Release 不可用，拒绝源码构建回退；请修复内部制品源或通过 -BinaryPath 提供已校验程序。'
+            }
             Write-Warning '预编译 Agent Release 不可用，回退到源码构建。'
             $sourceRoot = $projectRoot
             if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
@@ -536,10 +719,19 @@ try {
                 $sourceRoot = $temporarySource
             }
             if (-not (Get-Command go -ErrorAction SilentlyContinue)) { throw '未提供 -BinaryPath 时需要 Go 1.24+；也可以指定预编译 Agent。' }
+            $sourceBuildVersion = 'dev'
+            foreach ($candidate in @($Version, $SourceRef)) {
+                if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+                try {
+                    $sourceBuildVersion = Normalize-ReleaseVersion $candidate
+                    break
+                }
+                catch { }
+            }
             Push-Location (Join-Path $sourceRoot 'agent')
             try {
                 $env:CGO_ENABLED = '0'
-                & go build -trimpath -ldflags '-s -w' -o $temporaryBinary ./cmd/agent
+                & go build -trimpath -ldflags "-s -w -X main.version=$sourceBuildVersion" -o $temporaryBinary ./cmd/agent
                 if ($LASTEXITCODE -ne 0) { throw 'Agent 编译失败。' }
             } finally {
                 Pop-Location
@@ -551,7 +743,19 @@ try {
 
     $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
     Get-AgentEnrollmentCredential
-    New-Item -ItemType Directory -Force -Path $installDir, $dataDir, (Join-Path $dataDir 'spool') | Out-Null
+    New-Item -ItemType Directory -Force -Path $installDir, $dataDir, (Join-Path $dataDir 'spool'), $updateRequestDir | Out-Null
+    & icacls.exe $updateRequestDir /inheritance:r /grant:r 'SYSTEM:(OI)(CI)(F)' 'Administrators:(OI)(CI)(F)' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw '无法收紧 Agent 更新请求目录权限。' }
+    if (-not (Test-Path -LiteralPath $updateStatusPath)) {
+        $initialUpdateStatus = [ordered]@{
+            status = 'IDLE'
+            lastError = ''
+            changedAt = [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        } | ConvertTo-Json -Compress
+        $initialUpdateStatusTemporary = "$updateStatusPath.$PID.tmp"
+        [IO.File]::WriteAllText($initialUpdateStatusTemporary, $initialUpdateStatus, [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $initialUpdateStatusTemporary -Destination $updateStatusPath -Force
+    }
     $targetBinary = Join-Path $installDir $binaryName
 
     $existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
@@ -568,6 +772,9 @@ try {
         interval = $Interval
         request_timeout = '10s'
         spool_dir = (Join-Path $dataDir 'spool')
+        update_status_path = $updateStatusPath
+        update_request_path = $updateRequestPath
+        update_launcher_path = $updateLauncherPath
         max_buffered_reports = 10000
         allow_insecure_http = $configAllowInsecureHttp
         allow_command_execution = $AllowCommandExecution.IsPresent
@@ -600,8 +807,8 @@ try {
     else {
         New-Service -Name $serviceName -DisplayName 'Xingchen Server Monitoring Agent' -BinaryPathName $command -StartupType Automatic -Description 'Collects server metrics for Xingchen Monitor.' | Out-Null
     }
-    Start-Service -Name $serviceName
     Install-AgentUpdater
+    Start-Service -Name $serviceName
     Write-Host "星辰监控 Agent 已安装并启动。可运行 Get-Service $serviceName 查看状态。"
 }
 finally {

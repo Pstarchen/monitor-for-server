@@ -50,6 +50,7 @@ export default defineConfig({
           { text: '部署与运维', link: '/deployment' },
           { text: '系统架构', link: '/architecture' },
           { text: '备份与生产检查', link: '/production-audit' },
+          { text: 'AI 安装更新审计提示词', link: '/installation-update-ai-prompt' },
           { text: '常见问题', link: '/faq' },
         ],
       },

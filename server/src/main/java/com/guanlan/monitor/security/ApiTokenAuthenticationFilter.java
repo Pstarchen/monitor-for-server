@@ -109,6 +109,7 @@ public class ApiTokenAuthenticationFilter extends OncePerRequestFilter {
         }
         if (path.startsWith("/api/services")) return resourceScope("service", method);
         if (path.startsWith("/api/ddns")) return method.equals("GET") ? "nezha:ddns:read" : resourceScope("ddns", method);
+        if (path.equals("/api/tasks/update")) return "nezha:admin:*";
         if (path.startsWith("/api/tasks")) return switch (method) {
             case "GET" -> "nezha:server:read";
             case "POST" -> "nezha:server:exec";

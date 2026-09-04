@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,6 +56,72 @@ func TestLoadAllowsLocalDevelopmentHTTP(t *testing.T) {
 	}
 	if cfg.ProcessCollectionLimit != 12 || cfg.PortCollectionLimit != 512 || cfg.ContainerCollectionLimit != 100 {
 		t.Fatalf("unexpected collection limits: %+v", cfg)
+	}
+}
+
+func TestLoadReadsUpdateStatusPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.json")
+	body := []byte(`{"server_url":"https://monitor.example.com","device_id":"device","agent_key":"secret","update_status_path":" C:\\ProgramData\\XingchenMonitor\\update-status.json "}`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load([]string{"-config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UpdateStatusPath != `C:\ProgramData\XingchenMonitor\update-status.json` {
+		t.Fatalf("unexpected update status path: %q", cfg.UpdateStatusPath)
+	}
+}
+
+func TestLoadReadsExplicitUpdateBridgePaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.json")
+	requestPath := filepath.Join(dir, "requests", "update-request")
+	launcherPath := filepath.Join(dir, "invoke-update-request.ps1")
+	body, err := json.Marshal(map[string]any{
+		"server_url":           "https://monitor.example.com",
+		"device_id":            "device",
+		"agent_key":            "secret",
+		"update_request_path":  requestPath,
+		"update_launcher_path": launcherPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load([]string{"-config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.UpdateRequestPath != requestPath || cfg.UpdateLauncherPath != launcherPath {
+		t.Fatalf("unexpected update bridge paths: %q, %q", cfg.UpdateRequestPath, cfg.UpdateLauncherPath)
+	}
+}
+
+func TestLoadRejectsInvalidUpdateBridgePaths(t *testing.T) {
+	cases := []map[string]any{
+		{"update_request_path": "relative/request"},
+		{"update_launcher_path": filepath.Join(t.TempDir(), "launcher.ps1")},
+	}
+	for index, values := range cases {
+		values["server_url"] = "https://monitor.example.com"
+		values["device_id"] = "device"
+		values["agent_key"] = "secret"
+		body, err := json.Marshal(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(t.TempDir(), "agent.json")
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load([]string{"-config", path}); err == nil {
+			t.Fatalf("case %d: expected invalid update bridge path", index)
+		}
 	}
 }
 

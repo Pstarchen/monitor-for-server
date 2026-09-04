@@ -18,12 +18,12 @@ services:
     networks: [monitor]
 
   setup:
-    image: ${XINGCHEN_SETUP_IMAGE:-ghcr.io/pstarchen/monitor-for-server-setup:v1.20.14}
+    image: ${XINGCHEN_SETUP_IMAGE:-ghcr.io/pstarchen/monitor-for-server-setup:v1.20.15}
     build:
       context: .
       dockerfile: setup/Dockerfile
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.14}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.15}
     restart: unless-stopped
     environment:
       SETUP_WORKSPACE: /workspace
@@ -48,6 +48,8 @@ services:
       XINGCHEN_AGENT_CACHE_DIR: ${XINGCHEN_AGENT_CACHE_DIR:-/workspace/.cache/agent-release}
       XINGCHEN_AGENT_OFFLINE_DIR: ${XINGCHEN_AGENT_OFFLINE_DIR:-/workspace/release/assets}
       XINGCHEN_CONTROLLER_ALLOW_GITHUB_API: ${XINGCHEN_CONTROLLER_ALLOW_GITHUB_API:-false}
+      XINGCHEN_NETWORK_MODE: ${XINGCHEN_NETWORK_MODE:-public}
+      XINGCHEN_ALLOW_GITEE: ${XINGCHEN_ALLOW_GITEE:-false}
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Shanghai}
     volumes:
       - ./:/workspace
@@ -76,11 +78,11 @@ services:
     networks: [monitor]
 
   server:
-    image: ${XINGCHEN_SERVER_IMAGE:-ghcr.io/pstarchen/monitor-for-server-server:v1.20.14}
+    image: ${XINGCHEN_SERVER_IMAGE:-ghcr.io/pstarchen/monitor-for-server-server:v1.20.15}
     build:
       context: ./server
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.14}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.15}
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-bootstrap}
@@ -151,11 +153,11 @@ services:
 
   controller-agent:
     profiles: [host-monitoring]
-    image: ${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14}
+    image: ${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15}
     build:
       context: ./agent
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.14}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.15}
     restart: unless-stopped
     pid: host
     network_mode: host
@@ -188,11 +190,11 @@ services:
       retries: 4
 
   web:
-    image: ${XINGCHEN_WEB_IMAGE:-ghcr.io/pstarchen/monitor-for-server-web:v1.20.14}
+    image: ${XINGCHEN_WEB_IMAGE:-ghcr.io/pstarchen/monitor-for-server-web:v1.20.15}
     build:
       context: ./web
       args:
-        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.14}
+        VERSION: ${XINGCHEN_TARGET_VERSION:-v1.20.15}
     restart: unless-stopped
     ports:
       - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-18080}:80"

@@ -4,6 +4,7 @@ import "time"
 
 type Report struct {
 	CollectedAt       time.Time            `json:"collectedAt"`
+	Agent             *AgentInfo           `json:"agent,omitempty"`
 	Host              HostInfo             `json:"host"`
 	CPU               CPUStats             `json:"cpu"`
 	Memory            MemoryStats          `json:"memory"`
@@ -20,6 +21,26 @@ type Report struct {
 	SystemLogs        []LogFile            `json:"systemLogs"`
 	Integrity         []IntegrityItem      `json:"integrity"`
 	CustomMetrics     []CustomMetricResult `json:"customMetrics"`
+}
+
+type AgentUpdateStatus string
+
+const (
+	AgentUpdateIdle        AgentUpdateStatus = "IDLE"
+	AgentUpdateChecking    AgentUpdateStatus = "CHECKING"
+	AgentUpdateDownloading AgentUpdateStatus = "DOWNLOADING"
+	AgentUpdateApplying    AgentUpdateStatus = "APPLYING"
+	AgentUpdateSucceeded   AgentUpdateStatus = "SUCCEEDED"
+	AgentUpdateFailed      AgentUpdateStatus = "FAILED"
+	AgentUpdatePaused      AgentUpdateStatus = "PAUSED"
+	AgentUpdateRollingBack AgentUpdateStatus = "ROLLING_BACK"
+)
+
+type AgentInfo struct {
+	Version              string            `json:"version"`
+	UpdateStatus         AgentUpdateStatus `json:"updateStatus"`
+	LastUpdateError      string            `json:"lastUpdateError"`
+	UpdateStateChangedAt *time.Time        `json:"updateStateChangedAt"`
 }
 
 type HostInfo struct {

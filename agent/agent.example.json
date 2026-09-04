@@ -5,6 +5,8 @@
   "interval": "3s",
   "request_timeout": "10s",
   "spool_dir": "data/spool",
+  "update_request_path": "",
+  "update_launcher_path": "",
   "max_buffered_reports": 10000,
   "allow_insecure_http": false,
   "monitored_services": ["nginx", "sshd"],

@@ -273,7 +273,7 @@ func composeApplyArgs() []string {
 	if strings.EqualFold(environmentValue("CONTROLLER_AGENT_ENABLED", "false"), "true") {
 		args = append(args, "--profile", "host-monitoring")
 	}
-	return append(args, "up", "-d", "--build", "--no-deps", "--wait", "--wait-timeout", "300", "server", "web")
+	return append(args, "up", "-d", "--no-build", "--pull", "never", "--no-deps", "--wait", "--wait-timeout", "300", "server", "web")
 }
 
 func writeEnvironment(request setupRequest) error {
@@ -346,6 +346,7 @@ func writeEnvironment(request setupRequest) error {
 		"XINGCHEN_TARGET_VERSION", "XINGCHEN_RELEASE_MANIFEST_PATH", "XINGCHEN_RELEASE_MANIFEST_URLS", "XINGCHEN_RELEASE_MANIFEST_SHA256",
 		"XINGCHEN_AGENT_RELEASE_BASE_URLS", "XINGCHEN_AGENT_CACHE_DIR", "XINGCHEN_AGENT_OFFLINE_DIR",
 		"XINGCHEN_CONTROLLER_ALLOW_GITHUB_API", "XINGCHEN_CONTROLLER_IMAGE_MIRRORS", "XINGCHEN_AGENT_IMAGE_MIRRORS",
+		"XINGCHEN_NETWORK_MODE", "XINGCHEN_ALLOW_GITEE",
 		"XINGCHEN_SOURCE_REPOSITORIES", "XINGCHEN_SOURCE_REF",
 		"XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS", "XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS", "XINGCHEN_UPDATE_MIN_FREE_BYTES",
 		"XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS", "XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS",

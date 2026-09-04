@@ -225,6 +225,27 @@ function statusLabel(status: Device['status'] | null) {
   return status === 'ONLINE' ? '在线' : status === 'OFFLINE' ? '离线' : status === 'PENDING' ? '待接入' : '--'
 }
 
+function agentUpdateLabel(status: Device['agentUpdateStatus']) {
+  const labels: Record<Device['agentUpdateStatus'], string> = {
+    IDLE: '空闲',
+    CHECKING: '检查中',
+    DOWNLOADING: '下载中',
+    APPLYING: '应用中',
+    SUCCEEDED: '更新成功',
+    FAILED: '更新失败',
+    PAUSED: '已暂停',
+    ROLLING_BACK: '回滚中',
+  }
+  return labels[status]
+}
+
+function agentUpdateTone(status: Device['agentUpdateStatus']) {
+  if (status === 'SUCCEEDED') return 'success'
+  if (status === 'FAILED') return 'danger'
+  if (status === 'IDLE') return 'info'
+  return 'warning'
+}
+
 async function loadNotes() {
   notesLoading.value = true
   notesError.value = ''
@@ -446,6 +467,10 @@ onBeforeUnmount(() => {
                 <div><dt>登记时间</dt><dd>{{ dateTime(device.createdAt) }}</dd></div>
                 <div><dt>操作权限</dt><dd>{{ canOperate ? '可管理设备' : '仅查看' }}</dd></div>
                 <div><dt>接入诊断</dt><dd>{{ device.health.reasonCode }}</dd></div>
+                <div><dt>Agent 版本</dt><dd class="mono-value">{{ device.agentVersion || '尚未上报' }}</dd></div>
+                <div><dt>更新状态</dt><dd><span class="status-badge" :data-tone="device.agentVersion ? agentUpdateTone(device.agentUpdateStatus) : 'info'"><i />{{ device.agentVersion ? agentUpdateLabel(device.agentUpdateStatus) : '尚未上报' }}</span></dd></div>
+                <div><dt>状态更新时间</dt><dd>{{ dateTime(device.agentUpdateStateChangedAt) }}</dd></div>
+                <div v-if="device.agentLastUpdateError"><dt>最近更新错误</dt><dd :title="device.agentLastUpdateError">{{ device.agentLastUpdateError }}</dd></div>
               </dl>
             </article>
           </div>

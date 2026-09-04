@@ -35,6 +35,7 @@
 - 无需登录的根路径 `/` 公开状态页（`/status` 保留兼容），展示服务器在线摘要、资源负载、实时吞吐与服务可用性。
 - API Token 支持哈希存储、过期、吊销、scope 和服务器白名单，并与所属账号的设备权限取交集，可供移动端与自动化脚本安全访问。
 - Agent 任务支持受控的一次性命令下发、超时/输出限制、取消、结果回传和审计；Agent 默认关闭命令执行，需显式配置开启。
+- Agent 发布支持确定性灰度分组、批次、维护窗口、并发与抖动控制、失败阈值自动暂停和批量回滚；只有任务下发后的实时版本上报才会确认升级成功。
 - 可选 MCP HTTP 入口支持 API Token 驱动的服务器查询和任务下发，默认关闭。
 - DDNS 配置支持 Webhook、IPv4/IPv6、重试、设备关联和 IP 变化自动更新，凭据加密存储。
 - 网络发现支持总控探测 RFC1918 私网 `/24` 到 `/32` 地址、常见端口和响应耗时，任务带进度、取消、审计记录和设备登记入口。
@@ -42,7 +43,7 @@
 
 ## 快速启动
 
-总终端只需要 Docker Engine 和 Compose v2。安装器优先使用管理员配置的受信内部镜像仓库，不默认启用来源不明的公共加速器；未配置内部镜像时才使用镜像自身地址。镜像不可用时，源码构建默认只尝试 Gitee，只有显式加入 `XINGCHEN_SOURCE_REPOSITORIES` 才会访问 GitHub。运行方式始终保持 Docker，并自动启动受 Docker 内网保护的 PostgreSQL 16 与 Redis；数据库端口不会暴露到公网。
+总终端只需要 Docker Engine 和 Compose v2。安装器提供 `public`、`internal`、`offline` 三种网络模式：`internal` 在代码层拒绝 GitHub、GitHub API、GitHubusercontent、GHCR 和 Docker Hub，Gitee 也必须显式开启；`offline` 只允许已校验 bundle 与本地 Docker image store，不进行远程发现、拉取或源码回退。生产环境如果目标服务器不能访问 GitHub，推荐使用 `internal`，并把 setup、server、web、agent、PostgreSQL、Redis 六个镜像和 Agent 制品提前晋级到内部基础设施。
 
 第一次部署建议先阅读[新手使用指南](docs/user-guide.md)。它从 Docker 准备、首次 `/setup`、Agent 接入一直讲到告警、通知、备份、更新和常见问题排查。
 
@@ -61,7 +62,7 @@ cd xingchen-monitor
 bash ./deploy/install-controller.sh
 ```
 
-需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时，跨主版本或熔断期间仍可人工评估后手动执行。更新器先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 和镜像自身地址，再按 `XINGCHEN_SOURCE_REPOSITORIES` 顺序回退源码；GitHub 不在默认运行时路径中。
+需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时，跨主版本或熔断期间仍可人工评估后手动执行。`public` 模式先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 和固定版本的官方 GHCR 镜像；源码回退默认关闭，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会启用，GitHub API 与 GitHub 源码不会被隐式访问。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。
 
 使用本地源码构建总控镜像：
 
@@ -69,7 +70,9 @@ bash ./deploy/install-controller.sh
 bash ./deploy/install-controller.sh --build
 ```
 
-目标服务器无法访问 GitHub/GHCR 时，将 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE`、`XINGCHEN_AGENT_IMAGE`、`XINGCHEN_POSTGRES_IMAGE` 和 `XINGCHEN_REDIS_IMAGE` 指向内部 Registry，并通过 `XINGCHEN_RELEASE_MANIFEST_URLS`、`XINGCHEN_AGENT_RELEASE_BASE_URLS` 指向内部 HTTPS 制品服务。稳定版 Setup 镜像还内置同版本的四个平台 Agent 制品作为末级本地基线；Agent 默认从总控同域取得受校验制品，manifest 的最低 Controller 版本门禁可阻止不兼容下发。内部 manifest 用于持续发现后续版本，不能由镜像内基线代替。完全断网环境在联网发布机取得 `xingchen-monitor-offline-vX.Y.Z-<架构>.tar.gz`，校验外层 `.sha256` 后传入目标机，解压并执行包内 `install-offline.sh` 或 `install-offline.ps1`。联网 CI 仅在全部镜像、Agent 制品和离线包验证成功后才把 draft Release 公开。
+目标服务器无法访问 GitHub/GHCR 时，将 `XINGCHEN_SETUP_IMAGE`、`XINGCHEN_SERVER_IMAGE`、`XINGCHEN_WEB_IMAGE`、`XINGCHEN_AGENT_IMAGE`、`XINGCHEN_POSTGRES_IMAGE` 和 `XINGCHEN_REDIS_IMAGE` 指向内部 Registry 的不可变 digest，通过 `XINGCHEN_RELEASE_MANIFEST_URLS`、`XINGCHEN_AGENT_RELEASE_BASE_URLS` 指向内部 HTTPS 制品服务，并设置 `XINGCHEN_NETWORK_MODE=internal`、`XINGCHEN_ALLOW_GITEE=false`、`XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false`。联网发布机可使用 `deploy/promote-internal-release.ps1` 按源 digest 晋级镜像并生成内部 manifest/lock；脚本不接收 Registry 凭据。稳定版 Setup 镜像还内置同版本的四个平台 Agent 制品作为末级本地基线；Agent 默认从总控同域取得受校验制品，目标节点不访问代码托管平台。
+
+完全断网环境在联网发布机取得 `xingchen-monitor-offline-vX.Y.Z-<架构>.tar.gz` 与同名 `.sha256`，通过受控介质传入目标机。新装执行包内 `install-offline.sh` 或 `install-offline.ps1`；已有部署必须执行 `upgrade-offline.sh --project-root <绝对部署目录> --check` 后再使用 `--apply`，以保留原 `.env`、Compose 项目、端口和数据卷，并在切换前备份 PostgreSQL。不要用新装入口覆盖存量部署。
 
 安装器会自动生成 PostgreSQL 数据库凭据并等待 Web 健康检查，然后打开 `http://<服务器IP>:18080/setup`。向导只收集站点名称、公网入口、允许来源、时区和首个管理员；端口与绑定地址在总终端启动时确定。提交后页面进入公开状态页，完成服务启动后再从状态页进入登录控制台。
 
@@ -119,6 +122,7 @@ docker compose build setup server web postgres
 - [总终端服务器搭建材料](docs/controller-server.md)
 - [受监控服务器搭建材料](docs/monitored-agent.md)
 - [生产审计与使用检查](docs/production-audit.md)
+- [让 AI 审计和优化安装、更新体系](docs/installation-update-ai-prompt.md)
 
 ### 本地运行官网与 Wiki
 
