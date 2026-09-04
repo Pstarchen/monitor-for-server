@@ -628,10 +628,11 @@ function New-ControllerDatabaseBackup([string[]] $ComposeArguments) {
     else {
         New-Item -ItemType Directory -Path $backupDirectory | Out-Null
     }
-    $identifier = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    $numericSuffix = '{0}{1}' -f $PID, [DateTime]::UtcNow.Ticks
+    $identifier = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') + '-' + $numericSuffix
     $containerPath = "/tmp/xingchen-controller-update-$identifier.sql"
-    $partial = Join-Path $backupDirectory ("controller-update-$identifier.sql.partial")
-    $final = Join-Path $backupDirectory ("controller-update-$identifier.sql")
+    $partial = Join-Path $backupDirectory ("xingchen-monitor-$identifier.sql.partial")
+    $final = Join-Path $backupDirectory ("xingchen-monitor-$identifier.sql")
     $dumpScript = 'umask 077; export PGPASSWORD="${POSTGRES_PASSWORD:?}"; exec pg_dump --clean --if-exists --no-owner --no-privileges -U "${POSTGRES_USER:-xingchen}" -d "${POSTGRES_DB:-xingchen_monitor}" -f "$1"'
     try {
         & docker exec $containerId sh -ec $dumpScript sh $containerPath | Out-Null
@@ -1012,9 +1013,9 @@ try {
     $services = @('setup', 'server', 'web')
     $imageKeys = @('XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE')
     $imageDefaults = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.15',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.15',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.15'
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.16',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.16'
     )
     $sourceContexts = @('.', 'server', 'web')
     $sourceDockerfiles = @('setup/Dockerfile', '', '')
@@ -1285,6 +1286,8 @@ try {
             if (-not $imageId) { throw "无法记录 $($services[$index]) 的旧镜像，更新未开始。" }
             $previousImages += $imageId
         }
+        $databaseBackupPath = New-ControllerDatabaseBackup $composeArgs
+        Write-Host "升级前数据库备份已保存：$databaseBackupPath"
     }
 
     if ($Offline) {
@@ -1344,7 +1347,9 @@ try {
         if ($targetVersion) {
             $env:XINGCHEN_TARGET_VERSION = $targetVersion
         }
-        & docker compose @composeArgs up -d --remove-orphans --wait --wait-timeout 300 $services
+        $composeApplyArguments = @('up', '-d', '--remove-orphans', '--wait', '--wait-timeout', '300')
+        if ($Offline) { $composeApplyArguments += @('--pull', 'never') }
+        & docker compose @composeArgs @composeApplyArguments $services
         if ($LASTEXITCODE -ne 0) {
             Write-Warning '总控健康检查失败，正在恢复更新前镜像。数据库不会自动回退。'
             $rollbackFailed = $false
@@ -1363,7 +1368,7 @@ try {
                     [Environment]::SetEnvironmentVariable($imageKeys[$index], $rollbackImages[$index], 'Process')
                 }
                 $env:XINGCHEN_TARGET_VERSION = $previousTargetSetting
-                & docker compose @composeArgs up -d --remove-orphans --wait --wait-timeout 300 $services
+                & docker compose @composeArgs @composeApplyArguments $services
                 $rollbackFailed = $LASTEXITCODE -ne 0
             }
             if ($rollbackFailed) { throw '总控更新失败，且镜像自动恢复未通过健康检查；不要在未评估迁移兼容性前恢复数据库。' }

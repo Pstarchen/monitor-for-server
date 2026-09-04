@@ -2,16 +2,16 @@
 
 受监控服务器只安装一个 Agent。每台机器在星辰监控总控的“设备管理”中创建一条设备记录，拿到设备 ID 和只显示一次的接入令牌后，再在目标主机安装。令牌 15 分钟后过期且只能消费一次；安装器用它向总控交换长期 Agent 密钥，管理员不需要复制或保存长期密钥。
 
-第一次接入设备可先阅读[新手使用指南的“接入第一台服务器”](user-guide.md#7-接入第一台服务器)。控制台自动生成的命令应优先于手工拼接；本页用于查阅完整 Agent 参数和高级采集配置。
+第一次接入设备可先阅读[新手使用指南的“接入第一台服务器”](user-guide.md#7-接入第一台服务器)。Agent 采用类似哪吒的一条命令接入体验：控制台按设备生成 Controller 同域短命令，管理员无需手工拼接多级下载地址；本页仍保留完整 Agent 参数、内部源、离线安装和高级采集配置。
 
 ## Linux
 
 在线安装器默认识别操作系统和 CPU 架构，从总控同源的 release/artifact 接口下载预编译 Agent，校验 manifest 声明的大小和 SHA256 后安装 systemd 服务。只有 `public` 模式显式配置制品基址、GitHub API 或源码仓库时才使用相应公共回退。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
 
-控制台只使用总控同域入口，目标服务器无需访问 GitHub、Gitee 或公共 CDN。复制按钮输出的是纯文本命令，不包含接入令牌、长期密钥、Markdown 链接、历史版本号或多级下载回退；脚本与 SHA256 分别下载，校验匹配后才会执行。
+控制台只使用总控同域入口，目标服务器无需访问 GitHub、Gitee 或公共 CDN。复制按钮输出的是纯文本 bootstrap 命令，不包含接入令牌、长期密钥、Markdown 链接、历史版本号或多级下载回退；bootstrap 将完整安装器与 SHA256 分别下载到随机临时文件，精确匹配后才执行。完整安装器准备好目标 Agent 制品后再通过终端隐藏输入读取一次性接入令牌，完成交换后清除凭据变量。
 
 ```bash
-installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && (trap 'rm -f "$installer"' EXIT && curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o "$installer" && expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256') && actual_sha=$(sha256sum "$installer" | awk '{print $1}') && test "$actual_sha" = "$expected_sha" && chmod 700 "$installer" && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' "$installer" --interval 3s)
+curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s' | bash
 ```
 
 不要将安装器 URL 改成代码托管平台的 `main` 分支。需要外部回退时，在总控侧配置受信上游或内部镜像，由总控完成版本固定、缓存和制品校验。
@@ -23,14 +23,14 @@ export XINGCHEN_NETWORK_MODE=internal
 export XINGCHEN_ALLOW_GITEE=false
 export XINGCHEN_AGENT_ALLOW_GITHUB_API=false
 export XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
-bash ./deploy/install-agent.sh --network-mode internal --version v1.20.15
+bash ./deploy/install-agent.sh --network-mode internal --version v1.20.16
 ```
 
 完全断网的新节点不能交换一次性接入令牌。管理员应通过秘密管理器或受控执行器把旧兼容变量 `XINGCHEN_AGENT_KEY` 直接注入安装器进程环境，并使用离线包中的本平台二进制；不要在命令行或脚本中给长期密钥赋值：
 
 ```bash
 export XINGCHEN_NETWORK_MODE=offline
-bash ./deploy/install-agent.sh --offline --binary /srv/xingchen/xingchen-agent --version v1.20.15 --no-auto-update
+bash ./deploy/install-agent.sh --offline --binary /srv/xingchen/xingchen-agent --version v1.20.16 --no-auto-update
 ```
 
 离线模式不会执行 DNS、远程下载、镜像拉取、源码构建或自动更新。示例中的内部域、路径和凭据占位符必须替换；不要把真实密钥写入 shell 历史、脚本或工单。

@@ -163,6 +163,25 @@ func TestControllerUpdateEnvironmentPassesNormalizedTargetVersion(t *testing.T) 
 	}
 }
 
+func TestOverrideEnvironmentRemovesEarlierValues(t *testing.T) {
+	environment := overrideEnvironment(
+		[]string{"KEEP=value", "XINGCHEN_PREUPDATE_BACKUP_PATH=stale", "XINGCHEN_PREUPDATE_BACKUP_PATH=older"},
+		"XINGCHEN_PREUPDATE_BACKUP_PATH=/workspace/backups/fresh.sql",
+	)
+	count := 0
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "XINGCHEN_PREUPDATE_BACKUP_PATH=") {
+			count++
+			if entry != "XINGCHEN_PREUPDATE_BACKUP_PATH=/workspace/backups/fresh.sql" {
+				t.Fatalf("unexpected backup override: %q", entry)
+			}
+		}
+	}
+	if count != 1 || !containsEnvironmentValue(environment, "KEEP=value") {
+		t.Fatalf("overrideEnvironment() = %v", environment)
+	}
+}
+
 func TestNormalizeControllerVersionRejectsLeadingZeroes(t *testing.T) {
 	for _, value := range []string{"v01.20.5", "v1.020.5", "v1.20.05"} {
 		if got := normalizeControllerVersion(value); got != "" {

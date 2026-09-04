@@ -17,7 +17,7 @@
 </role>
 
 <task_configuration>
-- 仓库基线：<REPOSITORY_BASELINE，例如 v1.20.15>
+- 仓库基线：<REPOSITORY_BASELINE，例如 v1.20.16>
 - 当前生产版本：<CURRENT_PRODUCTION_VERSION，例如 v1.20.13>
 - 执行模式：<EXECUTION_MODE：AUDIT_ONLY 或 IMPLEMENT>
 - 内部 OCI Registry：<INTERNAL_REGISTRY，例如 registry.internal.example/xingchen>
@@ -136,7 +136,7 @@
     "args": [],
     "payload": {
       "action": "update",
-      "version": "v1.20.15",
+      "version": "v1.20.16",
       "rolloutId": 123,
       "memberId": 456
     }

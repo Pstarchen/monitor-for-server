@@ -4,7 +4,7 @@ import { buildAgentInstallCommand, type AgentInstallCommandOptions } from './age
 const baseOptions: AgentInstallCommandOptions = {
   platform: 'linux',
   serverUrl: 'https://monitor.example.com',
-  deviceId: 'device-1',
+  deviceId: '123e4567-e89b-42d3-a456-426614174000',
   collectionSeconds: 30,
   diskMountpoints: ['/', '/data'],
   lightweight: false,
@@ -12,52 +12,86 @@ const baseOptions: AgentInstallCommandOptions = {
   processCollectionLimit: 128,
 }
 
+function commandUrl(command: string): URL {
+  const matched = command.match(/-Uri '(https?:\/\/[^']+)'| '(https?:\/\/[^']+)' \| bash/)
+  const value = matched?.[1] ?? matched?.[2]
+  if (!value) throw new Error(`install command URL not found: ${command}`)
+  return new URL(value)
+}
+
 describe('buildAgentInstallCommand', () => {
-  it('builds a short controller-hosted Linux install command', () => {
+  it('builds a single-line controller-hosted Linux bootstrap command', () => {
     const command = buildAgentInstallCommand(baseOptions)
+    const url = commandUrl(command)
 
-    expect(command).toContain('https://monitor.example.com/api/setup/agent-installer?platform=linux')
-    expect(command).toContain('installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh")')
-    expect(command).toContain('curl -fL --max-redirs 0 --retry 3')
-    expect(command).toContain("--proto '=https' --proto-redir '=https'")
-    expect(command).toContain('platform=linux&format=sha256')
-    expect(command).toContain('sha256sum "$installer"')
-    expect(command).toContain('test "$actual_sha" = "$expected_sha"')
-    expect(command).toContain('chmod 700 "$installer"')
-    expect(command).toContain('trap \'rm -f "$installer"\' EXIT')
-    expect(command).toContain("env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='device-1' \"$installer\" --interval 30s")
-    expect(command).not.toContain('-o xingchen-agent.sh')
-    expect(command).toContain("--disk '/' --disk '/data'")
-    expect(command).toContain('--all-processes --process-limit 128')
-    expect(command).not.toContain('export XINGCHEN_AGENT_KEY')
-    expect(command).not.toContain('XINGCHEN_AGENT_KEY=')
-    expect(command).not.toContain('XINGCHEN_ENROLLMENT_TOKEN')
-    expect(command).not.toContain('if [ "$(id -u)"')
-    expect(command).not.toMatch(/v1\.12\.0|v12|jsdelivr|raw\.githubusercontent/)
-    expect(command).not.toContain('](')
+    expect(command.split('\n')).toHaveLength(1)
+    expect(command).toContain("curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https'")
+    expect(command.endsWith('| bash')).toBe(true)
+    expect(url.origin).toBe('https://monitor.example.com')
+    expect(url.pathname).toBe('/api/setup/agent-bootstrap')
+    expect(url.searchParams.get('platform')).toBe('linux')
+    expect(url.searchParams.get('deviceId')).toBe(baseOptions.deviceId)
+    expect(url.searchParams.get('interval')).toBe('30s')
+    expect(url.searchParams.getAll('disk')).toEqual(['/', '/data'])
+    expect(url.searchParams.get('collectAllProcesses')).toBe('true')
+    expect(url.searchParams.get('processLimit')).toBe('128')
+    expect(command).not.toMatch(/agent-installer|sha256sum|format=sha256/)
+    expect(command).not.toMatch(/XINGCHEN_(AGENT_KEY|ENROLLMENT_TOKEN)/)
+    expect(command).not.toMatch(/github|gitee|jsdelivr|raw\.githubusercontent/i)
   })
 
-  it('uses the controller for a lightweight install without external source fallbacks', () => {
-    const command = buildAgentInstallCommand({ ...baseOptions, lightweight: true })
+  it('encodes lightweight options without exposing shell syntax', () => {
+    const command = buildAgentInstallCommand({
+      ...baseOptions,
+      diskMountpoints: ['/srv/data (primary)'],
+      lightweight: true,
+      collectAllProcesses: false,
+    })
+    const url = commandUrl(command)
 
-    expect(command).toContain('https://monitor.example.com/api/setup/agent-installer?platform=linux')
-    expect(command).toContain('--skip-processes --skip-connections')
-    expect(command).not.toContain('--all-processes')
-    expect(command).not.toContain('raw.githubusercontent.com')
-    expect(command).not.toContain('gitee.com')
+    expect(url.searchParams.getAll('disk')).toEqual(['/srv/data (primary)'])
+    expect(url.searchParams.get('lightweight')).toBe('true')
+    expect(url.searchParams.has('collectAllProcesses')).toBe(false)
+    expect(url.searchParams.has('processLimit')).toBe(false)
   })
 
-  it('builds a Windows command without putting the Agent key in PowerShell history', () => {
-    const command = buildAgentInstallCommand({ ...baseOptions, platform: 'windows' })
+  it('builds a single-line Windows bootstrap command', () => {
+    const command = buildAgentInstallCommand({
+      ...baseOptions,
+      platform: 'windows',
+      diskMountpoints: ['C:\\', 'D:\\Data'],
+    })
+    const url = commandUrl(command)
 
-    expect(command).toContain('https://monitor.example.com/api/setup/agent-installer?platform=windows')
-    expect(command).toContain('platform=windows&format=sha256')
-    expect(command).toContain("[Guid]::NewGuid().ToString('N')")
-    expect(command).toContain('Get-FileHash -LiteralPath $installer -Algorithm SHA256')
-    expect(command).toContain('Agent 安装器 SHA256 校验失败')
-    expect(command).not.toContain('XINGCHEN_AGENT_KEY')
-    expect(command).not.toContain("agent'key")
-    expect(command).toContain('Remove-Item $installer')
-    expect(command).not.toMatch(/gitee|github|jsdelivr|raw\.githubusercontent/)
+    expect(command.split('\n')).toHaveLength(1)
+    expect(command.startsWith('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command')).toBe(true)
+    expect(command).toContain('Invoke-RestMethod -TimeoutSec 60 -MaximumRedirection 0')
+    expect(command.endsWith('| Invoke-Expression"')).toBe(true)
+    expect(url.pathname).toBe('/api/setup/agent-bootstrap')
+    expect(url.searchParams.get('platform')).toBe('windows')
+    expect(url.searchParams.getAll('disk')).toEqual(['C:\\', 'D:\\Data'])
+    expect(command).not.toMatch(/agent-installer|Get-FileHash|format=sha256/)
+    expect(command).not.toMatch(/XINGCHEN_(AGENT_KEY|ENROLLMENT_TOKEN)/)
+  })
+
+  it('uses only the explicitly configured HTTP protocol', () => {
+    const command = buildAgentInstallCommand({
+      ...baseOptions,
+      serverUrl: 'http://127.0.0.1:18080',
+      collectAllProcesses: false,
+    })
+
+    expect(command).toContain("--proto '=http' --proto-redir '=http'")
+    expect(commandUrl(command).origin).toBe('http://127.0.0.1:18080')
+  })
+
+  it('rejects malformed origins, devices and collection options', () => {
+    expect(() => buildAgentInstallCommand({ ...baseOptions, serverUrl: 'https://user:secret@monitor.example.com' })).toThrow(/Controller/)
+    expect(() => buildAgentInstallCommand({ ...baseOptions, serverUrl: 'https://monitor.example.com/path' })).toThrow(/Controller/)
+    expect(() => buildAgentInstallCommand({ ...baseOptions, deviceId: "device'; curl evil" })).toThrow(/设备 ID/)
+    expect(() => buildAgentInstallCommand({ ...baseOptions, collectionSeconds: 2 })).toThrow(/采集周期/)
+    expect(() => buildAgentInstallCommand({ ...baseOptions, diskMountpoints: ["/data'; curl evil"] })).toThrow(/磁盘白名单/)
+    expect(() => buildAgentInstallCommand({ ...baseOptions, lightweight: true })).toThrow(/不能同时/)
+    expect(() => buildAgentInstallCommand({ ...baseOptions, processCollectionLimit: 257 })).toThrow(/进程上限/)
   })
 })

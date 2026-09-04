@@ -131,6 +131,162 @@ func TestAgentInstallerPrefersPackagedVersionOverWorkspace(t *testing.T) {
 	}
 }
 
+func useAgentBootstrapFixture(t *testing.T, publicBaseURL string) {
+	t.Helper()
+	originalWorkspace, originalEnvPath, originalPackagedInstallerDir := workspace, envPath, packagedInstallerDir
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	packagedInstallerDir = filepath.Join(t.TempDir(), "not-installed")
+	t.Cleanup(func() {
+		workspace, envPath, packagedInstallerDir = originalWorkspace, originalEnvPath, originalPackagedInstallerDir
+	})
+	if err := os.MkdirAll(filepath.Join(workspace, "deploy"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.sh"), []byte("#!/usr/bin/env bash\nset -euo pipefail\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "deploy", "install-agent.ps1"), []byte("$ErrorActionPreference = 'Stop'\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if publicBaseURL != "" {
+		if err := os.WriteFile(envPath, []byte("PUBLIC_BASE_URL=\""+publicBaseURL+"\"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestAgentBootstrapUsesConfiguredControllerAndVerifiesLinuxInstaller(t *testing.T) {
+	useAgentBootstrapFixture(t, "https://monitor.example.com")
+	query := url.Values{
+		"platform":            {"linux"},
+		"deviceId":            {"123e4567-e89b-42d3-a456-426614174000"},
+		"interval":            {"30s"},
+		"disk":                {"/", "/srv/data (primary)"},
+		"collectAllProcesses": {"true"},
+		"processLimit":        {"128"},
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://setup:8090/api/setup/agent-bootstrap?"+query.Encode(), nil)
+	request.Host = "untrusted.example"
+	request.Header.Set("X-Forwarded-Host", "also-untrusted.example")
+	response := httptest.NewRecorder()
+
+	(&setupService{}).agentBootstrap(response, request)
+
+	content := response.Body.String()
+	if response.Code != http.StatusOK {
+		t.Fatalf("Linux bootstrap response = %d %q", response.Code, content)
+	}
+	for _, expected := range []string{
+		"#!/usr/bin/env bash",
+		"https://monitor.example.com/api/setup/agent-installer?platform=linux",
+		"&format=sha256",
+		"sha256sum -- \"${installer}\"",
+		"bash \"${installer}\" '--server-url' 'https://monitor.example.com' '--device-id' '123e4567-e89b-42d3-a456-426614174000' '--interval' '30s' '--disk' '/' '--disk' '/srv/data (primary)' '--all-processes' '--process-limit' '128'",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("Linux bootstrap missing %q:\n%s", expected, content)
+		}
+	}
+	if strings.Contains(content, "untrusted.example") || strings.Contains(content, "XINGCHEN_ENROLLMENT_TOKEN") || strings.Contains(content, "XINGCHEN_AGENT_KEY") {
+		t.Fatalf("Linux bootstrap contains an untrusted origin or credential: %s", content)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("bootstrap response must be non-cacheable and nosniff")
+	}
+}
+
+func TestAgentBootstrapBuildsWindowsScriptFromConfiguredController(t *testing.T) {
+	useAgentBootstrapFixture(t, "https://edge.example:8443")
+	query := url.Values{
+		"platform":    {"windows"},
+		"deviceId":    {"123e4567-e89b-42d3-a456-426614174000"},
+		"interval":    {"3s"},
+		"disk":        {`C:\`, `D:\Data`},
+		"lightweight": {"true"},
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://setup:8090/api/setup/agent-bootstrap?"+query.Encode(), nil)
+	response := httptest.NewRecorder()
+
+	(&setupService{}).agentBootstrap(response, request)
+
+	content := response.Body.String()
+	if response.Code != http.StatusOK {
+		t.Fatalf("Windows bootstrap response = %d %q", response.Code, content)
+	}
+	for _, expected := range []string{
+		"https://edge.example:8443/api/setup/agent-installer?platform=windows",
+		"Get-FileHash -LiteralPath $installer -Algorithm SHA256",
+		"ServerUrl = 'https://edge.example:8443'",
+		"DeviceId = '123e4567-e89b-42d3-a456-426614174000'",
+		`DiskMountpoint = @('C:\', 'D:\Data')`,
+		"SkipProcesses = $true",
+		"SkipConnections = $true",
+		"& $installer @installOptions",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("Windows bootstrap missing %q:\n%s", expected, content)
+		}
+	}
+	if strings.Contains(content, "ENROLLMENT_TOKEN") || strings.Contains(content, "AGENT_KEY") {
+		t.Fatalf("Windows bootstrap contains a credential variable: %s", content)
+	}
+}
+
+func TestAgentBootstrapRejectsUnknownDuplicateAndUnsafeOptions(t *testing.T) {
+	useAgentBootstrapFixture(t, "https://monitor.example.com")
+	valid := "platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s"
+	tests := []string{
+		valid + "&token=secret-value",
+		valid + "&deviceId=123e4567-e89b-42d3-a456-426614174001",
+		"platform=linux&deviceId=device%27%3Bcurl+evil&interval=3s",
+		"platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=2s",
+		valid + "&disk=%2Fdata%27%3Bcurl+evil",
+		valid + "&lightweight=true&collectAllProcesses=true",
+		valid + "&processLimit=128",
+		valid + "&collectAllProcesses=true&processLimit=257",
+		"platform=windows&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s&disk=%2Fvar",
+	}
+	for _, rawQuery := range tests {
+		request := httptest.NewRequest(http.MethodGet, "/api/setup/agent-bootstrap?"+rawQuery, nil)
+		response := httptest.NewRecorder()
+		(&setupService{}).agentBootstrap(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("unsafe query %q returned %d, want 400: %s", rawQuery, response.Code, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), "secret-value") {
+			t.Fatal("bootstrap error leaked a credential value")
+		}
+	}
+}
+
+func TestAgentBootstrapRejectsInvalidConfiguredControllerWithoutRequestFallback(t *testing.T) {
+	useAgentBootstrapFixture(t, "https://user:secret@monitor.example.com")
+	request := httptest.NewRequest(http.MethodGet, "/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s", nil)
+	request.Host = "fallback.example"
+	response := httptest.NewRecorder()
+
+	(&setupService{}).agentBootstrap(response, request)
+
+	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "secret") || strings.Contains(response.Body.String(), "fallback.example") {
+		t.Fatalf("invalid configured controller response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestAgentBootstrapRejectsMissingConfiguredControllerWithoutRequestFallback(t *testing.T) {
+	useAgentBootstrapFixture(t, "")
+	request := httptest.NewRequest(http.MethodGet, "http://request.example/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s", nil)
+	request.Header.Set("X-Forwarded-Proto", "https")
+	request.Header.Set("X-Forwarded-Host", "forwarded.example")
+	response := httptest.NewRecorder()
+
+	(&setupService{}).agentBootstrap(response, request)
+
+	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "request.example") || strings.Contains(response.Body.String(), "forwarded.example") {
+		t.Fatalf("missing configured controller response = %d %q", response.Code, response.Body.String())
+	}
+}
+
 func TestValidateAllowedOriginsRequiresPublicOrigin(t *testing.T) {
 	publicURL, err := url.Parse("https://monitor.example.com")
 	if err != nil {

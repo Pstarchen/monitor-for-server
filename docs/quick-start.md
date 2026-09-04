@@ -13,7 +13,7 @@ description: 安装星辰监控总控，完成首次配置并接入第一台服�
 
 | 角色 | 最低准备 | 对外端口 |
 | --- | --- | --- |
-| 总控服务器 | 64 位 Linux、Docker Engine 24+、Compose v2 | 80/443，初始化时可临时使用 18080 |
+| 总控服务器 | 64 位 Linux 与 root/sudo；`public` 可自动安装 curl、Docker Engine 24+、Compose v2 | 80/443，初始化时可临时使用 18080 |
 | 被监控服务器 | Linux 或 Windows，具备安装服务的管理员权限 | 通常无需开放入站端口 |
 
 ::: warning 生产环境要求
@@ -27,22 +27,20 @@ description: 安装星辰监控总控，完成首次配置并接入第一台服�
 目标服务器无法访问 GitHub 时从 Gitee 获取：
 
 ```bash
-git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-sudo bash ./deploy/install-controller.sh
+git clone --depth 1 --branch v1.20.16 https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh --build
 ```
 
 能够访问 GitHub 时也可使用：
 
 ```bash
-git clone https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-sudo bash ./deploy/install-controller.sh
+git clone --depth 1 --branch v1.20.16 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh
 ```
 
-安装器会检查 Docker，生成数据库凭据，准备镜像并等待 Web 健康检查通过。它不会把数据库密码打印到日志。
+安装器在 `public` 模式会通过受支持的系统包管理器补齐 `curl`、Docker Engine 和 Compose v2，然后生成数据库凭据、准备固定版本镜像并等待 Web 健康检查通过。已预装依赖或需要由配置管理系统负责依赖时，添加 `--no-install-dependencies`；此时缺少任一依赖都会立即停止。安装器不会把数据库密码打印到日志。
 
-无法访问 GHCR 时，先在 `.env` 或进程环境中把全部 `XINGCHEN_*_IMAGE` 指向内部 Registry；完全断网时使用 Release 提供的架构对应离线 bundle，校验 `.sha256` 后执行包内 `install-offline.sh`。
+`internal` 和 `offline` 不会访问公网软件包源。无法访问 GHCR 时，应先在内部流程安装 curl、Docker Engine 与 Compose v2，并把全部 `XINGCHEN_*_IMAGE` 指向内部 Registry；完全断网时使用 Release 提供的架构对应离线 bundle，校验 `.sha256` 后执行包内 `install-offline.sh`。高级的内部 manifest、固定 digest、源码构建和存量离线升级方式见[部署与运维](./deployment.md)。
+
+无论从 Gitee 还是 GitHub 取得仓库，都不要改成 `curl .../main | bash`。总控安装与更新只接受固定稳定版本或 OCI digest；manifest、SHA256 或制品校验缺失、失败时直接停止，不执行未校验内容，也不依赖可变 `latest`。
 
 ### Windows
 
@@ -91,9 +89,9 @@ http://<总控服务器IP>:18080/setup
 
 1. 打开“设备管理”，点击“添加设备”。
 2. 填写设备名称、分组和资产信息。
-3. 保存后复制只显示一次的一次性接入令牌和安装命令；安装命令本身不包含任何凭据。
-4. 在目标服务器运行控制台生成的命令。
-5. 等待设备状态从“待接入”变为“在线”。
+3. 保存后取得只显示一次的一次性接入令牌，并复制控制台生成的一条 Controller 同域短命令；命令本身不包含任何凭据。
+4. 在目标服务器运行短命令。bootstrap 会分别下载完整安装器与 SHA256，校验匹配后才执行；安装器准备好 Agent 制品后再隐藏读取令牌。
+5. 等待设备状态从“待接入”变为“在线”。需要内部源、离线二进制或额外采集参数时，继续使用[受监控服务器搭建材料](./monitored-agent.md)中的高级入口。
 
 接入令牌 15 分钟后过期且只能消费一次；过期时可在设备列表或详情重新签发。不要把令牌发送到聊天群、工单或截图中。
 

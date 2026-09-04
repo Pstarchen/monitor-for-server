@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -130,9 +131,9 @@ type controllerImage struct {
 }
 
 var controllerImages = []controllerImage{
-	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.15"},
-	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.15"},
-	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.15"},
+	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16"},
+	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.16"},
+	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.16"},
 }
 
 func newControllerUpdateService() *controllerUpdateService {
@@ -469,10 +470,15 @@ func (s *controllerUpdateService) runUpdate() error {
 	state.DatabaseCompatibility = "NOT_EVALUATED"
 	state.Message = "正在创建更新前数据库备份"
 	_ = s.writeRuntimeState(state, preserveControllerAutomaticState)
-	backupName := "xingchen-monitor-" + s.currentTime().UTC().Format("20060102T150405Z") + ".sql"
+	backupTime := s.currentTime().UTC()
+	backupName := fmt.Sprintf("xingchen-monitor-%s-%d.sql", backupTime.Format("20060102T150405Z"), backupTime.UnixNano())
 	backupContext, cancelBackup := context.WithTimeout(context.Background(), controllerBackupCreateTimeout)
-	_, backupErr := createControllerBackup(backupContext, backupName)
+	backupPath, backupErr := createControllerBackup(backupContext, backupName)
 	cancelBackup()
+	backupSHA256 := ""
+	if backupErr == nil {
+		backupSHA256, backupErr = controllerBackupSHA256(backupPath)
+	}
 	if backupErr != nil {
 		log.Printf("controller pre-update backup failed: %v", backupErr)
 		state.State = "ERROR"
@@ -494,7 +500,11 @@ func (s *controllerUpdateService) runUpdate() error {
 		arguments = append(arguments, "--offline", "--no-source-fallback")
 	}
 	command := updateControllerCommand(ctx, updaterPath, arguments...)
-	command.Env = controllerUpdateEnvironment(targetVersion)
+	command.Env = overrideEnvironment(
+		controllerUpdateEnvironment(targetVersion),
+		"XINGCHEN_PREUPDATE_BACKUP_PATH="+filepath.Join(workspace, "backups", backupName),
+		"XINGCHEN_PREUPDATE_BACKUP_SHA256="+backupSHA256,
+	)
 	output, err := command.CombinedOutput()
 	state = s.readState()
 	if err != nil {
@@ -932,16 +942,48 @@ func composeBaseArgs() []string {
 }
 
 func controllerUpdateEnvironment(targetVersion ...string) []string {
-	environment := append(os.Environ(),
-		"COMPOSE_PROJECT_NAME="+environmentValue("COMPOSE_PROJECT_NAME", "xingchen-monitor"),
-		"XINGCHEN_HOST_PROJECT_ROOT="+hostWorkspace,
-	)
+	overrides := []string{
+		"COMPOSE_PROJECT_NAME=" + environmentValue("COMPOSE_PROJECT_NAME", "xingchen-monitor"),
+		"XINGCHEN_HOST_PROJECT_ROOT=" + hostWorkspace,
+	}
 	if len(targetVersion) > 0 {
 		if normalized := normalizeControllerVersion(targetVersion[0]); normalized != "" {
-			environment = append(environment, "XINGCHEN_TARGET_VERSION="+normalized)
+			overrides = append(overrides, "XINGCHEN_TARGET_VERSION="+normalized)
 		}
 	}
-	return environment
+	return overrideEnvironment(os.Environ(), overrides...)
+}
+
+func overrideEnvironment(environment []string, overrides ...string) []string {
+	names := make(map[string]struct{}, len(overrides))
+	for _, entry := range overrides {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok && name != "" {
+			names[name] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(environment)+len(overrides))
+	for _, entry := range environment {
+		name, _, ok := strings.Cut(entry, "=")
+		if _, replaced := names[name]; ok && replaced {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return append(result, overrides...)
+}
+
+func controllerBackupSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open controller backup for verification: %w", err)
+	}
+	defer file.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return "", fmt.Errorf("hash controller backup: %w", err)
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil)), nil
 }
 
 func environmentValueFromMap(values map[string]string, name, fallback string) string {

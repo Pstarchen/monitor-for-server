@@ -66,7 +66,7 @@ source_ref_overridden=false
 source_build_timeout="${XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
 mirror_pull_timeout="${XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45}"
 agent_pull_timeout="${XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
-agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.15}}"
+agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.16}}"
 container_name="${XINGCHEN_AGENT_CONTAINER:-xingchen-agent}"
 container_overridden=false
 [[ -n "${XINGCHEN_AGENT_CONTAINER:-}" ]] && container_overridden=true
@@ -395,9 +395,13 @@ if [[ "${action}" != install ]]; then
   exit $?
 fi
 
-if [[ -z "${agent_key}" && -z "${enrollment_token}" && -t 0 ]]; then
-  read -r -s -p '请输入一次性 Agent 接入令牌（输入不会回显）: ' enrollment_token
-  printf '\n'
+if [[ -z "${agent_key}" && -z "${enrollment_token}" ]]; then
+  if [[ -c /dev/tty ]] && IFS= read -r -s -p '请输入一次性 Agent 接入令牌（输入不会回显）: ' enrollment_token < /dev/tty; then
+    printf '\n' > /dev/tty
+  elif [[ -t 0 ]]; then
+    IFS= read -r -s -p '请输入一次性 Agent 接入令牌（输入不会回显）: ' enrollment_token
+    printf '\n'
+  fi
 fi
 if [[ -z "${server_url}" || -z "${device_id}" || ( -z "${enrollment_token}" && -z "${agent_key}" ) ]]; then
   echo "Server URL, device ID and XINGCHEN_ENROLLMENT_TOKEN or XINGCHEN_AGENT_KEY are required." >&2

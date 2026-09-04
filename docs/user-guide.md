@@ -122,25 +122,21 @@ Windows 总控不会自动采集 Windows 宿主机。完成总控安装后，还
 ### 4.1 Linux：从 Gitee 安装
 
 ```bash
-git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-sudo bash ./deploy/install-controller.sh
+git clone --depth 1 --branch v1.20.16 https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh --build
 ```
 
 ### 4.2 Linux：能够访问 GitHub 时
 
 ```bash
-git clone https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-sudo bash ./deploy/install-controller.sh
+git clone --depth 1 --branch v1.20.16 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh
 ```
 
 安装器会自动完成这些工作：
 
-1. 检查 Docker 和 Compose。
+1. `public` 模式自动补齐 curl、Docker Engine 和 Compose v2；`internal/offline` 只检查本地依赖。
 2. 生成随机 PostgreSQL 凭据并写入私有 `.env`。
 3. 优先从配置的受信内部 Registry 拉取固定版本镜像，再尝试镜像自身地址。
-4. 镜像不可用时，按 `XINGCHEN_SOURCE_REPOSITORIES` 配置顺序构建；默认仅包含 Gitee。
+4. 镜像不可用时，仅按显式配置的 `XINGCHEN_SOURCE_REPOSITORIES` 顺序构建；默认不访问任何源码仓库。
 5. 启动数据库和临时安装环境。
 6. 等待 `http://127.0.0.1:18080/healthz` 健康检查通过。
 
@@ -289,18 +285,10 @@ docker compose up -d --force-recreate server web
 3. 安装器会请求 sudo 权限；按提示输入目标服务器自己的 sudo 密码。
 4. 等待出现 Agent 已启动或状态检查提示。
 
-控制台生成的命令形式大致如下，下面的占位符不能直接照抄：
+控制台生成的命令形式大致如下，示例设备 ID 不能直接照抄：
 
 ```bash
-installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && ( \
-  trap 'rm -f "$installer"' EXIT \
-  && curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o "$installer" \
-  && expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256') \
-  && actual_sha=$(sha256sum "$installer" | awk '{print $1}') \
-  && test "$actual_sha" = "$expected_sha" \
-  && chmod 700 "$installer" \
-  && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' "$installer" --interval 3s
-)
+curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s' | bash
 ```
 
 安装器默认用预编译程序注册本机 systemd 服务；只有命令中显式添加 `--docker` 才用容器模式。检查状态和日志：
@@ -313,7 +301,7 @@ installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && ( \
 ### 7.4 Windows 安装 Agent
 
 1. 在目标 Windows 服务器上，以管理员身份打开 PowerShell。
-2. 粘贴控制台“Windows”页签生成的完整多行命令。
+2. 粘贴控制台“Windows”页签生成的单行短命令。
 3. 等待脚本下载安装程序、写入配置并创建 `XingchenAgent` 服务。
 4. 检查服务：
 

@@ -8,8 +8,9 @@ param(
     [switch] $AutoUpdate,
     [switch] $NoMirror,
     [switch] $NoSourceFallback,
+    [switch] $NoInstallDependencies,
     [ValidateSet('public', 'internal', 'offline')]
-    [string] $NetworkMode = $(if ($env:XINGCHEN_NETWORK_MODE) { $env:XINGCHEN_NETWORK_MODE } else { 'public' }),
+    [string] $NetworkMode,
     [switch] $AllowGitee
 )
 
@@ -18,6 +19,7 @@ $ErrorActionPreference = 'Stop'
 if ($Help) {
     @'
 Usage: install-controller.ps1 [-Cleanup] [-Build | -SourceBuild] [-Offline]
+                              [-NoInstallDependencies]
                               [-NetworkMode public|internal|offline] [-AllowGitee]
 
 Pulls prebuilt controller images and starts the controller with an internal
@@ -32,6 +34,7 @@ browser guide at /setup.
 -AutoUpdate enables the controller's daily 04:00 automatic update.
 -NoMirror skips mainland-China mirror registries and uses official GHCR.
 -NoSourceFallback does not build from source when all image registries fail.
+-NoInstallDependencies fails instead of installing Docker Desktop with winget.
 -NetworkMode selects public, internal, or fully offline source policy.
 -AllowGitee explicitly permits Gitee when network mode is internal.
 '@
@@ -39,48 +42,90 @@ browser guide at /setup.
 }
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-if ($Offline) { $NetworkMode = 'offline' }
-elseif ($NetworkMode -eq 'offline') { $Offline = $true }
+$envFile = Join-Path $projectRoot '.env'
+$networkModeWasProvided = $PSBoundParameters.ContainsKey('NetworkMode')
+$allowGiteeWasProvided = $PSBoundParameters.ContainsKey('AllowGitee')
+$processNetworkMode = [Environment]::GetEnvironmentVariable('XINGCHEN_NETWORK_MODE')
+$processAllowGitee = [Environment]::GetEnvironmentVariable('XINGCHEN_ALLOW_GITEE')
+
+function Get-InstallerEnvValue([string] $Path, [string] $Name) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    $line = Select-String -LiteralPath $Path -Pattern ('^' + [regex]::Escape($Name) + '=(.*)$') | Select-Object -First 1
+    if (-not $line) { return '' }
+    $value = $line.Matches[0].Groups[1].Value
+    if ($value.Length -ge 2 -and (($value[0] -eq '"' -and $value[$value.Length - 1] -eq '"') -or ($value[0] -eq "'" -and $value[$value.Length - 1] -eq "'"))) {
+        return $value.Substring(1, $value.Length - 2)
+    }
+    return $value
+}
+
+$fileNetworkMode = Get-InstallerEnvValue $envFile 'XINGCHEN_NETWORK_MODE'
+$fileAllowGitee = Get-InstallerEnvValue $envFile 'XINGCHEN_ALLOW_GITEE'
+if ($Offline) {
+    $NetworkMode = 'offline'
+}
+elseif ($networkModeWasProvided) {
+    $NetworkMode = $NetworkMode
+}
+elseif (-not [string]::IsNullOrWhiteSpace($processNetworkMode)) {
+    $NetworkMode = $processNetworkMode
+}
+elseif (-not [string]::IsNullOrWhiteSpace($fileNetworkMode)) {
+    $NetworkMode = $fileNetworkMode
+}
+else {
+    $NetworkMode = 'public'
+}
+$NetworkMode = $NetworkMode.Trim().ToLowerInvariant()
+if ($NetworkMode -notin @('public', 'internal', 'offline')) { throw 'XINGCHEN_NETWORK_MODE 必须是 public、internal 或 offline。' }
+if ($NetworkMode -eq 'offline') { $Offline = $true }
+
+$allowGiteeValue = if ($allowGiteeWasProvided) {
+    if ($AllowGitee) { 'true' } else { 'false' }
+}
+elseif (-not [string]::IsNullOrWhiteSpace($processAllowGitee)) { $processAllowGitee }
+elseif (-not [string]::IsNullOrWhiteSpace($fileAllowGitee)) { $fileAllowGitee }
+else { 'false' }
+$allowGiteeValue = $allowGiteeValue.Trim().ToLowerInvariant()
+if ($allowGiteeValue -notin @('true', 'false')) { throw 'XINGCHEN_ALLOW_GITEE 必须是 true 或 false。' }
 $env:XINGCHEN_NETWORK_MODE = $NetworkMode
-$env:XINGCHEN_ALLOW_GITEE = if ($AllowGitee -or $env:XINGCHEN_ALLOW_GITEE -eq 'true') { 'true' } else { 'false' }
+$env:XINGCHEN_ALLOW_GITEE = $allowGiteeValue
 if ($Build -and $SourceBuild) { throw '-Build 与 -SourceBuild 不能同时使用。' }
 if ($Offline -and ($Build -or $SourceBuild -or $AutoUpdate)) { throw '-Offline 不能与 -Build、-SourceBuild 或 -AutoUpdate 同时使用。' }
 if ($NetworkMode -eq 'internal') {
     if ($Build -or $SourceBuild) { throw 'internal 网络模式禁止 -Build 和 -SourceBuild；请使用已导入镜像或内部 Registry。' }
     $NoSourceFallback = $true
 }
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw '需要安装 Docker Engine。' }
-& docker compose version | Out-Null
-if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
+
+function Test-DockerComposeAvailable {
+    $docker = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $docker) { return $false }
+    & $docker.Source compose version *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+if (-not (Test-DockerComposeAvailable)) {
+    if ($NetworkMode -ne 'public') {
+        throw "缺少 Docker Engine 或 Docker Compose v2。$NetworkMode 模式禁止联网安装软件包，请预先安装后重试。"
+    }
+    if ($NoInstallDependencies) {
+        throw '缺少 Docker Engine 或 Docker Compose v2，且已通过 -NoInstallDependencies 禁用自动安装。'
+    }
+    $winget = Get-Command winget -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $winget) { throw '未找到 winget，请手动安装 Docker Desktop 后启动 Docker 并重试。' }
+    & $winget.Source install --id Docker.DockerDesktop --exact --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) { throw 'winget 安装 Docker Desktop 失败，请检查输出后重试。' }
+    throw 'Docker Desktop 已安装。请先启动 Docker Desktop，等待 Docker Engine 就绪，然后重新运行安装器。'
+}
 
 Push-Location $projectRoot
 try {
-    $envFile = Join-Path $projectRoot '.env'
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $newPassword = {
         $bytes = New-Object byte[] 32
         $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
         try { $generator.GetBytes($bytes) } finally { $generator.Dispose() }
         return -join ($bytes | ForEach-Object { $_.ToString('x2') })
-    }
-    $writeBootstrapEnv = {
-        $password = & $newPassword
-        $lines = @(
-            '# Generated by the controller installer. Keep this file private.'
-            'SPRING_PROFILES_ACTIVE=bootstrap'
-            'POSTGRES_DB=xingchen_monitor'
-            'POSTGRES_USER=xingchen'
-            "POSTGRES_PASSWORD=$password"
-            'CONTROLLER_AGENT_ENABLED=false'
-        )
-        [System.IO.File]::WriteAllLines($envFile, $lines, $utf8NoBom)
-    }
-
-    if (-not (Test-Path -LiteralPath $envFile)) {
-        & $writeBootstrapEnv
-    }
-    elseif (-not (Select-String -LiteralPath $envFile -Pattern '^POSTGRES_PASSWORD=("[^"]+"|\S+)$' -Quiet)) {
-        & $writeBootstrapEnv
     }
     function Set-InstallerSetting([string] $Name, [string] $Value) {
         if ($Value.Contains("`r") -or $Value.Contains("`n")) { throw "$Name 不能包含换行符。" }
@@ -103,11 +148,43 @@ try {
             if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
         }
     }
+    $writeBootstrapEnv = {
+        $password = & $newPassword
+        $lines = @(
+            '# Generated by the controller installer. Keep this file private.'
+            'SPRING_PROFILES_ACTIVE=bootstrap'
+            'POSTGRES_DB=xingchen_monitor'
+            'POSTGRES_USER=xingchen'
+            "POSTGRES_PASSWORD=$password"
+            'CONTROLLER_AGENT_ENABLED=false'
+        )
+        $temporary = Join-Path $projectRoot ('.env.controller-bootstrap.' + [Guid]::NewGuid().ToString('N'))
+        try {
+            [System.IO.File]::WriteAllLines($temporary, $lines, $utf8NoBom)
+            Move-Item -LiteralPath $temporary -Destination $envFile
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $envFile)) {
+        & $writeBootstrapEnv
+    }
+    else {
+        $passwordLines = @(Select-String -LiteralPath $envFile -Pattern '^POSTGRES_PASSWORD=')
+        if ($passwordLines.Count -eq 0) {
+            Set-InstallerSetting 'POSTGRES_PASSWORD' (& $newPassword)
+        }
+        elseif ($passwordLines.Count -ne 1 -or $passwordLines[0].Line -notmatch '^POSTGRES_PASSWORD=("[^"]+"|\x27[^\x27]+\x27|[^\s"\x27]+)$') {
+            throw '现有 .env 中的 POSTGRES_PASSWORD 非法或重复，请修正后重试；安装器未修改该文件。'
+        }
+    }
     if (-not (Select-String -LiteralPath $envFile -Pattern '^COMPOSE_PROJECT_NAME=' -Quiet)) {
         $legacyDatabase = Select-String -LiteralPath $envFile -Pattern '^POSTGRES_DB=["'']?(.*?)["'']?$' | Select-Object -First 1
         $legacyVolume = (& docker volume inspect 'guanlan-monitor_postgres-data' 2>$null)
         $projectName = if (($legacyDatabase -and $legacyDatabase.Matches[0].Groups[1].Value -eq 'guanlan_monitor') -or $legacyVolume) { 'guanlan-monitor' } else { 'xingchen-monitor' }
-        [System.IO.File]::AppendAllText($envFile, "COMPOSE_PROJECT_NAME=$projectName`r`n", $utf8NoBom)
+        Set-InstallerSetting 'COMPOSE_PROJECT_NAME' $projectName
     }
     $installerSettings = @(
         'XINGCHEN_POSTGRES_IMAGE', 'XINGCHEN_REDIS_IMAGE',

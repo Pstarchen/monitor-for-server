@@ -145,7 +145,7 @@ function New-TestFixture([string] $Name) {
     Write-Utf8 (Join-Path $project 'release/assets/old-agent.txt') "old release`n"
     Write-Utf8 (Join-Path $project 'release/manifest.json') '{"schemaVersion":1,"version":"v1.20.14"}'
 
-    $version = 'v1.20.15'
+    $version = 'v1.20.16'
     $architecture = Get-HostArchitecture
     Write-Utf8 (Join-Path $bundle 'bundle-metadata.txt') "schema=1`nversion=$version`narchitecture=$architecture`n"
     Write-Utf8 (Join-Path $bundle 'docker-compose.yml') "name: candidate-controller`nservices: {}`n"
@@ -163,7 +163,7 @@ function New-TestFixture([string] $Name) {
         [pscustomobject]@{ OS = 'windows'; Arch = 'amd64'; Extension = 'zip' },
         [pscustomobject]@{ OS = 'windows'; Arch = 'arm64'; Extension = 'zip' }
     )) {
-        $assetName = "xingchen-agent_1.20.15_$($platform.OS)_$($platform.Arch).$($platform.Extension)"
+        $assetName = "xingchen-agent_1.20.16_$($platform.OS)_$($platform.Arch).$($platform.Extension)"
         $assetPath = Join-Path $bundle "release/assets/$assetName"
         Write-Utf8 $assetPath "Agent fixture for $($platform.OS)/$($platform.Arch)`n"
         $assetHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -554,15 +554,15 @@ function global:docker {
     Assert-True ($result.Log -match '(?m)^docker cp ' -and $result.Log -match '(?m)^docker compose .* up .*--pull never .*--no-build .* setup server web') 'Apply did not copy the backup or health-check the expected Windows services.'
     Assert-True ($result.Log -notmatch '(?m)^docker (pull|build)\b') 'Offline bundle apply attempted a pull or build.'
     $envAfter = [System.IO.File]::ReadAllText((Join-Path $fixture.Project '.env'))
-    Assert-True ($envAfter.Contains('XINGCHEN_TARGET_VERSION="v1.20.15"') -and $envAfter.Contains('XINGCHEN_NETWORK_MODE="offline"') -and $envAfter.Contains('XINGCHEN_RELEASE_MANIFEST_SHA256="')) "Apply did not persist offline candidate settings.`n$envAfter"
+    Assert-True ($envAfter.Contains('XINGCHEN_TARGET_VERSION="v1.20.16"') -and $envAfter.Contains('XINGCHEN_NETWORK_MODE="offline"') -and $envAfter.Contains('XINGCHEN_RELEASE_MANIFEST_SHA256="')) "Apply did not persist offline candidate settings.`n$envAfter"
     Assert-BytesEqual ([System.IO.File]::ReadAllBytes((Join-Path $fixture.Bundle 'docker-compose.yml'))) ([System.IO.File]::ReadAllBytes((Join-Path $fixture.Project 'docker-compose.yml'))) 'Apply did not install the verified Compose file.'
     Assert-BytesEqual ([System.IO.File]::ReadAllBytes((Join-Path $fixture.Bundle 'deploy/update-controller.ps1'))) ([System.IO.File]::ReadAllBytes((Join-Path $fixture.Project 'deploy/update-controller.ps1'))) 'Apply did not install the verified updater.'
     Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $fixture.Project 'backups') -Filter '*.sql').Count -eq 1) 'Apply did not retain one PostgreSQL backup.'
     $bundleImages = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.15',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.15',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.15',
-        'ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15',
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.16',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.16',
+        'ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16',
         'postgres:16-alpine',
         'redis:7.4-alpine'
     )
@@ -666,19 +666,38 @@ function global:docker {
 POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="public"
-XINGCHEN_TARGET_VERSION="v1.20.15"
+XINGCHEN_TARGET_VERSION="v1.20.16"
 '@
     $result = Invoke-Update $fixture @('-Check', '-NoMirror', '-NoSourceFallback') @{ TEST_PULL_SUCCESS_PREFIX = 'ghcr.io/' } $false
     Assert-True ($result.Status -eq 0) "Online Check no longer prepares candidate images.`n$($result.Output)`n$($result.Log)"
-    Assert-True ($result.Log.Contains('docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.15')) "Online Check did not pull the expected candidate image.`n$($result.Log)"
+    Assert-True ($result.Log.Contains('docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.16')) "Online Check did not pull the expected candidate image.`n$($result.Log)"
     Assert-True ($result.Log -notmatch '(?m)^docker (build|compose .* up)\b') 'Online Check restarted services or built from source after successful pulls.'
+
+    $result = Invoke-Update $fixture @('-Apply', '-NoMirror', '-NoSourceFallback') @{ TEST_PULL_SUCCESS_PREFIX = 'ghcr.io/' } $false
+    Assert-True ($result.Status -eq 0) "Online Apply failed: $($result.Output)`n$($result.Log)"
+    $backupIndex = $result.Log.IndexOf('pg_dump', [System.StringComparison]::Ordinal)
+    $pullIndex = $result.Log.IndexOf('docker pull ', [System.StringComparison]::Ordinal)
+    Assert-True ($backupIndex -ge 0 -and $pullIndex -gt $backupIndex) "Online Apply did not back up PostgreSQL before pulling images.`n$($result.Log)"
+    $onlineBackups = @(Get-ChildItem -LiteralPath (Join-Path $fixture.Project 'backups') -Filter '*.sql')
+    Assert-True ($onlineBackups.Count -eq 1 -and $onlineBackups[0].Name -match '^xingchen-monitor-[0-9]{8}T[0-9]{6}Z-[0-9]+\.sql$') 'Online Apply backup is not visible to the Controller restore service.'
+
+    $fixture = New-TestFixture 'online-backup-failure'
+    Write-Utf8 (Join-Path $fixture.Project '.env') @'
+POSTGRES_PASSWORD="test-only"
+COMPOSE_PROJECT_NAME="test-controller"
+XINGCHEN_NETWORK_MODE="public"
+XINGCHEN_TARGET_VERSION="v1.20.16"
+'@
+    $result = Invoke-Update $fixture @('-Apply', '-NoMirror', '-NoSourceFallback') @{ TEST_BACKUP_FAIL = 'true'; TEST_PULL_SUCCESS_PREFIX = 'ghcr.io/' } $false
+    Assert-True ($result.Status -ne 0) 'Online Apply continued after a database backup failure.'
+    Assert-True ($result.Log -notmatch '(?m)^docker (pull|build)\b|^docker compose .*\bup\b') 'Online backup failure reached image preparation or service switching.'
 
     $fixture = New-TestFixture 'public-no-source-fallback'
     Write-Utf8 (Join-Path $fixture.Project '.env') @'
 POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="public"
-XINGCHEN_TARGET_VERSION="v1.20.15"
+XINGCHEN_TARGET_VERSION="v1.20.16"
 XINGCHEN_SOURCE_REPOSITORIES=""
 '@
     $result = Invoke-Update $fixture @('-Check', '-NoMirror') @{ XINGCHEN_SOURCE_REPOSITORIES = '' } $false
@@ -700,18 +719,21 @@ XINGCHEN_TARGET_VERSION="v01.20.15"
     Write-Utf8 (Join-Path $fixture.Project '.env') @'
 POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
-XINGCHEN_TARGET_VERSION="v1.20.15"
+XINGCHEN_TARGET_VERSION="v1.20.16"
 '@
     $result = Invoke-Update $fixture @('-Check', '-Offline') @{} $false
     Assert-True ($result.Status -eq 0) "CLI offline Check failed with complete local images.`n$($result.Output)"
     Assert-True ($result.Log -notmatch '(?m)^docker (pull|build)\b') 'CLI offline mode attempted a registry pull or remote build.'
+    $result = Invoke-Update $fixture @('-Apply', '-Offline') @{} $false
+    Assert-True ($result.Status -eq 0) "CLI offline Apply failed with complete local images.`n$($result.Output)"
+    Assert-True ($result.Log -match '(?m)^docker compose .*\bup\b.*--pull never') 'CLI offline Apply did not prohibit Compose pulls.'
 
     $fixture = New-TestFixture 'internal-local-ghcr'
     Write-Utf8 (Join-Path $fixture.Project '.env') @'
 POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="internal"
-XINGCHEN_TARGET_VERSION="v1.20.15"
+XINGCHEN_TARGET_VERSION="v1.20.16"
 XINGCHEN_POSTGRES_IMAGE="registry.internal.example/library/postgres:16-alpine"
 XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
 '@
@@ -720,16 +742,16 @@ XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
     Assert-True ($result.Log -notmatch '(?m)^docker (pull|build)\b') 'internal local-image path unexpectedly used the network.'
 
     $missingLogicalImages = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.15',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.15',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.15'
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.16',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.16'
     ) -join ','
     $fixture = New-TestFixture 'internal-missing-mirror'
     Write-Utf8 (Join-Path $fixture.Project '.env') @'
 POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="internal"
-XINGCHEN_TARGET_VERSION="v1.20.15"
+XINGCHEN_TARGET_VERSION="v1.20.16"
 XINGCHEN_POSTGRES_IMAGE="registry.internal.example/library/postgres:16-alpine"
 XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
 '@
@@ -742,7 +764,7 @@ XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
 POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="internal"
-XINGCHEN_TARGET_VERSION="v1.20.15"
+XINGCHEN_TARGET_VERSION="v1.20.16"
 XINGCHEN_CONTROLLER_IMAGE_MIRRORS="registry.internal.example"
 XINGCHEN_POSTGRES_IMAGE="registry.internal.example/library/postgres:16-alpine"
 XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
@@ -753,8 +775,8 @@ XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
     } $false
     Assert-True ($result.Status -eq 0) "internal mirror flow failed.`n$($result.Output)"
     foreach ($service in @('setup', 'server', 'web')) {
-        $internalImage = "registry.internal.example/pstarchen/monitor-for-server-$service`:v1.20.15"
-        $logicalImage = "ghcr.io/pstarchen/monitor-for-server-$service`:v1.20.15"
+        $internalImage = "registry.internal.example/pstarchen/monitor-for-server-$service`:v1.20.16"
+        $logicalImage = "ghcr.io/pstarchen/monitor-for-server-$service`:v1.20.16"
         Assert-True ($result.Log.Contains("docker pull $internalImage")) "internal mirror did not pull $service."
         Assert-True ($result.Log.Contains("docker tag $internalImage $logicalImage")) "internal mirror did not tag the $service logical image."
     }
@@ -771,10 +793,10 @@ XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
 POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="internal"
-XINGCHEN_TARGET_VERSION="v1.20.15"
-XINGCHEN_SETUP_IMAGE="registry.internal.example/xingchen/setup:v1.20.15"
-XINGCHEN_SERVER_IMAGE="registry.internal.example/xingchen/server:v1.20.15"
-XINGCHEN_WEB_IMAGE="registry.internal.example/xingchen/web:v1.20.15"
+XINGCHEN_TARGET_VERSION="v1.20.16"
+XINGCHEN_SETUP_IMAGE="registry.internal.example/xingchen/setup:v1.20.16"
+XINGCHEN_SERVER_IMAGE="registry.internal.example/xingchen/server:v1.20.16"
+XINGCHEN_WEB_IMAGE="registry.internal.example/xingchen/web:v1.20.16"
 XINGCHEN_POSTGRES_IMAGE="registry.internal.example/library/postgres:16-alpine"
 XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
 '@
@@ -788,9 +810,9 @@ POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="internal"
 XINGCHEN_SOURCE_REPOSITORIES="https://git.internal.example/monitor.git"
-XINGCHEN_SETUP_IMAGE="registry.internal.example/xingchen/setup:v1.20.15"
-XINGCHEN_SERVER_IMAGE="registry.internal.example/xingchen/server:v1.20.15"
-XINGCHEN_WEB_IMAGE="registry.internal.example/xingchen/web:v1.20.15"
+XINGCHEN_SETUP_IMAGE="registry.internal.example/xingchen/setup:v1.20.16"
+XINGCHEN_SERVER_IMAGE="registry.internal.example/xingchen/server:v1.20.16"
+XINGCHEN_WEB_IMAGE="registry.internal.example/xingchen/web:v1.20.16"
 XINGCHEN_POSTGRES_IMAGE="postgres:16-alpine"
 XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
 '@
@@ -816,9 +838,9 @@ POSTGRES_PASSWORD="test-only"
 COMPOSE_PROJECT_NAME="test-controller"
 XINGCHEN_NETWORK_MODE="internal"
 XINGCHEN_SOURCE_REPOSITORIES="https://github.com/Pstarchen/monitor-for-server.git"
-XINGCHEN_SETUP_IMAGE="registry.internal.example/xingchen/setup:v1.20.15"
-XINGCHEN_SERVER_IMAGE="registry.internal.example/xingchen/server:v1.20.15"
-XINGCHEN_WEB_IMAGE="registry.internal.example/xingchen/web:v1.20.15"
+XINGCHEN_SETUP_IMAGE="registry.internal.example/xingchen/setup:v1.20.16"
+XINGCHEN_SERVER_IMAGE="registry.internal.example/xingchen/server:v1.20.16"
+XINGCHEN_WEB_IMAGE="registry.internal.example/xingchen/web:v1.20.16"
 XINGCHEN_POSTGRES_IMAGE="registry.internal.example/library/postgres:16-alpine"
 XINGCHEN_REDIS_IMAGE="registry.internal.example/library/redis:7.4-alpine"
 '@

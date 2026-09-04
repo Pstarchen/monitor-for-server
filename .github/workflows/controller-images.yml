@@ -32,7 +32,7 @@ jobs:
         run: sudo bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/*.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
+        run: bash -n deploy/*.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
 
       - name: Check PowerShell scripts and generated updater
         shell: pwsh
@@ -108,11 +108,11 @@ jobs:
 
       - name: Test Controller updater with Windows PowerShell 5.1
         shell: powershell
-        run: .\deploy\update-controller_test.ps1
+        run: .\deploy\install-controller_test.ps1; .\deploy\update-controller_test.ps1
 
       - name: Test Controller updater with PowerShell 7
         shell: pwsh
-        run: .\deploy\update-controller_test.ps1
+        run: .\deploy\install-controller_test.ps1; .\deploy\update-controller_test.ps1
 
       - name: Test offline bundle wrappers on Windows
         shell: bash

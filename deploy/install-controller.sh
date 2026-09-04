@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage: install-controller.sh [--cleanup] [--build|--source-build] [--offline] [--auto-update] [--no-mirror] [--no-source-fallback]
+                             [--no-install-dependencies]
                              [--network-mode public|internal|offline] [--allow-gitee]
 
 Pulls prebuilt controller images and starts the controller with an internal
@@ -18,6 +19,7 @@ browser guide at /setup.
   --auto-update  enable the controller's daily 04:00 automatic update.
   --no-mirror  skip mainland-China mirror registries and use official GHCR.
   --no-source-fallback  do not build from source when all image registries fail.
+  --no-install-dependencies  fail instead of installing Docker, Compose, or curl.
   --network-mode  select public, internal, or fully offline source policy.
   --allow-gitee  explicitly permit Gitee when network mode is internal.
 USAGE
@@ -30,8 +32,11 @@ auto_update=false
 no_mirror=false
 source_fallback=true
 offline=false
-network_mode="${XINGCHEN_NETWORK_MODE:-public}"
-allow_gitee="${XINGCHEN_ALLOW_GITEE:-false}"
+no_install_dependencies=false
+network_mode_argument=""
+allow_gitee_argument=""
+network_mode_environment="${XINGCHEN_NETWORK_MODE:-}"
+allow_gitee_environment="${XINGCHEN_ALLOW_GITEE:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cleanup) cleanup=true; shift ;;
@@ -41,17 +46,121 @@ while [[ $# -gt 0 ]]; do
     --auto-update) auto_update=true; shift ;;
     --no-mirror) no_mirror=true; shift ;;
     --no-source-fallback) source_fallback=false; shift ;;
+    --no-install-dependencies) no_install_dependencies=true; shift ;;
     --network-mode)
       [[ $# -ge 2 && -n "${2:-}" ]] || { echo "--network-mode 需要模式值。" >&2; exit 2; }
-      network_mode="$2"
+      network_mode_argument="$2"
       shift 2
       ;;
-    --allow-gitee) allow_gitee=true; shift ;;
+    --allow-gitee) allow_gitee_argument=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd -- "${script_dir}/.." && pwd)"
+cd "${project_root}"
+
+read_env_value() {
+  local key="$1" value
+  value="$(awk -v key="${key}" 'index($0, key "=") == 1 {print substr($0, length(key) + 2); exit}' .env 2>/dev/null || true)"
+  if [[ "${value}" == \"*\" || "${value}" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "${value}"
+}
+
+policy_env_value=""
+policy_env_value_set=false
+read_policy_env_value() {
+  local key="$1" line candidate raw first last suffix env_fd match_count=0
+  policy_env_value=""
+  policy_env_value_set=false
+  if [[ ! -e .env && ! -L .env ]]; then
+    return 0
+  fi
+  if [[ ! -f .env || ! -r .env ]]; then
+    echo "现有 .env 不可读或不是普通文件，拒绝推断网络策略。" >&2
+    return 1
+  fi
+  if ! exec {env_fd}< .env; then
+    echo "现有 .env 读取失败，拒绝推断网络策略。" >&2
+    return 1
+  fi
+  while IFS= read -r -u "${env_fd}" line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    candidate="${line}"
+    while [[ "${candidate}" == ' '* || "${candidate}" == $'\t'* ]]; do
+      candidate="${candidate:1}"
+    done
+    [[ -z "${candidate}" || "${candidate}" == \#* ]] && continue
+    if [[ "${candidate}" == "${key}="* ]]; then
+      ((match_count += 1))
+      if ((match_count > 1)); then
+        echo "现有 .env 中的 ${key} 重复，拒绝继续。" >&2
+        exec {env_fd}<&-
+        return 1
+      fi
+      raw="${candidate#"${key}="}"
+      first="${raw:0:1}"
+      last="${raw: -1}"
+      if [[ "${first}" == '"' || "${first}" == "'" || "${last}" == '"' || "${last}" == "'" ]]; then
+        if [[ ${#raw} -lt 2 || "${first}" != "${last}" || ( "${first}" != '"' && "${first}" != "'" ) ]]; then
+          echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+          exec {env_fd}<&-
+          return 1
+        fi
+        raw="${raw:1:${#raw}-2}"
+      fi
+      if [[ "${raw}" == *'"'* || "${raw}" == *"'"* ]]; then
+        echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+        exec {env_fd}<&-
+        return 1
+      fi
+      policy_env_value="${raw}"
+      policy_env_value_set=true
+    elif [[ "${candidate}" == "${key}"* ]]; then
+      suffix="${candidate#"${key}"}"
+      first="${suffix:0:1}"
+      if [[ -z "${suffix}" || ! "${first}" =~ [A-Za-z0-9_] ]]; then
+        echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+        exec {env_fd}<&-
+        return 1
+      fi
+    elif [[ "${candidate}" == export[[:space:]]"${key}"* ]]; then
+      echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+      exec {env_fd}<&-
+      return 1
+    fi
+  done
+  exec {env_fd}<&-
+}
+
+if [[ -n "${network_mode_argument}" ]]; then
+  network_mode="${network_mode_argument}"
+elif [[ -n "${network_mode_environment}" ]]; then
+  network_mode="${network_mode_environment}"
+else
+  read_policy_env_value XINGCHEN_NETWORK_MODE || exit 2
+  if [[ "${policy_env_value_set}" == true ]]; then
+    network_mode="${policy_env_value}"
+  else
+    network_mode=public
+  fi
+fi
+if [[ -n "${allow_gitee_argument}" ]]; then
+  allow_gitee="${allow_gitee_argument}"
+elif [[ -n "${allow_gitee_environment}" ]]; then
+  allow_gitee="${allow_gitee_environment}"
+else
+  read_policy_env_value XINGCHEN_ALLOW_GITEE || exit 2
+  if [[ "${policy_env_value_set}" == true ]]; then
+    allow_gitee="${policy_env_value}"
+  else
+    allow_gitee=false
+  fi
+fi
 network_mode="${network_mode,,}"
 if [[ ! "${network_mode}" =~ ^(public|internal|offline)$ ]]; then
   echo "--network-mode 必须是 public、internal 或 offline。" >&2
@@ -82,15 +191,69 @@ if [[ "${network_mode}" == internal ]]; then
   source_fallback=false
 fi
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-project_root="$(cd -- "${script_dir}/.." && pwd)"
+missing_runtime_dependencies() {
+  local missing=()
+  if ! command -v docker >/dev/null 2>&1; then
+    missing+=(Docker)
+  elif ! docker compose version >/dev/null 2>&1; then
+    missing+=("Docker Compose v2")
+  fi
+  command -v curl >/dev/null 2>&1 || missing+=(curl)
+  local IFS=', '
+  printf '%s' "${missing[*]}"
+}
 
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Engine and Docker Compose v2 are required." >&2
-  exit 1
+run_as_root() {
+  if ((EUID == 0)); then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "自动安装依赖需要 root 权限或 sudo。" >&2
+    return 1
+  fi
+}
+
+install_runtime_dependencies() {
+  echo "正在安装 Docker Engine、Docker Compose v2 和 curl..."
+  if command -v apt-get >/dev/null 2>&1; then
+    run_as_root apt-get update
+    run_as_root apt-get install -y curl docker.io docker-compose-v2 \
+      || run_as_root apt-get install -y curl docker.io docker-compose-plugin
+  elif command -v dnf >/dev/null 2>&1; then
+    run_as_root dnf install -y curl docker docker-compose-plugin
+  elif command -v yum >/dev/null 2>&1; then
+    run_as_root yum install -y curl docker docker-compose-plugin
+  elif command -v apk >/dev/null 2>&1; then
+    run_as_root apk add --no-cache curl docker docker-cli-compose
+  elif command -v zypper >/dev/null 2>&1; then
+    run_as_root zypper --non-interactive install curl docker docker-compose
+  elif command -v pacman >/dev/null 2>&1; then
+    run_as_root pacman -Sy --noconfirm curl docker docker-compose
+  else
+    echo "未找到受支持的包管理器，请手动安装 Docker Engine、Docker Compose v2 和 curl。" >&2
+    return 1
+  fi
+}
+
+missing_dependencies="$(missing_runtime_dependencies)"
+if [[ -n "${missing_dependencies}" ]]; then
+  if [[ "${network_mode}" != public ]]; then
+    echo "缺少运行依赖：${missing_dependencies}。${network_mode} 模式禁止联网安装软件包，请预先安装后重试。" >&2
+    exit 1
+  fi
+  if [[ "${no_install_dependencies}" == true ]]; then
+    echo "缺少运行依赖：${missing_dependencies}。已通过 --no-install-dependencies 禁用自动安装。" >&2
+    exit 1
+  fi
+  install_runtime_dependencies
+  hash -r
+  missing_dependencies="$(missing_runtime_dependencies)"
+  if [[ -n "${missing_dependencies}" ]]; then
+    echo "依赖安装完成后仍缺少：${missing_dependencies}。请检查安装结果后重试。" >&2
+    exit 1
+  fi
 fi
-
-cd "${project_root}"
 
 generate_password() {
   if command -v openssl >/dev/null 2>&1; then
@@ -110,11 +273,6 @@ generate_device_id() {
     raw="$(generate_password)"
     printf '%s-%s-4%s-8%s-%s\n' "${raw:0:8}" "${raw:8:4}" "${raw:13:3}" "${raw:17:3}" "${raw:20:12}"
   fi
-}
-
-read_env_value() {
-  local key="$1"
-  awk -v key="${key}" 'index($0, key "=") == 1 {print substr($0, length(key) + 2); exit}' .env 2>/dev/null || true
 }
 
 write_env_value() {
@@ -151,16 +309,33 @@ ensure_controller_agent_env() {
 }
 
 write_bootstrap_env() {
-  local password
+  local password temporary
   password="$(generate_password)"
+  temporary="$(mktemp .env.controller-bootstrap.XXXXXX)"
   umask 077
   printf '%s\n' \
     '# Generated by the controller installer. Keep this file private.' \
     'SPRING_PROFILES_ACTIVE=bootstrap' \
     'POSTGRES_DB=xingchen_monitor' \
     'POSTGRES_USER=xingchen' \
-    "POSTGRES_PASSWORD=${password}" > .env
-  chmod 600 .env
+    "POSTGRES_PASSWORD=${password}" > "${temporary}"
+  chmod 600 "${temporary}"
+  mv "${temporary}" .env
+}
+
+ensure_postgres_password() {
+  local count
+  if [[ ! -f .env ]]; then
+    write_bootstrap_env
+    return
+  fi
+  count="$(grep -c '^POSTGRES_PASSWORD=' .env || true)"
+  if [[ "${count}" -eq 0 ]]; then
+    write_env_value POSTGRES_PASSWORD "$(generate_password)"
+  elif [[ "${count}" -ne 1 ]] || ! grep -Eq "^POSTGRES_PASSWORD=(\"[^\"]+\"|'[^']+'|[^[:space:]\"']+)$" .env; then
+    echo "现有 .env 中的 POSTGRES_PASSWORD 非法或重复，请修正后重试；安装器未修改该文件。" >&2
+    exit 1
+  fi
 }
 
 ensure_compose_project_name() {
@@ -177,13 +352,7 @@ ensure_compose_project_name() {
   fi
 }
 
-if [[ ! -f .env ]]; then
-  write_bootstrap_env
-elif ! grep -Eq '^POSTGRES_PASSWORD=("[^"]+"|[^[:space:]]+)$' .env; then
-  # A missing PostgreSQL password means this is not a usable bootstrap file.
-  # Recreate it so stale settings can never be reused by the new stack.
-  write_bootstrap_env
-fi
+ensure_postgres_password
 ensure_compose_project_name
 
 persist_installer_settings() {

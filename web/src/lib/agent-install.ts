@@ -11,64 +11,72 @@ export interface AgentInstallCommandOptions {
   processCollectionLimit: number
 }
 
-const controllerInstallerPath = '/api/setup/agent-installer'
+const controllerBootstrapPath = '/api/setup/agent-bootstrap'
+const deviceIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const diskValuePattern = /^[A-Za-z0-9_ ./\\:()+,@-]+$/
+const collectionIntervals = new Set([1, 3, 10, 30, 60])
 
 function shellQuote(value: string): string {
   return `'${value.split("'").join("'\"'\"'")}'`
 }
 
 function powerShellQuote(value: string): string {
-  return value.split("'").join("''")
+  return `'${value.split("'").join("''")}'`
 }
 
-function installerUrl(options: AgentInstallCommandOptions, checksum = false): string {
-  return `${options.serverUrl}${controllerInstallerPath}?platform=${options.platform}${checksum ? '&format=sha256' : ''}`
+function validatedOrigin(value: string): URL {
+  const parsed = new URL(value)
+  if (!['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    throw new Error('Controller 地址必须是 HTTP 或 HTTPS origin')
+  }
+  return parsed
 }
 
-function linuxCommand(options: AgentInstallCommandOptions): string {
-  const diskArgs = options.diskMountpoints.map((value) => ` --disk ${shellQuote(value)}`).join('')
-  const lightArgs = options.lightweight ? ' --skip-processes --skip-connections' : ''
-  const processArgs = !options.lightweight && options.collectAllProcesses
-    ? ` --all-processes --process-limit ${options.processCollectionLimit}`
-    : ''
-  const installArgs = `--interval ${options.collectionSeconds}s${diskArgs}${lightArgs}${processArgs}`
-  const protocol = options.serverUrl.startsWith('https://') ? '=https' : '=http'
-  const verifiedInstall = [
-    'trap \'rm -f "$installer"\' EXIT',
-    `curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto ${shellQuote(protocol)} --proto-redir ${shellQuote(protocol)} ${shellQuote(installerUrl(options))} -o "$installer"`,
-    `expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto ${shellQuote(protocol)} --proto-redir ${shellQuote(protocol)} ${shellQuote(installerUrl(options, true))})`,
-    `actual_sha=$(sha256sum "$installer" | awk '{print $1}')`,
-    'test "$actual_sha" = "$expected_sha"',
-    'chmod 700 "$installer"',
-    `env XINGCHEN_SERVER=${shellQuote(options.serverUrl)} XINGCHEN_DEVICE_ID=${shellQuote(options.deviceId)} "$installer" ${installArgs}`,
-  ].join(' && ')
-  return `installer=$(mktemp "\${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && (${verifiedInstall})`
+function validDiskMountpoint(platform: AgentInstallPlatform, value: string): boolean {
+  if (!value || value.length > 256 || value.trim() !== value || !diskValuePattern.test(value)) return false
+  if (platform === 'linux') {
+    return value.startsWith('/') && !value.includes('\\') && !value.split('/').some((part) => part === '.' || part === '..')
+  }
+  const absoluteDrivePath = /^[A-Za-z]:\\/.test(value)
+  const uncPath = /^\\\\[^\\]+\\[^\\]+/.test(value)
+  return (absoluteDrivePath || uncPath) && !value.split('\\').some((part) => part === '..')
 }
 
-function windowsCommand(options: AgentInstallCommandOptions): string {
-  const diskArgs = options.diskMountpoints.map((value) => ` -DiskMountpoint '${powerShellQuote(value)}'`).join('')
-  const lightArgs = options.lightweight ? ' -SkipProcesses -SkipConnections' : ''
-  const processArgs = !options.lightweight && options.collectAllProcesses
-    ? ` -CollectAllProcesses -ProcessCollectionLimit ${options.processCollectionLimit}`
-    : ''
-  const installArgs = `-ServerUrl '${powerShellQuote(options.serverUrl)}' -DeviceId '${powerShellQuote(options.deviceId)}' -Interval '${options.collectionSeconds}s'${diskArgs}${lightArgs}${processArgs}`
+function validateOptions(options: AgentInstallCommandOptions): void {
+  if (!deviceIdPattern.test(options.deviceId)) throw new Error('Agent 设备 ID 格式无效')
+  if (!collectionIntervals.has(options.collectionSeconds)) throw new Error('Agent 采集周期无效')
+  if (options.diskMountpoints.length > 16 || options.diskMountpoints.some((value) => !validDiskMountpoint(options.platform, value))) {
+    throw new Error('Agent 磁盘白名单格式无效')
+  }
+  if (options.lightweight && options.collectAllProcesses) throw new Error('轻量采集不能同时启用完整进程采集')
+  if (options.collectAllProcesses
+    && (!Number.isInteger(options.processCollectionLimit) || options.processCollectionLimit < 1 || options.processCollectionLimit > 256)) {
+    throw new Error('Agent 进程上限必须是 1 到 256 的整数')
+  }
+}
 
-  return [
-    "$installer = Join-Path $env:TEMP ('xingchen-agent-' + [Guid]::NewGuid().ToString('N') + '.ps1')",
-    `Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -MaximumRedirection 0 '${powerShellQuote(installerUrl(options))}' -OutFile $installer`,
-    'try {',
-    `  $expectedHash = [string](Invoke-RestMethod -TimeoutSec 60 -MaximumRedirection 0 '${powerShellQuote(installerUrl(options, true))}')`,
-    '  $expectedHash = $expectedHash.Trim().ToLowerInvariant()',
-    '  $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()',
-    "  if ($expectedHash -notmatch '^[a-f0-9]{64}$' -or $actualHash -ne $expectedHash) { throw 'Agent 安装器 SHA256 校验失败' }",
-    `  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer ${installArgs}`,
-    "  if ($LASTEXITCODE -ne 0) { throw 'Agent 安装器执行失败' }",
-    '} finally {',
-    '  Remove-Item $installer -Force -ErrorAction SilentlyContinue',
-    '}',
-  ].join('\n')
+function bootstrapUrl(options: AgentInstallCommandOptions): URL {
+  const origin = validatedOrigin(options.serverUrl)
+  validateOptions(options)
+  const result = new URL(controllerBootstrapPath, origin)
+  result.searchParams.set('platform', options.platform)
+  result.searchParams.set('deviceId', options.deviceId)
+  result.searchParams.set('interval', `${options.collectionSeconds}s`)
+  for (const mountpoint of options.diskMountpoints) result.searchParams.append('disk', mountpoint)
+  if (options.lightweight) result.searchParams.set('lightweight', 'true')
+  if (options.collectAllProcesses) {
+    result.searchParams.set('collectAllProcesses', 'true')
+    result.searchParams.set('processLimit', String(options.processCollectionLimit))
+  }
+  return result
 }
 
 export function buildAgentInstallCommand(options: AgentInstallCommandOptions): string {
-  return options.platform === 'linux' ? linuxCommand(options) : windowsCommand(options)
+  const url = bootstrapUrl(options)
+  if (options.platform === 'linux') {
+    const protocol = url.protocol === 'https:' ? '=https' : '=http'
+    return `curl -fsSL --max-redirs 0 --proto ${shellQuote(protocol)} --proto-redir ${shellQuote(protocol)} ${shellQuote(url.toString())} | bash`
+  }
+  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -TimeoutSec 60 -MaximumRedirection 0 -Uri ${powerShellQuote(url.toString())} | Invoke-Expression"`
 }

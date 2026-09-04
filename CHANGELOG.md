@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.20.16
+
+- Linux Controller 安装器在 `public` 模式可自动补齐 `curl`、Docker Engine 与 Compose v2，并提供 `--no-install-dependencies` 供预置环境禁用；`internal/offline` 不访问公网软件包源，缺失依赖时直接失败。
+- Controller 保留一键安装与 Compose 运维入口，但拒绝 `raw main`、可变 `latest` 和校验缺失后的 fail-open；普通 `--apply` 在切换服务前强制创建 PostgreSQL 备份，备份失败不切换。
+- Agent 接入采用控制台生成的 Controller 同域短命令；bootstrap 下载完整安装器及独立 SHA256，匹配后才执行，安装器在制品准备完成后隐藏读取一次性接入令牌。手工高级参数、内部源与完全离线入口继续保留。
+
 ## v1.20.15
 
 - Controller 与 Agent 安装/更新新增 `public`、`internal`、`offline` 网络策略；`internal` 拒绝 GitHub/GHCR/Docker Hub 并要求显式开启 Gitee，`offline` 禁止远程 URL、镜像拉取和源码回退。

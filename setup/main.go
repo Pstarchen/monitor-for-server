@@ -34,6 +34,8 @@ var controllerUpdateStatePath = "/workspace/.controller-update-state.json"
 var packagedInstallerDir = "/usr/local/share/xingchen/installers"
 
 var usernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
+var agentDeviceIDPattern = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[1-5][0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$`)
+var agentDiskValuePattern = regexp.MustCompile(`^[A-Za-z0-9_ ./\\:()+,@-]+$`)
 
 type setupService struct {
 	mu       sync.Mutex
@@ -57,6 +59,16 @@ type setupRequest struct {
 	AdminUsername        string `json:"adminUsername"`
 	AdminPassword        string `json:"adminPassword"`
 	AdminPasswordConfirm string `json:"adminPasswordConfirm"`
+}
+
+type agentBootstrapOptions struct {
+	Platform            string
+	DeviceID            string
+	Interval            string
+	DiskMountpoints     []string
+	Lightweight         bool
+	CollectAllProcesses bool
+	ProcessLimit        int
 }
 
 func main() {
@@ -88,6 +100,7 @@ func main() {
 	mux.HandleFunc("/api/setup/status", service.status)
 	mux.HandleFunc("/api/setup/complete", service.complete)
 	mux.HandleFunc("/api/setup/agent-installer", service.agentInstaller)
+	mux.HandleFunc("/api/setup/agent-bootstrap", service.agentBootstrap)
 	agentReleases.register(mux)
 	updater.register(mux)
 	backup.register(mux)
@@ -153,6 +166,267 @@ func (s *setupService) agentInstaller(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
+}
+
+func (s *setupService) agentBootstrap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	options, err := parseAgentBootstrapOptions(r.URL.RawQuery)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	baseURL, err := trustedAgentBaseURL()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "无法确定受信的 Controller 地址")
+		return
+	}
+
+	var content string
+	if options.Platform == "linux" {
+		content = linuxAgentBootstrap(baseURL, options)
+	} else {
+		content = windowsAgentBootstrap(baseURL, options)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, content)
+}
+
+func parseAgentBootstrapOptions(rawQuery string) (agentBootstrapOptions, error) {
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return agentBootstrapOptions{}, errors.New("Agent bootstrap 参数格式无效")
+	}
+	allowed := map[string]bool{
+		"platform": true, "deviceId": true, "interval": true, "disk": true,
+		"lightweight": true, "collectAllProcesses": true, "processLimit": true,
+	}
+	for name, entries := range values {
+		if !allowed[name] {
+			return agentBootstrapOptions{}, fmt.Errorf("不支持的 Agent bootstrap 参数: %s", name)
+		}
+		if name != "disk" && len(entries) != 1 {
+			return agentBootstrapOptions{}, fmt.Errorf("Agent bootstrap 参数 %s 只能提供一次", name)
+		}
+	}
+	required := func(name string) (string, error) {
+		entries := values[name]
+		if len(entries) != 1 || entries[0] == "" {
+			return "", fmt.Errorf("Agent bootstrap 缺少参数 %s", name)
+		}
+		return entries[0], nil
+	}
+	platform, err := required("platform")
+	if err != nil {
+		return agentBootstrapOptions{}, err
+	}
+	if platform != "linux" && platform != "windows" {
+		return agentBootstrapOptions{}, errors.New("Agent bootstrap 平台必须是 linux 或 windows")
+	}
+	deviceID, err := required("deviceId")
+	if err != nil {
+		return agentBootstrapOptions{}, err
+	}
+	if !agentDeviceIDPattern.MatchString(deviceID) {
+		return agentBootstrapOptions{}, errors.New("Agent 设备 ID 格式无效")
+	}
+	interval, err := required("interval")
+	if err != nil {
+		return agentBootstrapOptions{}, err
+	}
+	if !map[string]bool{"1s": true, "3s": true, "10s": true, "30s": true, "60s": true}[interval] {
+		return agentBootstrapOptions{}, errors.New("Agent 采集周期无效")
+	}
+	lightweight, err := strictOptionalBool(values, "lightweight")
+	if err != nil {
+		return agentBootstrapOptions{}, err
+	}
+	collectAllProcesses, err := strictOptionalBool(values, "collectAllProcesses")
+	if err != nil {
+		return agentBootstrapOptions{}, err
+	}
+	if lightweight && collectAllProcesses {
+		return agentBootstrapOptions{}, errors.New("轻量采集不能同时启用完整进程采集")
+	}
+
+	processLimit := 256
+	if entries := values["processLimit"]; len(entries) == 1 {
+		if !collectAllProcesses {
+			return agentBootstrapOptions{}, errors.New("仅完整进程采集可设置进程上限")
+		}
+		processLimit, err = strconv.Atoi(entries[0])
+		if err != nil || processLimit < 1 || processLimit > 256 {
+			return agentBootstrapOptions{}, errors.New("Agent 进程上限必须是 1 到 256 的整数")
+		}
+	}
+	disks := values["disk"]
+	if len(disks) > 16 {
+		return agentBootstrapOptions{}, errors.New("Agent 磁盘白名单最多包含 16 项")
+	}
+	for _, disk := range disks {
+		if !validAgentDisk(platform, disk) {
+			return agentBootstrapOptions{}, errors.New("Agent 磁盘白名单格式无效")
+		}
+	}
+	return agentBootstrapOptions{
+		Platform: platform, DeviceID: deviceID, Interval: interval, DiskMountpoints: disks,
+		Lightweight: lightweight, CollectAllProcesses: collectAllProcesses, ProcessLimit: processLimit,
+	}, nil
+}
+
+func strictOptionalBool(values url.Values, name string) (bool, error) {
+	entries := values[name]
+	if len(entries) == 0 {
+		return false, nil
+	}
+	if len(entries) != 1 || (entries[0] != "true" && entries[0] != "false") {
+		return false, fmt.Errorf("Agent bootstrap 参数 %s 必须是 true 或 false", name)
+	}
+	return entries[0] == "true", nil
+}
+
+func validAgentDisk(platform, value string) bool {
+	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value || !agentDiskValuePattern.MatchString(value) {
+		return false
+	}
+	if platform == "linux" {
+		if !strings.HasPrefix(value, "/") || strings.Contains(value, `\`) {
+			return false
+		}
+		for _, part := range strings.Split(value, "/") {
+			if part == "." || part == ".." {
+				return false
+			}
+		}
+		return true
+	}
+	for _, part := range strings.Split(value, `\`) {
+		if part == "." || part == ".." {
+			return false
+		}
+	}
+	if len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == ':' && value[2] == '\\' {
+		return true
+	}
+	if !strings.HasPrefix(value, `\\`) {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(value, `\\`), `\`)
+	return len(parts) >= 2 && parts[0] != "" && parts[1] != ""
+}
+
+func trustedAgentBaseURL() (string, error) {
+	configured := configuredEnvironmentValue("PUBLIC_BASE_URL")
+	if configured == "" {
+		return "", errors.New("PUBLIC_BASE_URL is not configured")
+	}
+	return normalizeAgentBaseURL(configured)
+}
+
+func normalizeAgentBaseURL(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User != nil || parsed.Host == "" || parsed.Opaque != "" || parsed.ForceQuery || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", errors.New("Controller 地址必须是 HTTP 或 HTTPS origin")
+	}
+	return normalizedOrigin(parsed), nil
+}
+
+func linuxAgentBootstrap(baseURL string, options agentBootstrapOptions) string {
+	installerURL := baseURL + "/api/setup/agent-installer?platform=linux"
+	checksumURL := installerURL + "&format=sha256"
+	protocol := "=" + strings.TrimSuffix(strings.SplitN(baseURL, ":", 2)[0], ":")
+	tlsOption := ""
+	if protocol == "=https" {
+		tlsOption = " --tlsv1.2"
+	}
+	arguments := []string{"--server-url", baseURL, "--device-id", options.DeviceID, "--interval", options.Interval}
+	if strings.HasPrefix(baseURL, "http://") {
+		arguments = append(arguments, "--allow-insecure-http")
+	}
+	for _, disk := range options.DiskMountpoints {
+		arguments = append(arguments, "--disk", disk)
+	}
+	if options.Lightweight {
+		arguments = append(arguments, "--skip-processes", "--skip-connections")
+	} else if options.CollectAllProcesses {
+		arguments = append(arguments, "--all-processes", "--process-limit", strconv.Itoa(options.ProcessLimit))
+	}
+	quotedArguments := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		quotedArguments = append(quotedArguments, shellSingleQuote(argument))
+	}
+	return strings.Join([]string{
+		"#!/usr/bin/env bash",
+		"set -euo pipefail",
+		"command -v curl >/dev/null 2>&1 || { echo 'Agent bootstrap 需要 curl。' >&2; exit 1; }",
+		"command -v sha256sum >/dev/null 2>&1 || { echo 'Agent bootstrap 需要 sha256sum。' >&2; exit 1; }",
+		`installer="$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh")"`,
+		`trap 'rm -f -- "${installer}"' EXIT`,
+		fmt.Sprintf("curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --max-filesize 4194304 --proto %s --proto-redir %s%s %s -o \"${installer}\"", shellSingleQuote(protocol), shellSingleQuote(protocol), tlsOption, shellSingleQuote(installerURL)),
+		fmt.Sprintf("expected_sha=\"$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --max-filesize 256 --proto %s --proto-redir %s%s %s | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')\"", shellSingleQuote(protocol), shellSingleQuote(protocol), tlsOption, shellSingleQuote(checksumURL)),
+		`[[ "${expected_sha}" =~ ^[a-f0-9]{64}$ ]] || { echo 'Agent 安装器摘要格式无效。' >&2; exit 1; }`,
+		`actual_sha="$(sha256sum -- "${installer}" | awk '{print $1}')"`,
+		`[[ "${actual_sha}" == "${expected_sha}" ]] || { echo 'Agent 安装器 SHA256 校验失败。' >&2; exit 1; }`,
+		`chmod 0700 "${installer}"`,
+		`bash "${installer}" ` + strings.Join(quotedArguments, " "),
+	}, "\n") + "\n"
+}
+
+func windowsAgentBootstrap(baseURL string, options agentBootstrapOptions) string {
+	installerURL := baseURL + "/api/setup/agent-installer?platform=windows"
+	checksumURL := installerURL + "&format=sha256"
+	lines := []string{
+		"$ErrorActionPreference = 'Stop'",
+		"$installer = Join-Path ([IO.Path]::GetTempPath()) ('xingchen-agent-' + [Guid]::NewGuid().ToString('N') + '.ps1')",
+		"$installOptions = @{",
+		"  ServerUrl = " + powerShellSingleQuote(baseURL),
+		"  DeviceId = " + powerShellSingleQuote(options.DeviceID),
+		"  Interval = " + powerShellSingleQuote(options.Interval),
+	}
+	if strings.HasPrefix(baseURL, "http://") {
+		lines = append(lines, "  AllowInsecureHttp = $true")
+	}
+	if len(options.DiskMountpoints) > 0 {
+		quoted := make([]string, 0, len(options.DiskMountpoints))
+		for _, disk := range options.DiskMountpoints {
+			quoted = append(quoted, powerShellSingleQuote(disk))
+		}
+		lines = append(lines, "  DiskMountpoint = @("+strings.Join(quoted, ", ")+")")
+	}
+	if options.Lightweight {
+		lines = append(lines, "  SkipProcesses = $true", "  SkipConnections = $true")
+	} else if options.CollectAllProcesses {
+		lines = append(lines, "  CollectAllProcesses = $true", fmt.Sprintf("  ProcessCollectionLimit = %d", options.ProcessLimit))
+	}
+	lines = append(lines,
+		"}",
+		"try {",
+		"  Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -MaximumRedirection 0 -Uri "+powerShellSingleQuote(installerURL)+" -OutFile $installer",
+		"  $expectedHash = [string](Invoke-RestMethod -TimeoutSec 60 -MaximumRedirection 0 -Uri "+powerShellSingleQuote(checksumURL)+")",
+		"  $expectedHash = $expectedHash.Trim().ToLowerInvariant()",
+		"  $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()",
+		"  if ($expectedHash -notmatch '^[a-f0-9]{64}$' -or $actualHash -ne $expectedHash) { throw 'Agent 安装器 SHA256 校验失败。' }",
+		"  Unblock-File -LiteralPath $installer -ErrorAction SilentlyContinue",
+		"  & $installer @installOptions",
+		"  if (-not $?) { throw 'Agent 安装器执行失败。' }",
+		"} finally {",
+		"  Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue",
+		"}",
+	)
+	return strings.Join(lines, "\r\n") + "\r\n"
+}
+
+func shellSingleQuote(value string) string {
+	return `'` + strings.ReplaceAll(value, `'`, `'"'"'`) + `'`
+}
+
+func powerShellSingleQuote(value string) string {
+	return `'` + strings.ReplaceAll(value, `'`, `''`) + `'`
 }
 
 func readAgentInstaller(filename string) ([]byte, error) {

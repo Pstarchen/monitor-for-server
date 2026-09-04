@@ -32,7 +32,7 @@ bash ./deploy/install-controller.sh --network-mode internal --no-source-fallback
 XINGCHEN_NETWORK_MODE=internal
 XINGCHEN_ALLOW_GITEE=false
 XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.15/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.16/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<受信 manifest 摘要>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 ```
@@ -42,9 +42,7 @@ XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 只有目标服务器明确允许 Gitee 时，才可在 `public` 模式从 Gitee 获取仓库：
 
 ```bash
-git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-bash ./deploy/install-controller.sh
+git clone --depth 1 --branch v1.20.16 https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh --build
 ```
 
 打开 `http://<服务器IP>:18080/setup`，按页面顺序完成：
@@ -99,12 +97,12 @@ TLS 在 Caddy、Nginx、Traefik、宝塔或云负载均衡器终止，并转发�
 
 更新失败不会删除数据卷。健康检查失败时更新器会尝试恢复旧应用镜像并再次检查，但不会自动回滚 PostgreSQL；新版本 `server` 可能已经执行前向 Flyway 迁移，因此镜像恢复后仍必须确认数据库兼容性。需要完整降级时，应使用升级前备份恢复 PostgreSQL。
 
-完全断网的已有部署必须使用离线包内的 `upgrade-offline.sh/.ps1`，不能再次运行新装入口。例如从 `v1.20.14` 升级到 `v1.20.15`：
+完全断网的已有部署必须使用离线包内的 `upgrade-offline.sh/.ps1`，不能再次运行新装入口。例如从 `v1.20.15` 升级到 `v1.20.16`：
 
 ```bash
-sha256sum -c xingchen-monitor-offline-v1.20.15-amd64.tar.gz.sha256
-tar -xzf xingchen-monitor-offline-v1.20.15-amd64.tar.gz
-cd xingchen-monitor-offline-v1.20.15-amd64
+sha256sum -c xingchen-monitor-offline-v1.20.16-amd64.tar.gz.sha256
+tar -xzf xingchen-monitor-offline-v1.20.16-amd64.tar.gz
+cd xingchen-monitor-offline-v1.20.16-amd64
 sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --check
 sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --apply
 ```

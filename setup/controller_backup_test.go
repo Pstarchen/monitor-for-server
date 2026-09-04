@@ -79,7 +79,7 @@ func TestControllerBackupListsOnlyValidatedSqlFiles(t *testing.T) {
 	if err := os.MkdirAll(controllerBackupDir(), 0700); err != nil {
 		t.Fatal(err)
 	}
-	valid := filepath.Join(controllerBackupDir(), "guanlan-monitor-20260831T120000Z.sql")
+	valid := filepath.Join(controllerBackupDir(), "xingchen-monitor-20260831T120000Z-4242.sql")
 	if err := os.WriteFile(valid, []byte("-- backup\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

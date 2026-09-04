@@ -13,10 +13,10 @@ does not accept credentials and never invokes docker login. Check and DryRun do 
 or write OutputDir.
 
 .EXAMPLE
-./deploy/promote-internal-release.ps1 -Version v1.20.15 `
+./deploy/promote-internal-release.ps1 -Version v1.20.16 `
   -TargetRegistry registry.internal.example/xingchen `
   -ArtifactDir ./dist/agent -ArtifactBaseUrl https://releases.internal.example/xingchen `
-  -ImageLockFile ./dist/source-images.lock.json -OutputDir ./dist/internal/v1.20.15 -Check
+  -ImageLockFile ./dist/source-images.lock.json -OutputDir ./dist/internal/v1.20.16 -Check
 #>
 #Requires -Version 5.1
 [CmdletBinding()]

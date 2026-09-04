@@ -184,6 +184,22 @@ create_upgrade_project() {
   printf '%s\n' 'name: old-controller' 'services: {}' > "${root}/docker-compose.yml"
 }
 
+assert_update_policy_rejected() {
+  local root="$1" expected_error="$2"
+  cp "${root}/.env" "${root}/env.before"
+  : > "${log_file}"
+  if run_update --project-root "${root}" --check >"${root}/stdout.log" 2>"${root}/stderr.log"; then
+    echo "Updater accepted unsafe network policy fixture: ${root}." >&2
+    exit 1
+  fi
+  cmp -s "${root}/env.before" "${root}/.env"
+  if grep -Eq '^docker (pull|build)|^docker compose' "${log_file}"; then
+    echo "Updater reached Docker before rejecting ${root}." >&2
+    exit 1
+  fi
+  grep -F -- "${expected_error}" "${root}/stderr.log" >/dev/null
+}
+
 create_agent_release() {
   local root="$1" version="$2" version_number="${2#v}" index separator="" asset hash size os_name arch
   local platforms=(linux:amd64 linux:arm64 windows:amd64 windows:arm64)
@@ -283,6 +299,70 @@ create_offline_bundle() {
   refresh_offline_bundle_checksums "${root}"
 }
 
+duplicate_policy_root="${temp_dir}/duplicate-network-mode"
+create_upgrade_project "${duplicate_policy_root}"
+cat >> "${duplicate_policy_root}/.env" <<'ENV'
+XINGCHEN_NETWORK_MODE="internal"
+XINGCHEN_NETWORK_MODE="public"
+ENV
+assert_update_policy_rejected "${duplicate_policy_root}" 'XINGCHEN_NETWORK_MODE 重复'
+
+invalid_policy_root="${temp_dir}/invalid-network-mode"
+create_upgrade_project "${invalid_policy_root}"
+printf '%s\n' 'XINGCHEN_NETWORK_MODE="restricted"' >> "${invalid_policy_root}/.env"
+assert_update_policy_rejected "${invalid_policy_root}" 'XINGCHEN_NETWORK_MODE 必须是'
+
+malformed_policy_root="${temp_dir}/malformed-network-mode"
+create_upgrade_project "${malformed_policy_root}"
+printf '%s\n' 'XINGCHEN_NETWORK_MODE internal' >> "${malformed_policy_root}/.env"
+cat > "${fake_bin}/awk" <<'SCRIPT'
+#!/bin/sh
+printf 'awk must not parse network policy\n' >> "${TEST_LOG}"
+exit 91
+SCRIPT
+chmod +x "${fake_bin}/awk"
+assert_update_policy_rejected "${malformed_policy_root}" 'XINGCHEN_NETWORK_MODE 无法解析'
+if grep -F 'awk must not parse network policy' "${log_file}" >/dev/null; then
+  echo 'Updater still invoked awk while parsing the network policy.' >&2
+  exit 1
+fi
+rm -f "${fake_bin}/awk"
+
+nonregular_policy_root="${temp_dir}/nonregular-network-policy"
+mkdir -p "${nonregular_policy_root}/deploy" "${nonregular_policy_root}/.env"
+cp "${source_updater}" "${nonregular_policy_root}/deploy/update-controller.sh"
+printf '%s\n' 'services: {}' > "${nonregular_policy_root}/docker-compose.yml"
+: > "${log_file}"
+if TEST_UPDATER="${nonregular_policy_root}/deploy/update-controller.sh" run_update --check \
+  >"${nonregular_policy_root}/stdout.log" 2>"${nonregular_policy_root}/stderr.log"; then
+  echo 'Updater accepted a non-regular .env file.' >&2
+  exit 1
+fi
+if grep -Eq '^docker (pull|build)|^docker compose' "${log_file}"; then
+  echo 'Updater reached Docker with a non-regular .env file.' >&2
+  exit 1
+fi
+grep -F '.env 不可读或不是普通文件' "${nonregular_policy_root}/stderr.log" >/dev/null
+
+unreadable_policy_root="${temp_dir}/unreadable-network-policy"
+create_upgrade_project "${unreadable_policy_root}"
+printf '%s\n' 'XINGCHEN_NETWORK_MODE="internal"' >> "${unreadable_policy_root}/.env"
+chmod 000 "${unreadable_policy_root}/.env"
+if [[ ! -r "${unreadable_policy_root}/.env" ]]; then
+  : > "${log_file}"
+  set +e
+  run_update --project-root "${unreadable_policy_root}" --check \
+    >"${unreadable_policy_root}/stdout.log" 2>"${unreadable_policy_root}/stderr.log"
+  unreadable_status=$?
+  set -e
+  chmod 600 "${unreadable_policy_root}/.env"
+  [[ "${unreadable_status}" -ne 0 ]]
+  ! grep -Eq '^docker (pull|build)|^docker compose' "${log_file}"
+  grep -F '.env 不可读或不是普通文件' "${unreadable_policy_root}/stderr.log" >/dev/null
+else
+  chmod 600 "${unreadable_policy_root}/.env"
+fi
+
 packaged_root="${temp_dir}/image/usr/local/share/xingchen"
 packaged_updater="${packaged_root}/updaters/update-controller.sh"
 runner_root="${temp_dir}/runner-project"
@@ -312,8 +392,8 @@ fi
 
 : > "${log_file}"
 run_update --check
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
-grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
 if grep -Eq 'ghcr\.(m\.daocloud\.io|1ms\.run|nju\.edu\.cn)' "${log_file}"; then
   echo 'Default update path still uses an unconfigured public mirror.' >&2
   exit 1
@@ -357,15 +437,15 @@ printf '%s\n' \
   'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS="11"' > "${timeout_root}/.env"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" bash "${timeout_root}/deploy/update-controller.sh" --check
-grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
-grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
+grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
+grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
 
 : > "${log_file}"
 TEST_SOURCE_REPOSITORIES='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git' \
   TEST_ALLOW_GITEE=true TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
 grep -E 'docker build --pull --file setup/Dockerfile --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://gitee.com/starchen520/monitor-for-server.git#main$' "${log_file}" >/dev/null
 grep -E 'docker build --pull --file setup/Dockerfile --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://github.com/Pstarchen/monitor-for-server.git#main$' "${log_file}" >/dev/null
-grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
+grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
 
 : > "${log_file}"
 if TEST_FAIL_ALL_PULLS=true run_update --check --no-mirror; then
@@ -487,10 +567,26 @@ fi
 
 : > "${log_file}"
 run_update --apply --no-mirror
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.15' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.16' "${log_file}" >/dev/null
 grep -q 'docker compose .* up -d --force-recreate --wait --wait-timeout 300 --remove-orphans' "${log_file}"
+backup_line="$(grep -n 'pg_dump' "${log_file}" | head -n 1 | cut -d: -f1)"
+pull_line="$(grep -n '^docker pull ' "${log_file}" | head -n 1 | cut -d: -f1)"
+if [[ -z "${backup_line}" || -z "${pull_line}" || "${backup_line}" -ge "${pull_line}" ]]; then
+  echo 'Regular Controller apply did not back up PostgreSQL before pulling images.' >&2
+  exit 1
+fi
 if grep -q 'controller-agent' "${log_file}"; then
   echo 'Update unexpectedly enabled controller Agent.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+if TEST_FAIL_BACKUP=true run_update --apply --no-mirror; then
+  echo 'Regular Controller apply continued after a database backup failure.' >&2
+  exit 1
+fi
+if grep -Eq '^docker (pull|build) |^docker compose .* up ' "${log_file}"; then
+  echo 'Regular Controller backup failure reached image preparation or service switching.' >&2
   exit 1
 fi
 
@@ -499,10 +595,33 @@ TEST_CONTROLLER_AGENT_ENABLED=true run_update --apply --no-mirror
 grep -q 'docker compose --profile host-monitoring .* up -d --force-recreate --wait --wait-timeout 300 --remove-orphans setup server web controller-agent' "${log_file}"
 
 : > "${log_file}"
-TEST_CONTROLLER_UPDATE_RUNNER=true TEST_SETUP_WORKSPACE="${base_root}" run_update --apply --no-mirror
+mkdir -p "${base_root}/backups"
+precreated_backup="${base_root}/backups/xingchen-monitor-20260904T010203Z-4242.sql"
+printf '%s\n' '-- pre-created controller backup' > "${precreated_backup}"
+precreated_backup_sha="$(sha256sum "${precreated_backup}")"
+precreated_backup_sha="${precreated_backup_sha%% *}"
+XINGCHEN_PREUPDATE_BACKUP_PATH="${precreated_backup}" XINGCHEN_PREUPDATE_BACKUP_SHA256="${precreated_backup_sha}" \
+  TEST_CONTROLLER_UPDATE_RUNNER=true \
+  TEST_SETUP_WORKSPACE="${base_root}" run_update --apply --no-mirror
 grep -q 'docker compose .* up -d --force-recreate --wait --wait-timeout 300 setup server web' "${log_file}"
+if grep -q 'pg_dump' "${log_file}"; then
+  echo 'Update runner repeated a database backup that Setup already created.' >&2
+  exit 1
+fi
 if grep -q 'remove-orphans' "${log_file}"; then
   echo 'Update runner unexpectedly removed orphan containers.' >&2
+  exit 1
+fi
+
+: > "${log_file}"
+if XINGCHEN_PREUPDATE_BACKUP_PATH="${precreated_backup}" \
+  XINGCHEN_PREUPDATE_BACKUP_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  TEST_CONTROLLER_UPDATE_RUNNER=true TEST_SETUP_WORKSPACE="${base_root}" run_update --apply --no-mirror; then
+  echo 'Update runner accepted a pre-created backup with the wrong digest.' >&2
+  exit 1
+fi
+if grep -Eq '^docker (pull|build)|^docker compose .* up ' "${log_file}"; then
+  echo 'Invalid pre-created backup reached image preparation or service switching.' >&2
   exit 1
 fi
 
@@ -512,7 +631,7 @@ if TEST_FAIL_COMPOSE_MODE=once TEST_COMPOSE_STATE="${temp_dir}/compose-state" ru
   echo 'Update reported success even though the candidate health check failed.' >&2
   exit 1
 fi
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
 if [[ "$(grep -c '^docker compose .* up -d --force-recreate --wait' "${log_file}")" -ne 2 ]]; then
   echo 'Rollback did not perform a second Compose health check.' >&2
   exit 1
@@ -810,7 +929,7 @@ if TEST_RUNNING_VERSION=v1.20.13 TEST_IMAGE_VERSION=v1.20.14 TEST_MISSING_LOCAL_
   exit 1
 fi
 cmp -s "${temp_dir}/missing-image.env.before" "${missing_image_root}/.env"
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
 if grep -q '^docker compose .* up -d ' "${log_file}"; then
   echo 'Missing-image failure attempted to switch services.' >&2
   exit 1
@@ -847,7 +966,7 @@ fi
 cmp -s "${temp_dir}/load-failure.env.before" "${load_failure_root}/.env"
 cmp -s "${temp_dir}/load-failure.compose.before" "${load_failure_root}/docker-compose.yml"
 cmp -s "${temp_dir}/load-failure.updater.before" "${load_failure_root}/deploy/update-controller.sh"
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
 if grep -q '^docker compose .* up -d ' "${log_file}"; then
   echo 'Load failure attempted to switch services.' >&2
   exit 1
@@ -881,7 +1000,7 @@ if [[ "$(grep -c '^docker compose .* up -d --force-recreate --wait' "${log_file}
   echo 'Bundle rollback did not perform a second health check.' >&2
   exit 1
 fi
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.15' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.16' "${log_file}" >/dev/null
 [[ -s "$(find "${bundle_rollback_root}/backups" -maxdepth 1 -type f -name 'xingchen-monitor-*.sql' -print -quit)" ]]
 
 downgrade_root="${temp_dir}/downgrade-project"

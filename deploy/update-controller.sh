@@ -112,12 +112,96 @@ read_env_value() {
   printf '%s' "${value}"
 }
 
-network_mode="${XINGCHEN_NETWORK_MODE:-$(read_env_value XINGCHEN_NETWORK_MODE)}"
+policy_env_value=""
+policy_env_value_set=false
+read_policy_env_value() {
+  local key="$1" line candidate raw first last suffix env_fd match_count=0
+  policy_env_value=""
+  policy_env_value_set=false
+  if [[ ! -e .env && ! -L .env ]]; then
+    return 0
+  fi
+  if [[ ! -f .env || ! -r .env ]]; then
+    echo "现有 .env 不可读或不是普通文件，拒绝推断网络策略。" >&2
+    return 1
+  fi
+  if ! exec {env_fd}< .env; then
+    echo "现有 .env 读取失败，拒绝推断网络策略。" >&2
+    return 1
+  fi
+  while IFS= read -r -u "${env_fd}" line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    candidate="${line}"
+    while [[ "${candidate}" == ' '* || "${candidate}" == $'\t'* ]]; do
+      candidate="${candidate:1}"
+    done
+    [[ -z "${candidate}" || "${candidate}" == \#* ]] && continue
+    if [[ "${candidate}" == "${key}="* ]]; then
+      ((match_count += 1))
+      if ((match_count > 1)); then
+        echo "现有 .env 中的 ${key} 重复，拒绝继续。" >&2
+        exec {env_fd}<&-
+        return 1
+      fi
+      raw="${candidate#"${key}="}"
+      first="${raw:0:1}"
+      last="${raw: -1}"
+      if [[ "${first}" == '"' || "${first}" == "'" || "${last}" == '"' || "${last}" == "'" ]]; then
+        if [[ ${#raw} -lt 2 || "${first}" != "${last}" || ( "${first}" != '"' && "${first}" != "'" ) ]]; then
+          echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+          exec {env_fd}<&-
+          return 1
+        fi
+        raw="${raw:1:${#raw}-2}"
+      fi
+      if [[ "${raw}" == *'"'* || "${raw}" == *"'"* ]]; then
+        echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+        exec {env_fd}<&-
+        return 1
+      fi
+      policy_env_value="${raw}"
+      policy_env_value_set=true
+    elif [[ "${candidate}" == "${key}"* ]]; then
+      suffix="${candidate#"${key}"}"
+      first="${suffix:0:1}"
+      if [[ -z "${suffix}" || ! "${first}" =~ [A-Za-z0-9_] ]]; then
+        echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+        exec {env_fd}<&-
+        return 1
+      fi
+    elif [[ "${candidate}" == export[[:space:]]"${key}"* ]]; then
+      echo "现有 .env 中的 ${key} 无法解析，拒绝继续。" >&2
+      exec {env_fd}<&-
+      return 1
+    fi
+  done
+  exec {env_fd}<&-
+}
+
+network_mode_environment="${XINGCHEN_NETWORK_MODE:-}"
+allow_gitee_environment="${XINGCHEN_ALLOW_GITEE:-}"
+if [[ -n "${network_mode_environment}" ]]; then
+  network_mode="${network_mode_environment}"
+else
+  read_policy_env_value XINGCHEN_NETWORK_MODE || exit 2
+  if [[ "${policy_env_value_set}" == true ]]; then
+    network_mode="${policy_env_value}"
+  else
+    network_mode=public
+  fi
+fi
+if [[ -n "${allow_gitee_environment}" ]]; then
+  allow_gitee="${allow_gitee_environment}"
+else
+  read_policy_env_value XINGCHEN_ALLOW_GITEE || exit 2
+  if [[ "${policy_env_value_set}" == true ]]; then
+    allow_gitee="${policy_env_value}"
+  else
+    allow_gitee=false
+  fi
+fi
 network_mode="${network_mode,,}"
-network_mode="${network_mode:-public}"
-allow_gitee="${XINGCHEN_ALLOW_GITEE:-$(read_env_value XINGCHEN_ALLOW_GITEE)}"
 allow_gitee="${allow_gitee,,}"
-allow_gitee="${allow_gitee:-false}"
 [[ "${network_mode}" == public || "${network_mode}" == internal || "${network_mode}" == offline ]] \
   || { echo "XINGCHEN_NETWORK_MODE 必须是 public、internal 或 offline。" >&2; exit 2; }
 [[ "${allow_gitee}" == true || "${allow_gitee}" == false ]] \
@@ -440,13 +524,13 @@ image_value() {
 
 image_keys=(XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE)
 source_images=(
-  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.15)"
-  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.15)"
-  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.15)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.16)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.16)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.16)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   image_keys+=(XINGCHEN_AGENT_IMAGE)
-  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.15)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.16)")
 fi
 dependency_images=(
   "$(image_value XINGCHEN_POSTGRES_IMAGE postgres:16-alpine)"
@@ -805,7 +889,7 @@ bundle_transaction_active=false
 bundle_transaction_committed=false
 bundle_image_mutation_started=false
 bundle_candidate_attempted=false
-bundle_database_backup=""
+database_backup=""
 bundle_env_mode=""
 bundle_compose_mode=""
 bundle_updater_sh_mode=""
@@ -1030,15 +1114,15 @@ bundle_exit_handler() {
     elif [[ "${rollback_failed}" == true ]]; then
       status=11
     fi
-    if [[ -n "${bundle_database_backup}" ]]; then
-      echo "升级前数据库备份已保留：${bundle_database_backup}；仅在评估迁移兼容性后人工恢复。" >&2
+    if [[ -n "${database_backup}" ]]; then
+      echo "升级前数据库备份已保留：${database_backup}；仅在评估迁移兼容性后人工恢复。" >&2
     fi
   fi
   cleanup_bundle_snapshot
   exit "${status}"
 }
 
-create_bundle_database_backup() {
+create_controller_database_backup() {
   local backup_dir="${project_root}/backups" timestamp backup_path backup_temporary container_id container_temporary
   assert_safe_deployment_path "${backup_dir}" "数据库备份目录" || return 1
   if [[ -e "${backup_dir}" ]]; then
@@ -1049,7 +1133,7 @@ create_bundle_database_backup() {
   fi
   assert_safe_deployment_path "${backup_dir}" "数据库备份目录" || return 1
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  backup_path="${backup_dir}/xingchen-monitor-${timestamp}.sql"
+  backup_path="${backup_dir}/xingchen-monitor-${timestamp}-${$}.sql"
   assert_safe_deployment_path "${backup_path}" "数据库备份文件" || return 1
   [[ ! -e "${backup_path}" ]] || { echo "数据库备份文件已存在，拒绝覆盖：${backup_path}" >&2; return 1; }
   backup_temporary="$(mktemp "${backup_dir}/.controller-update-backup.XXXXXX")" || return 1
@@ -1058,7 +1142,7 @@ create_bundle_database_backup() {
   container_id="$(docker compose "${compose_args[@]}" ps -q postgres 2>/dev/null || true)"
   if [[ -z "${container_id}" ]]; then
     rm -f -- "${backup_temporary}"
-    echo "未找到运行中的 PostgreSQL 容器，离线升级已停止。" >&2
+    echo "未找到运行中的 PostgreSQL 容器，总控更新已停止。" >&2
     return 1
   fi
   container_temporary="/tmp/xingchen-controller-update-${timestamp}-${$}.sql"
@@ -1079,12 +1163,41 @@ create_bundle_database_backup() {
     || echo "警告：无法清理 PostgreSQL 容器内的临时备份 ${container_temporary}。" >&2
   if ! chmod 600 "${backup_temporary}" || [[ ! -s "${backup_temporary}" ]]; then
     rm -f -- "${backup_temporary}"
-    echo "PostgreSQL 升级前备份为空，离线升级已停止。" >&2
+    echo "PostgreSQL 升级前备份为空，总控更新已停止。" >&2
     return 1
   fi
   mv -- "${backup_temporary}" "${backup_path}" || { rm -f -- "${backup_temporary}"; return 1; }
-  bundle_database_backup="${backup_path}"
-  echo "升级前数据库备份已创建：${bundle_database_backup}"
+  database_backup="${backup_path}"
+  echo "升级前数据库备份已创建：${database_backup}"
+}
+
+ensure_controller_database_backup() {
+  local prepared="${XINGCHEN_PREUPDATE_BACKUP_PATH:-}" expected_sha="${XINGCHEN_PREUPDATE_BACKUP_SHA256:-}"
+  local backup_root="${project_root}/backups" backup_name checksum_output actual_sha
+  if [[ -z "${prepared}" ]]; then
+    create_controller_database_backup
+    return
+  fi
+  [[ "${CONTROLLER_UPDATE_RUNNER:-false}" == true ]] \
+    || { echo "只有总控更新 Runner 可以复用预创建数据库备份。" >&2; return 1; }
+  [[ "${prepared}" == /* ]] || { echo "预创建数据库备份路径必须是绝对路径。" >&2; return 1; }
+  assert_safe_deployment_path "${prepared}" "预创建数据库备份" || return 1
+  backup_name="${prepared##*/}"
+  [[ "${prepared}" == "${backup_root}/"* && -f "${prepared}" && ! -L "${prepared}" && -s "${prepared}" && -O "${prepared}" ]] \
+    || { echo "预创建数据库备份必须是 backups 目录内、属于当前用户的非空普通文件。" >&2; return 1; }
+  [[ "${backup_name}" =~ ^xingchen-monitor-[0-9]{8}T[0-9]{6}Z-[0-9]+\.sql$ ]] \
+    || { echo "预创建数据库备份名称无效。" >&2; return 1; }
+  [[ "${expected_sha}" =~ ^[a-f0-9]{64}$ ]] \
+    || { echo "预创建数据库备份摘要无效。" >&2; return 1; }
+  find "${prepared}" -maxdepth 0 -type f -mmin -15 -print -quit | grep -Fx -- "${prepared}" >/dev/null \
+    || { echo "预创建数据库备份已过期，拒绝复用。" >&2; return 1; }
+  checksum_output="$(sha256sum -- "${prepared}")" \
+    || { echo "无法校验预创建数据库备份。" >&2; return 1; }
+  actual_sha="${checksum_output%% *}"
+  [[ "${actual_sha}" == "${expected_sha}" ]] \
+    || { echo "预创建数据库备份 SHA256 不匹配。" >&2; return 1; }
+  database_backup="${prepared}"
+  echo "复用控制台已创建的升级前数据库备份：${database_backup}"
 }
 
 verify_loaded_bundle_images() {
@@ -1334,10 +1447,13 @@ restore_previous_images() {
 
 if [[ "${mode}" == apply ]]; then
   snapshot_previous_images
+  if [[ -z "${offline_bundle}" ]]; then
+    ensure_controller_database_backup
+  fi
 fi
 
 if [[ -n "${offline_bundle}" ]]; then
-  create_bundle_database_backup
+  create_controller_database_backup
   bundle_image_mutation_started=true
   if ! run_with_timeout "${compose_timeout_seconds}" docker load --input "${offline_bundle}/images/controller-images.tar"; then
     echo "离线总控镜像导入失败。" >&2
@@ -1352,7 +1468,7 @@ if [[ -n "${offline_bundle}" ]]; then
     exit 1
   fi
   finish_bundle_transaction
-  echo "总控已从离线 bundle 更新到 ${bundle_version}；数据库备份保留在 ${bundle_database_backup}。"
+  echo "总控已从离线 bundle 更新到 ${bundle_version}；数据库备份保留在 ${database_backup}。"
   exit 0
 fi
 

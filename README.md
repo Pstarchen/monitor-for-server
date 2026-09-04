@@ -43,26 +43,24 @@
 
 ## 快速启动
 
-总终端只需要 Docker Engine 和 Compose v2。安装器提供 `public`、`internal`、`offline` 三种网络模式：`internal` 在代码层拒绝 GitHub、GitHub API、GitHubusercontent、GHCR 和 Docker Hub，Gitee 也必须显式开启；`offline` 只允许已校验 bundle 与本地 Docker image store，不进行远程发现、拉取或源码回退。生产环境如果目标服务器不能访问 GitHub，推荐使用 `internal`，并把 setup、server、web、agent、PostgreSQL、Redis 六个镜像和 Agent 制品提前晋级到内部基础设施。
+Linux 总终端在 `public` 模式会按受支持的发行版包管理器补齐 `curl`、Docker Engine 和 Docker Compose v2；已由运维平台准备依赖时可传 `--no-install-dependencies`，让缺失依赖直接报错。`internal` 与 `offline` 不访问公网软件包源：前者要求预装依赖并使用内部 Registry/制品服务，后者只允许已校验 bundle 与本地 Docker image store。安装器提供 `public`、`internal`、`offline` 三种网络模式；`internal` 在代码层拒绝 GitHub、GitHub API、GitHubusercontent、GHCR 和 Docker Hub，Gitee 也必须显式开启。生产环境如果目标服务器不能访问 GitHub，推荐使用 `internal`，并把 setup、server、web、agent、PostgreSQL、Redis 六个镜像和 Agent 制品提前晋级到内部基础设施。
+
+总控保留一键准备和 Docker Compose 编排体验，但不会从代码托管平台的可变 `main` 分支下载后直接执行，也不会用 `latest` 作为升级依据。版本必须固定为稳定 `vX.Y.Z` 或 OCI digest；manifest、摘要或制品校验缺失、失败时立即停止，不降级为未校验安装。GitHub 与 Gitee 示例都先取得完整仓库，再执行仓库内安装器，便于审计和固定版本。
 
 第一次部署建议先阅读[新手使用指南](docs/user-guide.md)。它从 Docker 准备、首次 `/setup`、Agent 接入一直讲到告警、通知、备份、更新和常见问题排查。
 
-Gitee 安装：
+无法访问 GitHub/GHCR 时从 Gitee 固定版本本地构建：
 ```bash
-git clone https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-bash ./deploy/install-controller.sh
+git clone --depth 1 --branch v1.20.16 https://gitee.com/starchen520/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh --build
 ```
 
 能够访问 GitHub 时也可使用：
 
 ```bash
-git clone https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-bash ./deploy/install-controller.sh
+git clone --depth 1 --branch v1.20.16 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor && cd xingchen-monitor && sudo bash ./deploy/install-controller.sh
 ```
 
-需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时，跨主版本或熔断期间仍可人工评估后手动执行。`public` 模式先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 和固定版本的官方 GHCR 镜像；源码回退默认关闭，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会启用，GitHub API 与 GitHub 源码不会被隐式访问。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。
+需要自动更新总控时可在首次安装添加 `--auto-update`。日常可用 `deploy/update-controller.sh --check` 检查稳定版本、`--apply` 手动更新；普通 `--apply` 在切换 Compose 服务前必须先创建 PostgreSQL 备份，备份失败则不切换。自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时，跨主版本或熔断期间仍可人工评估后手动执行。`public` 模式先尝试 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 和固定版本的官方 GHCR 镜像；源码回退默认关闭，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会启用，GitHub API 与 GitHub 源码不会被隐式访问。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。
 
 使用本地源码构建总控镜像：
 
@@ -96,7 +94,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
 
 1. 打开 `http://<服务器IP>:18080/setup`，设置公网入口、来源、时区和首个管理员。
 2. Linux 总终端会自动显示为“总控服务器”，并在生产服务就绪后开始上报主机指标。
-3. 其他服务器在“设备管理”中创建设备，复制一次性接入令牌和页面生成的命令安装 Agent。
+3. 其他服务器在“设备管理”中创建设备，运行页面生成的 Controller 同域短命令；bootstrap 校验完整安装器的 SHA256 后才执行，并由安装器隐藏读取一次性接入令牌。
 4. 按[新手使用指南](docs/user-guide.md)完成通知测试、告警规则、备份和更新设置。
 
 ## 本地校验

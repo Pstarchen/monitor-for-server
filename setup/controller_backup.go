@@ -30,7 +30,7 @@ const (
 )
 
 var controllerBackupStatePath = "/workspace/.controller-backup-state.json"
-var controllerBackupNamePattern = regexp.MustCompile(`^(?:xingchen-monitor|guanlan-monitor)-[0-9]{8}T[0-9]{6}Z\.sql$`)
+var controllerBackupNamePattern = regexp.MustCompile(`^(?:xingchen-monitor|guanlan-monitor)-[0-9]{8}T[0-9]{6}Z(?:-[0-9]+)?\.sql$`)
 
 type controllerBackupService struct {
 	mu      sync.Mutex

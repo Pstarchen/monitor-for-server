@@ -4,7 +4,8 @@
 
 ## 前置条件
 
-- Docker Engine 24+ 与 Docker Compose v2。
+- Linux Controller 使用 root/sudo 运行。`public` 模式可通过受支持的发行版包管理器自动安装 `curl`、Docker Engine 24+ 与 Docker Compose v2；传入 `--no-install-dependencies` 后只检查、不安装。
+- `internal` 与 `offline` 不访问公网软件包源，必须由内部配置管理预装依赖，或直接使用包含所需镜像的已校验离线 bundle。
 - Docker Compose 会自动启动 PostgreSQL 16 和 Redis。数据库、用户和密码由控制端安装器自动生成，数据库端口只在 Compose 内网可见，无需安装数据库客户端或执行 SQL。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
 - Linux 被监控主机默认使用 systemd 安装预编译 Agent；Release 不可用时需要 Go 1.24+ 与 git 进行源码回退。只有需要容器模式时才要求 Docker Engine。
@@ -12,12 +13,20 @@
 
 ## Docker Compose 部署
 
-Linux 生产环境应使用总终端安装器启动。`public` 模式先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置的受信 Registry，再尝试固定版本的官方 GHCR 镜像；源码列表默认为空，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会回退源码，使用 Gitee 还必须设置 `XINGCHEN_ALLOW_GITEE=true`。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。安装器会自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
+Linux 生产环境应使用总终端安装器启动。该入口保留一键准备与 Docker Compose 编排体验，但不执行代码托管平台的 `raw main`，不以可变 `latest` 判定升级，也不会在 manifest、SHA256 或制品校验缺失时继续安装。`public` 模式先使用 `XINGCHEN_CONTROLLER_IMAGE_MIRRORS` 配置的受信 Registry，再尝试固定版本的官方 GHCR 镜像；源码列表默认为空，只有显式配置 `XINGCHEN_SOURCE_REPOSITORIES` 才会回退源码，使用 Gitee 还必须设置 `XINGCHEN_ALLOW_GITEE=true`。无法访问 GitHub/GHCR 的服务器应使用 `internal` 或 `offline` 模式。安装器会自动生成数据库与总控 Agent 凭据，将本机作为“总控服务器”显示到“设备管理”。未完成安装时，服务会以临时 bootstrap 配置启动，Web 只提供 `/setup` 向导：
 
 ```bash
 bash ./deploy/install-controller.sh
 docker compose --profile host-monitoring ps
 ```
+
+在 `public` 模式运行上述命令时，缺少的 `curl`、Docker Engine 或 Compose v2 会先通过受支持的系统包管理器安装。要禁止安装器修改系统软件包，使用：
+
+```bash
+bash ./deploy/install-controller.sh --no-install-dependencies
+```
+
+`internal/offline` 会隐式采用同等的“只检查”策略，绝不为了补依赖访问发行版公网镜像；依赖不完整时应先接入内部包源并由运维系统安装，或改用已校验离线 bundle。
 
 需要从当前工作区源码构建总控镜像时：
 
@@ -84,6 +93,8 @@ sudo bash ./deploy/update-controller.sh --apply
 sudo bash ./deploy/update-controller.sh --auto
 ```
 
+普通 `--apply` 在切换任何 Compose 服务前创建一致性 PostgreSQL 备份；备份失败会终止更新，现有服务保持不切换。候选镜像准备和版本校验也发生在切换前，只有备份与校验均成功才进入服务切换；应用健康失败时恢复旧镜像，数据库备份保留供管理员评估 Flyway 兼容性后人工恢复。
+
 更新器默认给予单个内部镜像前缀 45 秒快速失败时间，镜像自身地址最多拉取 180 秒，单个源码镜像最多构建 1200 秒，Compose 操作最多执行 900 秒。可通过 `XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS`、`XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS`、`XINGCHEN_SOURCE_BUILD_TIMEOUT_SECONDS` 和 `XINGCHEN_UPDATE_COMPOSE_TIMEOUT_SECONDS` 调整；`XINGCHEN_UPDATE_MIN_FREE_BYTES` 默认要求至少 1 GiB 可用空间。外层任务上限覆盖完整回退链，更新失败不会删除数据库卷。
 
 稳定发布使用 `vX.Y.Z`，但目标服务器的版本发现不依赖 GitHub API。总控优先读取本地或 `XINGCHEN_RELEASE_MANIFEST_URLS` 配置的 HTTPS manifest，并保存 last-known-good 缓存；只有显式设置 `XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=true` 才允许 GitHub API 回退。联网 CI 先创建 draft Release，等待四个项目镜像、四个平台 Agent 制品、manifest、校验文件和两个架构离线包全部验证完成后才公开发布，避免目标机看见半成品版本。
@@ -99,7 +110,7 @@ sudo bash ./deploy/update-controller.sh --auto
 ```json
 {
   "schemaVersion": 1,
-  "version": "v1.20.15",
+  "version": "v1.20.16",
   "images": {
     "setup": { "source": "ghcr.io/example/xingchen-setup", "digest": "sha256:<64 lowercase hex>" },
     "server": { "source": "ghcr.io/example/xingchen-server", "digest": "sha256:<64 lowercase hex>" },
@@ -115,12 +126,12 @@ sudo bash ./deploy/update-controller.sh --auto
 
 ```powershell
 .\deploy\promote-internal-release.ps1 `
-  -Version v1.20.15 `
+  -Version v1.20.16 `
   -TargetRegistry registry.internal.example/xingchen `
   -ArtifactDir D:\release\agent `
   -ArtifactBaseUrl https://release.internal.example/xingchen `
   -ImageLockFile D:\release\source-images.lock.json `
-  -OutputDir D:\publish\xingchen\v1.20.15 `
+  -OutputDir D:\publish\xingchen\v1.20.16 `
   -WriteEnvExample
 ```
 
@@ -138,7 +149,7 @@ XINGCHEN_WEB_IMAGE=registry.internal.example/xingchen/web@sha256:<digest>
 XINGCHEN_AGENT_IMAGE=registry.internal.example/xingchen/agent@sha256:<digest>
 XINGCHEN_POSTGRES_IMAGE=registry.internal.example/xingchen/postgres@sha256:<digest>
 XINGCHEN_REDIS_IMAGE=registry.internal.example/xingchen/redis@sha256:<digest>
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.15/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.16/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<manifest.json 的 SHA256>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 XINGCHEN_SOURCE_REPOSITORIES=
@@ -163,7 +174,7 @@ sudo ./install-offline.sh
 
 包内安装器会再次校验全部文件、导入六个镜像、固定目标版本，并以 `--offline --no-source-fallback` 启动；缺少任何镜像或 Agent 制品都会在启动前失败。
 
-已有 `v1.20.14` 部署升级到 `v1.20.15` 时不要运行 `install-offline.*`。先验证外层 `.sha256` 并解压，再从包内执行存量升级入口，其中 `--project-root` / `-ProjectRoot` 必须是已有部署的绝对目录：
+已有 `v1.20.15` 部署升级到 `v1.20.16` 时不要运行 `install-offline.*`。先验证外层 `.sha256` 并解压，再从包内执行存量升级入口，其中 `--project-root` / `-ProjectRoot` 必须是已有部署的绝对目录：
 
 ```bash
 sudo ./upgrade-offline.sh --project-root /opt/xingchen-monitor --check
@@ -230,15 +241,15 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 ## Linux Agent
 
-安装器默认通过总控查询 manifest 并下载对应架构的预编译程序，不要求目标机安装 Go。控制台生成的命令不包含接入令牌或 Agent 密钥；安装器完成提权、准备好目标制品后在交互终端静默询问一次性令牌，再通过 `/api/agent/v1/enroll` 的 JSON body 交换长期密钥。非交互自动化可临时使用 `XINGCHEN_ENROLLMENT_TOKEN`，旧自动化的 `XINGCHEN_AGENT_KEY` 入口继续兼容；两者都会在安装器退出时清除。
+Agent 接入采用控制台生成一条短命令的体验，但下载入口始终是 Controller 同域。该短命令只承担 bootstrap：分别下载完整安装器与 SHA256，精确匹配后才执行。命令不包含接入令牌或 Agent 密钥；完整安装器完成提权、准备好目标制品后在交互终端静默询问一次性令牌，再通过 `/api/agent/v1/enroll` 的 JSON body 交换长期密钥。非交互自动化可临时使用 `XINGCHEN_ENROLLMENT_TOKEN`，旧自动化的 `XINGCHEN_AGENT_KEY` 入口继续兼容；两者都会在安装器退出时清除。
 
 控制台只通过总控同域入口下发安装器及其 SHA256；安装器随 Setup 镜像固化并优先于宿主机工作目录中的副本，更新镜像后不会继续下发旧脚本。目标服务器无需直接访问代码托管平台，也不会执行 Gitee 或 GitHub `main` 分支上的未固定脚本。
 
 ```bash
-installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh") && (trap 'rm -f "$installer"' EXIT && curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux' -o "$installer" && expected_sha=$(curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256') && actual_sha=$(sha256sum "$installer" | awk '{print $1}') && test "$actual_sha" = "$expected_sha" && chmod 700 "$installer" && env XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>' "$installer" --interval 3s --disk / --disk /data)
+curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s&disk=%2F&disk=%2Fdata' | bash
 ```
 
-不要手工替换安装器 URL。若总控需要从外部同步版本或源码，应在总控侧配置受信内部制品源或 `XINGCHEN_SOURCE_REPOSITORIES`；GitHub 仍只能作为管理员显式启用的末级回退。
+不要手工替换安装器 URL。若总控需要从外部同步版本或源码，应在总控侧配置受信内部制品源或 `XINGCHEN_SOURCE_REPOSITORIES`；GitHub 仍只能作为管理员显式启用的末级回退。已有的 `--image`、`--binary`、`--source-url`、内部 release 基址与离线安装方式继续作为高级入口，不受控制台短命令影响。
 
 低配置或连接密集型主机可添加 `--skip-processes --skip-connections`。使用 `--process java`（可重复指定，最多 32 个）可额外保留关键进程，即使其不在 CPU 排名前 12；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。Windows 安装器对应使用 `-MonitoredProcess java`、`-CollectAllProcesses`。如明确需要远程一次性命令或 MCP 文件操作，再分别添加 `--allow-command-execution`、`--allow-file-operations`；两项默认关闭。支持 `1s`、`3s`、`10s`、`30s`、`60s`，不传 `--disk` 时采集全部可用分区。
 
