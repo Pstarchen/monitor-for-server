@@ -105,15 +105,13 @@ grep -F 'XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45' "${installer}" >/dev/null
 grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
 for documentation in monitored-agent.md deployment.md user-guide.md; do
   documentation_path="${script_dir}/../docs/${documentation}"
-  grep -F 'https://monitor.example.com/api/setup/agent-installer?platform=linux' "${documentation_path}" >/dev/null
-  grep -F 'platform=linux&format=sha256' "${documentation_path}" >/dev/null
-  grep -F 'installer=$(mktemp "${TMPDIR:-/tmp}/xingchen-agent.XXXXXX.sh")' "${documentation_path}" >/dev/null
-  grep -F 'trap '\''rm -f "$installer"'\'' EXIT' "${documentation_path}" >/dev/null
-  grep -F -- 'curl -fL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60' "${documentation_path}" >/dev/null
-  grep -F -- 'curl -fsSL --max-redirs 0 --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60' "${documentation_path}" >/dev/null
-  grep -F 'sha256sum "$installer"' "${documentation_path}" >/dev/null
-  grep -F 'chmod 700 "$installer"' "${documentation_path}" >/dev/null
-  grep -F "XINGCHEN_SERVER='https://monitor.example.com' XINGCHEN_DEVICE_ID='<设备ID>'" "${documentation_path}" >/dev/null
+  grep -F 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=' "${documentation_path}" >/dev/null
+  grep -F -- "curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https'" "${documentation_path}" >/dev/null
+  grep -F '| bash' "${documentation_path}" >/dev/null
+  if grep -F '/api/setup/agent-installer?platform=linux' "${documentation_path}" >/dev/null; then
+    echo "${documentation} still documents the superseded long Agent installer command." >&2
+    exit 1
+  fi
   if grep -Eq '(gitee\.com|raw\.githubusercontent\.com)/.*/(raw/)?main/deploy/install-agent' "${documentation_path}"; then
     echo "${documentation} executes an unpinned main-branch Agent installer." >&2
     exit 1
