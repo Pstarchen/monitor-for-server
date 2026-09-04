@@ -119,7 +119,7 @@ SCRIPT
 
   normalize_wrapper_path() {
     case "$(uname -s)" in
-      MINGW*|MSYS*|CYGWIN*) cygpath -am "$1" ;;
+      MINGW*|MSYS*|CYGWIN*) cygpath -alm "$1" ;;
       *) printf '%s\n' "$1" ;;
     esac
   }
