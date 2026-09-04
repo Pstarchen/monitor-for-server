@@ -66,6 +66,7 @@ archive="$(bash "${packager}" "${version}" "${assets_dir}" "${temp_dir}/images.t
 [[ -s "${archive}" && -s "${archive}.sha256" ]]
 grep -E "^[a-f0-9]{64}  $(basename "${archive}")$" "${archive}.sha256" >/dev/null
 (
+  trap 'status=$?; echo "package-offline-bundle_test.sh valid bundle check failed at line ${LINENO}." >&2; exit "${status}"' ERR
   cd "${output_dir}"
   sha256sum -c "$(basename "${archive}.sha256")"
   tar -xzf "$(basename "${archive}")"

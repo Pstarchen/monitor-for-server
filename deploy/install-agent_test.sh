@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+report_test_failure() {
+  local status="$1" line="$2"
+  if [[ "$-" == *e* ]]; then
+    echo "install-agent_test.sh failed at line ${line}." >&2
+    exit "${status}"
+  fi
+  return "${status}"
+}
+trap 'report_test_failure "$?" "$LINENO"' ERR
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd -- "${script_dir}/.." && pwd)"
 installer="${script_dir}/install-agent.sh"

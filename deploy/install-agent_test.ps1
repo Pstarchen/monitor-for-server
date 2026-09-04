@@ -136,6 +136,7 @@ try {
     finally { $ErrorActionPreference = $previousErrorPreference }
     Assert-True ($invalidExitCode -ne 0) 'Injected update version was accepted.'
     Assert-True (-not (Test-Path -LiteralPath $logPath)) 'Rejected update request reached the updater.'
+    $global:LASTEXITCODE = 0
 }
 finally {
     Remove-Item Env:XINGCHEN_BRIDGE_TEST_LOG -ErrorAction SilentlyContinue
