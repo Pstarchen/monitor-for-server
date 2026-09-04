@@ -129,6 +129,7 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - name: server
@@ -185,9 +186,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
-            ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/monitor-for-server-${{ matrix.name }}
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
           tags: |
             type=ref,event=tag
             type=sha,enable=${{ github.ref_type == 'branch' }}
@@ -211,6 +210,31 @@ jobs:
             VERSION=${{ github.ref_name }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Install registry copy tool
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
+
+      - name: Mirror image to Tencent Cloud TCR
+        timeout-minutes: 65
+        env:
+          SOURCE_IMAGE: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
+          TARGET_IMAGE: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/monitor-for-server-${{ matrix.name }}:${{ steps.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            if timeout --signal=TERM --kill-after=30s 30m \
+              skopeo copy --all --retry-times 5 --retry-delay 10s \
+                --authfile "${HOME}/.docker/config.json" \
+                "docker://${SOURCE_IMAGE}" "docker://${TARGET_IMAGE}"; then
+              exit 0
+            fi
+            [[ "${attempt}" -lt 2 ]] || break
+            echo "Tencent Cloud mirror attempt ${attempt} failed; retrying in 15 seconds." >&2
+            sleep 15
+          done
+          echo "Tencent Cloud mirror failed after 2 attempts: ${TARGET_IMAGE}" >&2
+          exit 1
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
