@@ -15,6 +15,11 @@ ARG VERSION=dev
 LABEL org.opencontainers.image.version=$VERSION
 # smartmontools is optional at runtime: the collector reports UNKNOWN when
 # host devices or the required privileges are not exposed to the container.
-RUN apk add --no-cache ca-certificates smartmontools
+RUN set -eux; \
+    for attempt in 1 2 3; do \
+      apk add --no-cache ca-certificates smartmontools && break; \
+      [ "$attempt" -lt 3 ]; \
+      sleep $((attempt * 2)); \
+    done
 COPY --from=build /out/xingchen-agent /xingchen-agent
 ENTRYPOINT ["/xingchen-agent"]

@@ -13,8 +13,13 @@ FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS agent-release
 WORKDIR /src/agent
 ARG GOPROXY=https://mirrors.cloud.tencent.com/go
 ENV GOPROXY=$GOPROXY
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories \
-    && apk add --no-cache zip
+RUN set -eux; \
+    sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories; \
+    for attempt in 1 2 3; do \
+      apk add --no-cache zip && break; \
+      [ "$attempt" -lt 3 ]; \
+      sleep $((attempt * 2)); \
+    done
 COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent/ ./
@@ -48,8 +53,13 @@ RUN set -eux; \
 FROM docker:27-cli
 ARG VERSION=dev
 LABEL org.opencontainers.image.version=$VERSION
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories \
-    && apk add --no-cache bash docker-cli-compose util-linux
+RUN set -eux; \
+    sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories; \
+    for attempt in 1 2 3; do \
+      apk add --no-cache bash docker-cli-compose util-linux && break; \
+      [ "$attempt" -lt 3 ]; \
+      sleep $((attempt * 2)); \
+    done
 COPY --from=build /out/setup /usr/local/bin/xingchen-setup
 COPY deploy/install-agent.sh deploy/install-agent.ps1 /usr/local/share/xingchen/installers/
 COPY deploy/update-controller.sh /usr/local/share/xingchen/updaters/update-controller.sh
