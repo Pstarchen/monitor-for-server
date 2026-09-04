@@ -252,6 +252,8 @@ cat > "${fake_bin}/docker" <<'SCRIPT'
 printf 'docker %s\n' "$*" >> "${TEST_LOG}"
 if [[ "${1:-}" == "pull" && "${TEST_FAIL_AGENT_PULLS:-0}" == "1" ]]; then
   exit 1
+elif [[ "${1:-}" == "build" && "${TEST_FAIL_AGENT_BUILDS:-0}" == "1" ]]; then
+  exit 1
 elif [[ "${1:-}" == "build" && "${TEST_FAIL_GITEE_BUILD:-0}" == "1" && "$*" == *gitee.com* ]]; then
   exit 1
 elif [[ "${1:-}" == "info" ]]; then
@@ -506,6 +508,7 @@ manager_environment=(
   "TEST_DOCKER_AVAILABLE=1"
   "TEST_CONTAINER_EXISTS=1"
   "TEST_CONTROLLER_RELEASE=1"
+  "TEST_AGENT_IMAGE_VERSION=v1.20.14"
   "XINGCHEN_AGENT_MANAGER_ROOT=${temp_dir}/manager"
   "XINGCHEN_SYSTEMD_DIR=${temp_dir}/systemd"
   "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
@@ -710,7 +713,7 @@ rm -f "${temp_dir}/manager/update-failures" "${temp_dir}/manager/update-paused-u
 : > "${log_file}"
 set +e
 for attempt in 1 2 3 4 5; do
-  env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh" --automatic
+  env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh" --automatic
   if [[ $? -eq 0 ]]; then
     echo "Automatic Agent update failure ${attempt} unexpectedly succeeded." >&2
     exit 1
@@ -720,7 +723,7 @@ set -e
 grep -Fx '5' "${temp_dir}/manager/update-failures" >/dev/null
 test -s "${temp_dir}/manager/update-paused-until"
 pull_count_before="$(grep -c '^docker pull ' "${log_file}")"
-env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh" --automatic
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh" --automatic
 pull_count_after="$(grep -c '^docker pull ' "${log_file}")"
 if [[ "${pull_count_after}" -ne "${pull_count_before}" ]]; then
   echo 'Paused automatic Agent update still contacted an image source.' >&2
@@ -730,7 +733,7 @@ fi
 failure_count_before="$(cat "${temp_dir}/manager/update-failures")"
 pause_before="$(cat "${temp_dir}/manager/update-paused-until")"
 set +e
-env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh"
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh"
 manual_status=$?
 set -e
 if [[ "${manual_status}" -eq 0 ]]; then
