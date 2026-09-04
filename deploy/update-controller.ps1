@@ -1138,7 +1138,9 @@ try {
     function Get-RunningServiceVersion([string] $Service) {
         $containerId = ([string] (& docker compose @composeArgs ps -q $Service 2>$null | Select-Object -First 1)).Trim()
         if (-not $containerId) { return $null }
-        $actual = ([string] (& docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' $containerId 2>$null | Select-Object -First 1)).Trim().TrimStart('v')
+        $actualOutput = & docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' $containerId 2>$null | Select-Object -First 1
+        if ($null -eq $actualOutput) { return $null }
+        $actual = ([string] $actualOutput).Trim().TrimStart('v')
         if ($actual -notmatch '^\d+\.\d+\.\d+$') { return $null }
         return "v$actual"
     }
