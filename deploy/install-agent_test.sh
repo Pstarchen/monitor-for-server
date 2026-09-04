@@ -466,7 +466,7 @@ run_as_root bash -n "${temp_dir}/manager/handle-update-request.sh"
 run_as_root grep -F "PathExists=${temp_dir}/manager/requests/update-request" "${temp_dir}/systemd/xingchen-agent-update-request.path" >/dev/null
 
 run_as_root cp "${temp_dir}/manager/update-agent.sh" "${temp_dir}/update-agent.saved"
-run_as_root sh -c 'printf '\''#!/usr/bin/env bash\nprintf "bridge %s\\n" "$*" >> "$TEST_LOG"\n'\'' > "$1"' sh "${temp_dir}/manager/update-agent.sh"
+run_as_root sh -c 'printf '\''#!/usr/bin/env bash\nprintf "bridge %%s\\n" "$*" >> "$TEST_LOG"\n'\'' > "$1"' sh "${temp_dir}/manager/update-agent.sh"
 run_as_root chmod 0755 "${temp_dir}/manager/update-agent.sh"
 run_as_root sh -c 'printf '\''action=update\nversion=v1.20.14\nrollout_id=7\nmember_id=11\n'\'' > "$1"' sh "${temp_dir}/manager/requests/update-request"
 run_as_root chmod 0600 "${temp_dir}/manager/requests/update-request"

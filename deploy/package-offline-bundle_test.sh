@@ -113,13 +113,45 @@ grep -E "^[a-f0-9]{64}  $(basename "${archive}")$" "${archive}.sha256" >/dev/nul
   mkdir -p "${existing_root}" "${fake_bin}"
   cat > "${fake_bin}/bash" <<'SCRIPT'
 #!/usr/bin/bash
-printf '%s\n' "$*" > "${WRAPPER_LOG}"
+printf '%s\n' "$@" > "${WRAPPER_LOG}"
 SCRIPT
   chmod 755 "${fake_bin}/bash"
+
+  normalize_wrapper_path() {
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) cygpath -u "$1" ;;
+      *) printf '%s\n' "$1" ;;
+    esac
+  }
+
+  assert_wrapper_args() {
+    local expected_mode="$1" index actual
+    local expected_args=(
+      "${bundle_root}/deploy/update-controller.sh"
+      "${expected_mode}"
+      --offline
+      --no-source-fallback
+      --project-root
+      "${existing_root}"
+      --offline-bundle
+      "${bundle_root}"
+    )
+    local wrapper_args=()
+    mapfile -t wrapper_args < "${wrapper_log}"
+    [[ "${#wrapper_args[@]}" -eq "${#expected_args[@]}" ]] || return 1
+    for index in "${!expected_args[@]}"; do
+      actual="${wrapper_args[index]}"
+      case "${index}" in
+        0|5|7) actual="$(normalize_wrapper_path "${actual}")" ;;
+      esac
+      [[ "${actual}" == "${expected_args[index]}" ]] || return 1
+    done
+  }
+
   PATH="${fake_bin}:${PATH}" WRAPPER_LOG="${wrapper_log}" /usr/bin/bash "${bundle_root}/upgrade-offline.sh" --project-root "${existing_root}"
-  grep -F "${bundle_root}/deploy/update-controller.sh --check --offline --no-source-fallback --project-root ${existing_root} --offline-bundle ${bundle_root}" "${wrapper_log}" >/dev/null
+  assert_wrapper_args --check
   PATH="${fake_bin}:${PATH}" WRAPPER_LOG="${wrapper_log}" /usr/bin/bash "${bundle_root}/upgrade-offline.sh" --project-root "${existing_root}" --apply
-  grep -F "${bundle_root}/deploy/update-controller.sh --apply --offline --no-source-fallback --project-root ${existing_root} --offline-bundle ${bundle_root}" "${wrapper_log}" >/dev/null
+  assert_wrapper_args --apply
   if PATH="${fake_bin}:${PATH}" WRAPPER_LOG="${wrapper_log}" /usr/bin/bash "${bundle_root}/upgrade-offline.sh" --apply >/dev/null 2>&1; then
     echo 'Bash upgrade wrapper accepted apply without --project-root.' >&2
     exit 1
