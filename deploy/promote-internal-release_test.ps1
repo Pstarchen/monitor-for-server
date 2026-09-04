@@ -322,6 +322,7 @@ exit 93
         Remove-Item Env:PROMOTION_DOCKER_CONFLICT_COMPONENT -ErrorAction SilentlyContinue
     }
 
+    $global:LASTEXITCODE = 0
     Write-Host 'promote-internal-release.ps1 behavior tests passed.'
 } finally {
     $env:PATH = $originalPath

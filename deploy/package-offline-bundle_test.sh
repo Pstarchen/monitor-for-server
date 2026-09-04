@@ -119,13 +119,13 @@ SCRIPT
 
   normalize_wrapper_path() {
     case "$(uname -s)" in
-      MINGW*|MSYS*|CYGWIN*) cygpath -u "$1" ;;
+      MINGW*|MSYS*|CYGWIN*) cygpath -am "$1" ;;
       *) printf '%s\n' "$1" ;;
     esac
   }
 
   assert_wrapper_args() {
-    local expected_mode="$1" index actual
+    local expected_mode="$1" index actual expected
     local expected_args=(
       "${bundle_root}/deploy/update-controller.sh"
       "${expected_mode}"
@@ -138,13 +138,27 @@ SCRIPT
     )
     local wrapper_args=()
     mapfile -t wrapper_args < "${wrapper_log}"
-    [[ "${#wrapper_args[@]}" -eq "${#expected_args[@]}" ]] || return 1
+    if [[ "${#wrapper_args[@]}" -ne "${#expected_args[@]}" ]]; then
+      printf 'Offline Bash wrapper %s argument count mismatch: expected %s, got %s.\n' \
+        "${expected_mode}" "${#expected_args[@]}" "${#wrapper_args[@]}" >&2
+      printf 'Actual wrapper arguments:\n' >&2
+      printf '  <%s>\n' "${wrapper_args[@]}" >&2
+      return 1
+    fi
     for index in "${!expected_args[@]}"; do
       actual="${wrapper_args[index]}"
+      expected="${expected_args[index]}"
       case "${index}" in
-        0|5|7) actual="$(normalize_wrapper_path "${actual}")" ;;
+        0|5|7)
+          actual="$(normalize_wrapper_path "${actual}")"
+          expected="$(normalize_wrapper_path "${expected}")"
+          ;;
       esac
-      [[ "${actual}" == "${expected_args[index]}" ]] || return 1
+      if [[ "${actual}" != "${expected}" ]]; then
+        printf 'Offline Bash wrapper %s argument %s mismatch: expected <%s>, got <%s>.\n' \
+          "${expected_mode}" "${index}" "${expected}" "${actual}" >&2
+        return 1
+      fi
     done
   }
 
