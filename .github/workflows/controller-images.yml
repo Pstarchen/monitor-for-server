@@ -215,7 +215,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
 
       - name: Mirror image to Tencent Cloud TCR
-        timeout-minutes: 65
+        timeout-minutes: 305
         env:
           SOURCE_IMAGE: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
           TARGET_IMAGE: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/monitor-for-server-${{ matrix.name }}:${{ steps.meta.outputs.version }}
@@ -223,7 +223,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2; do
-            if timeout --signal=TERM --kill-after=30s 30m \
+            if timeout --signal=TERM --kill-after=30s 150m \
               skopeo copy --all --retry-times 5 \
                 --authfile "${HOME}/.docker/config.json" \
                 "docker://${SOURCE_IMAGE}" "docker://${TARGET_IMAGE}"; then
