@@ -5,9 +5,14 @@ on:
     branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Resume packaging an existing draft release (vX.Y.Z); leave empty to build images'
+        required: false
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.release_version != '' && format('refs/tags/{0}', inputs.release_version) || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -18,6 +23,7 @@ env:
 
 jobs:
   test:
+    if: ${{ inputs.release_version == '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,7 +45,7 @@ jobs:
         run: sudo bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/*.sh && bash deploy/xingchen_test.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/mirror-release-image_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
+        run: bash -n deploy/*.sh && bash deploy/xingchen_test.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/mirror-release-image_test.sh && bash deploy/pull-release-platform_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
 
       - name: Check PowerShell scripts and generated updater
         shell: pwsh
@@ -100,6 +106,7 @@ jobs:
         run: pnpm install --frozen-lockfile && pnpm test && pnpm build
 
   test-windows-updater:
+    if: ${{ inputs.release_version == '' }}
     runs-on: windows-latest
     permissions:
       contents: read
@@ -126,6 +133,7 @@ jobs:
         run: bash deploy/package-offline-bundle_test.sh
 
   publish:
+    if: ${{ inputs.release_version == '' }}
     needs: [test, test-windows-updater]
     runs-on: ubuntu-latest
     permissions:
@@ -229,21 +237,48 @@ jobs:
         run: bash deploy/mirror-release-image.sh "${SOURCE_IMAGE}" "${TARGET_IMAGE}" "${SOURCE_DIGEST}"
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ !cancelled() && ((startsWith(github.ref, 'refs/tags/v') && needs.publish.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')) }}
     needs: publish
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.release_version || github.ref_name }}
+      RESUME_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version != '' }}
+    defaults:
+      run:
+        working-directory: release-source
     permissions:
       actions: read
       contents: write
       packages: write
     steps:
-      - name: Checkout
+      - name: Checkout release tooling
         uses: actions/checkout@v4
 
-      - name: Protect published GitHub Release
+      - name: Validate release and protect published artifacts
+        working-directory: .
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_VERSION}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          state="$(bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${RELEASE_VERSION}")"
+          if [[ "${RESUME_RELEASE}" == true && "${state}" != draft ]]; then
+            echo 'Only an existing draft release can be resumed.' >&2
+            exit 1
+          fi
+          [[ "${TCR_REGISTRY}" == "ccr.ccs.tencentyun.com" ]]
+          [[ "${TCR_NAMESPACE}" == "xc_monitor" ]]
+
+      - name: Test platform pull helper
+        working-directory: .
+        run: bash deploy/pull-release-platform_test.sh
+
+      - name: Checkout tagged release source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_VERSION }}
+          path: release-source
 
       - name: Wait for matching Agent workflow
         env:
@@ -252,9 +287,10 @@ jobs:
         run: |
           set -euo pipefail
           agent_run_id=''
+          release_commit="$(git rev-parse HEAD)"
           for attempt in {1..60}; do
             agent_run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow agent-image.yml \
-              --branch "${GITHUB_REF_NAME}" --commit "${GITHUB_SHA}" --event push --limit 5 \
+              --branch "${RELEASE_VERSION}" --commit "${release_commit}" --event push --limit 5 \
               --json databaseId --jq '.[0].databaseId // empty')"
             [[ -z "${agent_run_id}" ]] || break
             if [[ "${attempt}" -eq 60 ]]; then
@@ -291,7 +327,7 @@ jobs:
           set -euo pipefail
           repository="${GITHUB_REPOSITORY,,}"
           for component in setup server web agent; do
-            image="${REGISTRY}/${repository}-${component}:${GITHUB_REF_NAME}"
+            image="${REGISTRY}/${repository}-${component}:${RELEASE_VERSION}"
             for attempt in {1..30}; do
               if docker buildx imagetools inspect "${image}" >/dev/null 2>&1; then
                 break
@@ -309,7 +345,7 @@ jobs:
         run: |
           set -euo pipefail
           for component in setup server web agent; do
-            image="${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-${component}:${GITHUB_REF_NAME}"
+            image="${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-${component}:${RELEASE_VERSION}"
             for attempt in {1..30}; do
               if docker buildx imagetools inspect "${image}" >/dev/null 2>&1; then
                 break
@@ -325,7 +361,7 @@ jobs:
       - name: Install registry copy tool
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
 
-      - name: Mirror base images to Tencent Cloud TCR
+      - name: Resolve base images in Tencent Cloud TCR
         id: base-images
         timeout-minutes: 140
         env:
@@ -333,12 +369,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          postgres_digest="$(bash deploy/mirror-release-image.sh \
-            docker.io/library/postgres:16-alpine \
-            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres:${GITHUB_REF_NAME}")"
-          redis_digest="$(bash deploy/mirror-release-image.sh \
-            docker.io/library/redis:7.4-alpine \
-            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis:${GITHUB_REF_NAME}")"
+          if [[ "${RESUME_RELEASE}" == true ]]; then
+            for component in postgres redis; do
+              image="${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-${component}:${RELEASE_VERSION}"
+              manifest="${RUNNER_TEMP}/${component}-manifest.json"
+              skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${image}" > "${manifest}"
+              jq -e '.schemaVersion == 2 and ([.manifests[]?.platform | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64")) | .architecture] | sort == ["amd64", "arm64"])' "${manifest}" >/dev/null
+              digest="$(skopeo manifest-digest "${manifest}")"
+              [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+              printf -v "${component}_digest" '%s' "${digest}"
+            done
+          else
+            postgres_digest="$(bash deploy/mirror-release-image.sh \
+              docker.io/library/postgres:16-alpine \
+              "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres:${RELEASE_VERSION}")"
+            redis_digest="$(bash deploy/mirror-release-image.sh \
+              docker.io/library/redis:7.4-alpine \
+              "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis:${RELEASE_VERSION}")"
+          fi
           echo "postgres-digest=${postgres_digest}" >> "${GITHUB_OUTPUT}"
           echo "redis-digest=${redis_digest}" >> "${GITHUB_OUTPUT}"
 
@@ -350,12 +398,12 @@ jobs:
           set -euo pipefail
           mkdir -p "${DOCKER_CONFIG}"
           for reference in \
-            monitor-for-server-setup:${GITHUB_REF_NAME} \
-            monitor-for-server-server:${GITHUB_REF_NAME} \
-            monitor-for-server-web:${GITHUB_REF_NAME} \
-            monitor-for-server-agent:${GITHUB_REF_NAME} \
-            monitor-for-server-postgres:${GITHUB_REF_NAME} \
-            monitor-for-server-redis:${GITHUB_REF_NAME}; do
+            monitor-for-server-setup:${RELEASE_VERSION} \
+            monitor-for-server-server:${RELEASE_VERSION} \
+            monitor-for-server-web:${RELEASE_VERSION} \
+            monitor-for-server-agent:${RELEASE_VERSION} \
+            monitor-for-server-postgres:${RELEASE_VERSION} \
+            monitor-for-server-redis:${RELEASE_VERSION}; do
             image="${TCR_REGISTRY}/${TCR_NAMESPACE}/${reference}"
             docker buildx imagetools inspect "${image}" >/dev/null \
               || { echo "Tencent Cloud image is not publicly pullable: ${image}" >&2; exit 1; }
@@ -368,7 +416,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/agent
-          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir dist/agent \
+          gh release download "${RELEASE_VERSION}" --repo "${GITHUB_REPOSITORY}" --dir dist/agent \
             --pattern 'xingchen-agent_*' --pattern checksums.txt --pattern manifest.json --pattern manifest.json.sha256
           test "$(find dist/agent -maxdepth 1 -type f -name 'xingchen-agent_*' | wc -l)" -eq 4
           (cd dist/agent && sha256sum -c checksums.txt && sha256sum -c manifest.json.sha256)
@@ -384,7 +432,7 @@ jobs:
           mkdir -p dist/offline
           release_images=()
           for component in setup server web agent; do
-            release_images+=("${REGISTRY}/${repository}-${component}:${GITHUB_REF_NAME}")
+            release_images+=("${REGISTRY}/${repository}-${component}:${RELEASE_VERSION}")
           done
           base_images=("postgres:16-alpine" "redis:7.4-alpine")
           base_sources=(
@@ -398,8 +446,8 @@ jobs:
             for image in "${release_images[@]}"; do
               docker pull --platform "linux/${arch}" "${image}"
               actual_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "${image}")"
-              if [[ "${actual_version#v}" != "${GITHUB_REF_NAME#v}" ]]; then
-                echo "Release image version mismatch for ${image}: got ${actual_version:-<empty>}, want ${GITHUB_REF_NAME}" >&2
+              if [[ "${actual_version#v}" != "${RELEASE_VERSION#v}" ]]; then
+                echo "Release image version mismatch for ${image}: got ${actual_version:-<empty>}, want ${RELEASE_VERSION}" >&2
                 exit 1
               fi
               if [[ "${image}" == *-setup:* ]]; then
@@ -408,24 +456,23 @@ jobs:
               fi
             done
             for index in "${!base_images[@]}"; do
-              docker pull --platform "linux/${arch}" "${base_sources[index]}"
-              docker tag "${base_sources[index]}" "${base_images[index]}"
+              bash "${GITHUB_WORKSPACE}/deploy/pull-release-platform.sh" "${base_sources[index]}" "${arch}" "${base_images[index]}"
             done
-            archive="dist/controller-images-${GITHUB_REF_NAME}-${arch}.tar"
+            archive="dist/controller-images-${RELEASE_VERSION}-${arch}.tar"
             docker save --output "${archive}" "${images[@]}"
-            bash deploy/package-offline-bundle.sh "${GITHUB_REF_NAME}" dist/agent "${archive}" dist/offline "${arch}"
+            bash deploy/package-offline-bundle.sh "${RELEASE_VERSION}" dist/agent "${archive}" dist/offline "${arch}"
           done
 
       - name: Upload offline bundles to draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" >/dev/null
-          gh release upload "${GITHUB_REF_NAME}" dist/offline/*.tar.gz dist/offline/*.sha256 --repo "${GITHUB_REPOSITORY}" --clobber
+          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${RELEASE_VERSION}" >/dev/null
+          gh release upload "${RELEASE_VERSION}" dist/offline/*.tar.gz dist/offline/*.sha256 --repo "${GITHUB_REPOSITORY}" --clobber
 
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" >/dev/null
-          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
+          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${RELEASE_VERSION}" >/dev/null
+          gh release edit "${RELEASE_VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false

@@ -146,7 +146,15 @@ sudo bash ./deploy/update-controller.sh --auto
 
 当前国内镜像仓库为 `ccr.ccs.tencentyun.com/xc_monitor`，组件名称统一为 `monitor-for-server-{setup,server,web,agent,postgres,redis}`。GitHub Actions 使用仓库变量 `TCR_REGISTRY`、`TCR_NAMESPACE`、`TCR_USERNAME` 和仓库 Secret `TCR_PASSWORD`；本机登录保存在 Docker credential store，不能代替 CI 的 Secret。脚本不接受密码参数，手动发布机复用已有 Docker 登录。
 
-两条发布工作流按同一 Git ref 排队，构建后把实际输出 digest 交给 `deploy/mirror-release-image.sh`。复制前要求清单包含唯一的 Linux `amd64` 和 `arm64`，使用 `skopeo copy --all --preserve-digests` 从 `source@sha256:...` 复制，目标摘要一致才成功。目标已有相同摘要时跳过传输；失败有两轮受限重试。六个目标镜像还必须通过匿名拉取检查，才能公开完整 Release。离线包的 PostgreSQL/Redis 从本次腾讯云复制得到的 digest 拉取，包内保留原有镜像别名。
+两条发布工作流各自按 Git ref 排队，构建后把实际输出 digest 交给 `deploy/mirror-release-image.sh`。复制前要求清单包含唯一的 Linux `amd64` 和 `arm64`，使用 `skopeo copy --all --preserve-digests` 从 `source@sha256:...` 复制，目标摘要一致才成功。目标已有相同摘要时跳过传输；失败有两轮受限重试。六个目标镜像还必须通过匿名拉取检查，才能公开完整 Release。离线包的 PostgreSQL/Redis 从腾讯云固定 index digest 解析唯一的目标架构 manifest，再按该子摘要拉取并验证本地架构，包内保留原有镜像别名，避免 Docker 传统镜像存储在切换架构时覆盖同一 index digest 失败。
+
+若镜像和 Agent 工作流已经成功，而离线打包或上传失败，可在修复发布工具后续跑现有草稿：
+
+```bash
+gh workflow run controller-images.yml --ref main -f release_version=v1.20.18
+```
+
+`release_version` 必须是已存在的稳定版本草稿；已公开或不存在的 Release 会被拒绝。续跑使用指定版本标签的源码、安装器和已成功的 Agent 工作流，复用腾讯云已有基础镜像，不重新构建或同步镜像；发布工具来自本次选定的 workflow ref。续跑与同版本标签发布共用并发锁，仍需通过镜像、Agent 制品和离线包校验才会公开。留空该参数维持原有镜像构建流程。
 
 发布机可用以下只读命令核验已经公开的版本；无需启动本机 Docker 引擎：
 
