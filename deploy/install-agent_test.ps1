@@ -22,7 +22,10 @@ $requiredFunctions = @(
     'Test-NetworkSourceAllowed',
     'Assert-NetworkSourcePolicy',
     'Normalize-ReleaseVersion',
-    'Get-AgentSource'
+    'Get-AgentSource',
+    'Assert-AgentBinaryVersion',
+    'Merge-AgentConfiguration',
+    'Test-SourceCheckoutMatchesRelease'
 )
 $definitions = @{}
 foreach ($functionAst in $ast.FindAll({
@@ -58,6 +61,76 @@ try { Normalize-ReleaseVersion 'v01.20.14' | Out-Null }
 catch { $leadingZeroRejected = $true }
 Assert-True $leadingZeroRejected 'Agent installer accepted a leading-zero version.'
 
+function Test-AgentVersion { $global:LASTEXITCODE = 0; 'v1.20.14' }
+Assert-AgentBinaryVersion 'Test-AgentVersion' 'v1.20.14'
+$wrongVersionRejected = $false
+try { Assert-AgentBinaryVersion 'Test-AgentVersion' 'v1.20.17' }
+catch { $wrongVersionRejected = $true }
+Assert-True $wrongVersionRejected 'Agent installer accepted a binary with a mismatched version.'
+function Test-AgentVersion { $global:LASTEXITCODE = 1; 'v1.20.14' }
+$failedVersionRejected = $false
+try { Assert-AgentBinaryVersion 'Test-AgentVersion' 'v1.20.14' }
+catch { $failedVersionRejected = $true }
+Assert-True $failedVersionRejected 'Agent installer accepted a failed version command.'
+$global:LASTEXITCODE = 0
+
+$existingConfig = [pscustomobject]@{
+    server_url = 'https://monitor.example.com'; device_id = 'existing-device'; agent_key = 'old-test-credential'
+    interval = '30s'; allow_command_execution = $true; monitored_processes = @('sqlservr')
+    request_timeout = '45s'; spool_dir = 'D:\AgentData\spool'; custom_metrics = @([pscustomobject]@{ name = 'queue_depth'; args = @('one', 'two') })
+    update_launcher_path = 'old-launcher'
+}
+$generatedConfig = [ordered]@{
+    server_url = 'https://monitor.example.com'; device_id = 'existing-device'; agent_key = 'new-test-credential'
+    interval = '3s'; allow_command_execution = $false; monitored_processes = @()
+    request_timeout = '10s'; spool_dir = 'C:\Default\spool'; update_launcher_path = 'new-launcher'
+}
+$mergedConfig = Merge-AgentConfiguration $generatedConfig $existingConfig @{}
+Assert-True ($mergedConfig.interval -eq '30s') 'Reinstall reset the existing collection interval.'
+Assert-True ($mergedConfig.allow_command_execution -and $mergedConfig.monitored_processes[0] -eq 'sqlservr') 'Reinstall reset collection or permission settings.'
+Assert-True ($mergedConfig.request_timeout -eq '45s' -and $mergedConfig.spool_dir -eq 'D:\AgentData\spool') 'Reinstall reset custom transport or spool settings.'
+Assert-True ($mergedConfig.custom_metrics[0].args[1] -eq 'two') 'Reinstall lost nested custom metrics.'
+Assert-True ($mergedConfig.agent_key -eq 'new-test-credential' -and $mergedConfig.update_launcher_path -eq 'new-launcher') 'Reinstall failed to refresh credentials or managed paths.'
+$overriddenConfig = Merge-AgentConfiguration $generatedConfig $existingConfig @{ Interval = '3s'; AllowCommandExecution = $false; MonitoredProcess = @() }
+Assert-True ($overriddenConfig.interval -eq '3s' -and -not $overriddenConfig.allow_command_execution -and $overriddenConfig.monitored_processes.Count -eq 0) 'Explicit reinstall settings did not replace stored values.'
+
+$script:testTargetCommit = 'current-commit'
+$script:testSourceChanges = ''
+function git {
+    $global:LASTEXITCODE = 0
+    if ($args -contains 'status') { return $script:testSourceChanges }
+    if ($args[-1] -eq 'HEAD') { return 'current-commit' }
+    return $script:testTargetCommit
+}
+try {
+    Assert-True (Test-SourceCheckoutMatchesRelease 'fixture' 'v1.20.14') 'Matching clean checkout was rejected.'
+    $script:testTargetCommit = 'other-commit'
+    Assert-True (-not (Test-SourceCheckoutMatchesRelease 'fixture' 'v1.20.14')) 'Pinned source fallback accepted a different local commit.'
+    $script:testTargetCommit = 'current-commit'
+    $script:testSourceChanges = ' M agent/main.go'
+    Assert-True (-not (Test-SourceCheckoutMatchesRelease 'fixture' 'v1.20.14')) 'Pinned source fallback accepted modified local source.'
+}
+finally { Remove-Item Function:git }
+
+$identityBlock = $ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.IfStatementAst] -and $node.Extent.Text.StartsWith('if ($Action -eq ''install'' -and (Test-Path -LiteralPath $configPath))')
+}, $true) | Select-Object -First 1
+Assert-True ($null -ne $identityBlock) 'Existing installation identity handling was not found.'
+$identityFixture = Join-Path ([IO.Path]::GetTempPath()) ('xingchen-agent-identity-test-' + [Guid]::NewGuid().ToString('N') + '.json')
+try {
+    [IO.File]::WriteAllText($identityFixture, ($existingConfig | ConvertTo-Json -Depth 20))
+    $configPath = $identityFixture
+    $Action = 'install'
+    $ServerUrl = ''; $DeviceId = ''; $agentKey = ''; $enrollmentToken = ''; $preservedConfig = $null
+    . ([scriptblock]::Create($identityBlock.Extent.Text))
+    Assert-True ($DeviceId -ceq 'existing-device' -and $ServerUrl -eq 'https://monitor.example.com' -and $agentKey -eq 'old-test-credential') 'Reinstall did not reuse the existing identity.'
+    $DeviceId = 'different-device'; $agentKey = ''; $preservedConfig = $null
+    . ([scriptblock]::Create($identityBlock.Extent.Text))
+    Assert-True ([string]::IsNullOrEmpty($agentKey) -and $null -eq $preservedConfig) 'Installing another device reused the previous credential or settings.'
+}
+finally { Remove-Item -LiteralPath $identityFixture -Force }
+
 $AllowGitee = $true
 Assert-True (Test-NetworkSourceAllowed 'https://git.gitee.com/example/repo') 'internal mode rejected explicitly enabled Gitee.'
 
@@ -91,6 +164,74 @@ Assert-True (-not $source.Contains("Write-AgentUpdateStatus 'FAILED' ([string] `
 Assert-True $source.Contains('Start-Sleep -Seconds 10') 'Update launcher does not delay replacement long enough to report task acceptance.'
 Assert-True $source.Contains('& `$powerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `$updaterPath `$action `$version') 'Update launcher does not use the fixed updater entry point.'
 Assert-True (-not $source.Contains('Invoke-Expression')) 'Update launcher must not evaluate request content.'
+
+$updaterAssignment = $ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script'
+}, $true) | Select-Object -First 1
+Assert-True ($null -ne $updaterAssignment) 'Generated updater was not found.'
+$updaterSource = $updaterAssignment.Right.Expression.Value
+$updaterTokens = $null
+$updaterErrors = $null
+$updaterAst = [System.Management.Automation.Language.Parser]::ParseInput($updaterSource, [ref] $updaterTokens, [ref] $updaterErrors)
+Assert-True ($updaterErrors.Count -eq 0) 'Generated updater has parser errors.'
+foreach ($functionAst in $updaterAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Assert-AgentBinaryVersion', 'Normalize-Version')
+}, $true)) { Invoke-Expression $functionAst.Extent.Text }
+function Test-AgentVersion { $global:LASTEXITCODE = 0; 'v1.20.14' }
+Assert-AgentBinaryVersion 'Test-AgentVersion' 'v1.20.14'
+$wrongUpdaterVersionRejected = $false
+try { Assert-AgentBinaryVersion 'Test-AgentVersion' 'v1.20.17' }
+catch { $wrongUpdaterVersionRejected = $true }
+Assert-True $wrongUpdaterVersionRejected 'Generated updater accepted a binary with a mismatched version.'
+
+$replacementTry = $updaterAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.TryStatementAst] -and $node.Body.Statements.Count -gt 0 -and $node.Body.Statements[0].Extent.Text -like 'Stop-Service -Name *'
+}, $true) | Select-Object -First 1
+Assert-True ($null -ne $replacementTry) 'Generated updater replacement transaction was not found.'
+Assert-True ($updaterSource.IndexOf("Copy-Item -LiteralPath '`$targetBinary' -Destination `$backup") -lt $replacementTry.Extent.StartOffset) 'Updater stops the service before creating the backup.'
+$rollbackFixture = Join-Path ([IO.Path]::GetTempPath()) ('xingchen-agent-rollback-test-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $rollbackFixture | Out-Null
+try {
+    $oldBinary = Join-Path $rollbackFixture 'agent.exe'
+    $backup = Join-Path $rollbackFixture 'agent.backup'
+    $staged = Join-Path $rollbackFixture 'agent.new'
+    [IO.File]::WriteAllText($oldBinary, 'previous-binary')
+    Copy-Item -LiteralPath $oldBinary -Destination $backup
+    [IO.File]::WriteAllText($staged, 'replacement-binary')
+    $script:serviceEvents = [Collections.Generic.List[string]]::new()
+    $script:startAttempts = 0
+    function Stop-Service { param($Name, [switch] $Force, $ErrorAction) $script:serviceEvents.Add('stop') }
+    function Start-Service {
+        param($Name, $ErrorAction)
+        $script:serviceEvents.Add('start')
+        $script:startAttempts++
+        if ($script:startAttempts -eq 1) { throw 'Simulated replacement startup failure.' }
+    }
+    function Get-Service {
+        param($Name)
+        $mockService = [pscustomobject]@{}
+        $mockService | Add-Member -MemberType ScriptMethod -Name WaitForStatus -Value {
+            param($Status, $Timeout)
+            $script:serviceEvents.Add("wait:$Status")
+        }
+        return $mockService
+    }
+    function Write-AgentUpdateStatus { param($Status, $Message) $script:serviceEvents.Add("status:$Status") }
+    $transaction = $replacementTry.Extent.Text.Replace('$targetBinary', $oldBinary.Replace("'", "''")).Replace('$serviceName', 'MockAgent')
+    $replacementFailed = $false
+    try { & ([scriptblock]::Create($transaction)) }
+    catch { $replacementFailed = $true }
+    Assert-True $replacementFailed 'Failed replacement was incorrectly reported as successful.'
+    Assert-True ((Get-Content -Raw -LiteralPath $oldBinary) -eq 'previous-binary') 'Failed replacement did not restore the previous executable.'
+    Assert-True (($script:serviceEvents -join ',') -eq 'stop,wait:Stopped,start,status:ROLLING_BACK,stop,wait:Stopped,start,wait:Running') 'Rollback did not stop the failed service and wait before restoring the binary.'
+}
+finally {
+    Remove-Item Function:Stop-Service, Function:Start-Service, Function:Get-Service, Function:Write-AgentUpdateStatus -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $rollbackFixture -Recurse -Force
+}
 
 $launcherAssignment = $ast.FindAll({
     param($node)

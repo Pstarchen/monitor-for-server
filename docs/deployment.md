@@ -18,13 +18,13 @@ Linux 生产环境推荐使用 `deploy/xingchen.sh`。它保留一条命令准�
 能够访问 GitHub 和 GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.17
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.18
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.17
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.18
 ```
 
 `CN=true` 固定使用 Gitee 的对应版本编排文件，并直接从 `ccr.ccs.tencentyun.com/xc_monitor` 拉取 setup、server、web、agent、PostgreSQL 和 Redis 六个多架构镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。该模式仍然联网：依赖补齐需要 Linux 发行版包源，运行镜像需要腾讯云 TCR。所有这些外部源都不可达时必须改用内部源或离线 bundle。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。
@@ -110,7 +110,9 @@ sudo xingchen restart
 sudo xingchen update
 ```
 
-不带动作运行 `sudo xingchen` 会打开交互菜单。`status` 展示 Compose 服务状态，`logs` 显示最近 200 行总控日志，`restart` 重新创建并等待现有服务健康，`update` 执行稳定版本更新。管理器会从已有部署的 Git origin 沿用 GitHub 或 Gitee 来源；也可用 `--source gitee|github` 显式指定。
+不带动作运行 `sudo xingchen` 会打开交互菜单。`status` 展示 Compose 服务状态，`logs` 显示最近 200 行总控日志，`restart` 重新创建并等待现有服务健康，`update` 执行稳定版本更新。快捷命令会从实际安装脚本推断自定义部署目录；管理器沿用已有 Git origin、镜像前缀、制品源和网络策略。`restart` 与重复安装尊重 `CONTROLLER_AGENT_ENABLED=false`，保留已有宿主 Agent 名称和分组。
+
+只有显式 `--source gitee|github` 才会改用对应的在线来源。切源时，即使版本号相同，更新器也会核对容器实际使用的镜像引用并重新部署。已有 `internal/offline` 部署不能通过普通 `xingchen update` 隐式改成公网模式，应继续使用底层更新器或离线 bundle。
 
 需要精细控制时，底层更新器可以先检查候选版本，再决定是否重启：
 
@@ -127,6 +129,32 @@ sudo bash ./deploy/update-controller.sh --auto
 稳定发布使用 `vX.Y.Z`。`CN=true` 部署从 Gitee 稳定标签发现新版本，并且只在 TCR 验证完成后才向 Gitee 推送版本标签；GitHub 部署从已公开 Release 发现版本。内部或离线部署优先读取本地或 `XINGCHEN_RELEASE_MANIFEST_URLS` 配置的 HTTPS manifest，并保存 last-known-good 缓存。联网 CI 先创建 draft Release，等待四个项目镜像、四个平台 Agent 制品、manifest、校验文件和两个架构离线包全部验证完成后才公开发布，避免目标机看见半成品版本。
 
 更新器不内置公共镜像加速器。控制台发起更新时拉取固定的 `vX.Y.Z` 或管理员配置的 OCI digest，并校验 OCI 版本标签，避免旧 `latest` 混入升级。自动更新只允许同一主版本内前进，跨主版本必须由管理员评估后手动执行。镜像源全部失败后，再按 `XINGCHEN_SOURCE_REPOSITORIES` 顺序使用目标版本标签作为 Docker 远程构建上下文；GitHub 只有显式配置时才会参与。`--source-build` 直接走配置的源码列表，`--no-source-fallback` 在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
+
+### 哪吒机制对照与腾讯云发布
+
+安装流程参考[哪吒 Dashboard 安装](https://nezha.wiki/guide/dashboard.html)、[Agent 安装](https://nezha.wiki/guide/agent.html)及 [Agent 更新配置](https://nezha.wiki/configuration/agent.html)。本项目继续使用 Docker Compose、独立 Setup 服务和当前版本协议：
+
+| 环节 | 本项目入口与行为 |
+| --- | --- |
+| Dashboard 首次安装 | 固定稳定标签的 `xingchen.sh install`，补齐依赖、拉取镜像、等待健康，再进入 `/setup` 创建管理员 |
+| 国内在线源 | `CN=true` 使用 Gitee 标签与腾讯云 TCR 六镜像，更新沿用部署来源 |
+| Dashboard 更新 | `xingchen update` 或控制台更新；手动检查刷新发布源，备份和候选验证完成后切换 |
+| Agent 安装 | 设备页生成总控同域短命令，校验安装器和制品，交换一次性接入令牌 |
+| Agent 更新 | 固定 updater 或“Agent 发布”灰度任务；默认从总控同域下载，自动更新限同一主版本 |
+| 更新成功判定 | Dashboard 验证服务健康；灰度 Agent 必须出现任务下发后的目标版本上报 |
+| 离线与回滚 | 已校验 bundle、原配置和数据库备份；Agent 恢复旧程序，数据库恢复由管理员执行 |
+
+当前国内镜像仓库为 `ccr.ccs.tencentyun.com/xc_monitor`，组件名称统一为 `monitor-for-server-{setup,server,web,agent,postgres,redis}`。GitHub Actions 使用仓库变量 `TCR_REGISTRY`、`TCR_NAMESPACE`、`TCR_USERNAME` 和仓库 Secret `TCR_PASSWORD`；本机登录保存在 Docker credential store，不能代替 CI 的 Secret。脚本不接受密码参数，手动发布机复用已有 Docker 登录。
+
+两条发布工作流按同一 Git ref 排队，构建后把实际输出 digest 交给 `deploy/mirror-release-image.sh`。复制前要求清单包含唯一的 Linux `amd64` 和 `arm64`，使用 `skopeo copy --all --preserve-digests` 从 `source@sha256:...` 复制，目标摘要一致才成功。目标已有相同摘要时跳过传输；失败有两轮受限重试。六个目标镜像还必须通过匿名拉取检查，才能公开完整 Release。离线包的 PostgreSQL/Redis 从本次腾讯云复制得到的 digest 拉取，包内保留原有镜像别名。
+
+发布机可用以下只读命令核验已经公开的版本；无需启动本机 Docker 引擎：
+
+```bash
+docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-setup:v1.20.18
+```
+
+仓库中的未发布改动不会自动进入上述版本或生产服务器。新版本应完成 CI、腾讯云制品和离线包校验后，再将相同稳定标签同步到 Gitee，以免国内安装先发现尚未就绪的版本。
 
 ### 内部源与完全离线安装
 
@@ -176,7 +204,7 @@ XINGCHEN_WEB_IMAGE=registry.internal.example/xingchen/web@sha256:<digest>
 XINGCHEN_AGENT_IMAGE=registry.internal.example/xingchen/agent@sha256:<digest>
 XINGCHEN_POSTGRES_IMAGE=registry.internal.example/xingchen/postgres@sha256:<digest>
 XINGCHEN_REDIS_IMAGE=registry.internal.example/xingchen/redis@sha256:<digest>
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.17/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.18/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<manifest.json 的 SHA256>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 XINGCHEN_SOURCE_REPOSITORIES=
@@ -284,6 +312,10 @@ curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https' 'https://monit
 
 `XINGCHEN_SERVER` 可以填写域名或 `域名:端口`，安装器会优先探测 `https://主机/healthz`。远程 HTTP 不会自动启用，只有明确传入 `--allow-insecure-http` 才允许明文连接；HTTPS 下载也禁止重定向降级到 HTTP。原生模式默认从总控取得 Linux/Windows amd64/arm64 制品并校验 manifest 中的大小和 SHA256；更新失败会恢复旧程序并验证服务存活。Docker 模式必须显式添加 `--docker`，并建议用 `--image` 或 `XINGCHEN_AGENT_IMAGE` 指向内部 OCI 仓库。源码回退仅使用显式配置的 `--source-url` 和 `--source-ref`。
 
+原生安装和更新在替换程序前还会运行候选二进制的 `--version`，确认实际版本与目标一致；固定版本源码回退默认检出同名稳定标签，不会把当前分支内容标成目标版本。总控远程制品源在下载过程中推进新版时，已选旧版本可继续从当前或上一份受信缓存取得，仍校验清单、兼容性和制品摘要。
+
+已有 Linux Agent 日常升级应执行 updater 的 `update`，保留原 JSON 配置、设备身份与 spool。重新运行 `install` 仍会按安装参数生成配置，不应用作保留所有自定义采集项的升级入口。
+
 - 容器：`xingchen-agent`，重启策略为 `unless-stopped`
 - 配置：`/etc/xingchen-agent/agent.json`，只读挂载到容器
 - 缓冲：Docker 卷 `xingchen-agent-spool`
@@ -344,6 +376,8 @@ Get-Content "$env:ProgramData\XingchenMonitor\agent.json" | ConvertFrom-Json | S
 ```
 
 不要输出或展示 `agent_key` 字段。
+
+Windows 同一总控、同一设备的重复安装会复用现有身份，结构化合并原配置，并保留未显式覆盖的采集项、缓存路径和自定义指标；配置先写入受限临时文件再替换。Windows updater 在停服务前完成备份和候选暂存，等待服务停止后替换；新程序启动失败时先停新服务再恢复旧程序，并复检服务状态。
 
 ## Agent 灰度发布与回滚
 

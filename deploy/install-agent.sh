@@ -66,7 +66,7 @@ source_ref_overridden=false
 source_build_timeout="${XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
 mirror_pull_timeout="${XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45}"
 agent_pull_timeout="${XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
-agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.17}}"
+agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.18}}"
 container_name="${XINGCHEN_AGENT_CONTAINER:-xingchen-agent}"
 container_overridden=false
 [[ -n "${XINGCHEN_AGENT_CONTAINER:-}" ]] && container_overridden=true
@@ -753,6 +753,23 @@ normalize_release_version() {
     return 0
   fi
   return 1
+}
+
+verify_agent_binary_version() {
+  local binary="$1" expected="$2" actual
+  actual="$(run_with_timeout 15 "${binary}" --version 2>/dev/null)" || return 1
+  actual="$(normalize_release_version "${actual}")" || return 1
+  [[ "${actual}" == "$(normalize_release_version "${expected}")" ]]
+}
+
+source_checkout_matches_release() {
+  local root="$1" ref="$2" current target changes
+  [[ -n "${root}" ]] && command -v git >/dev/null 2>&1 || return 1
+  current="$(git -C "${root}" rev-parse --verify --quiet HEAD)" || return 1
+  target="$(git -C "${root}" rev-parse --verify --quiet "${ref}^{commit}")" || return 1
+  [[ "${current}" == "${target}" ]] || return 1
+  changes="$(git -C "${root}" status --porcelain --untracked-files=normal -- agent)" || return 1
+  [[ -z "${changes}" ]]
 }
 
 get_release_version() {
@@ -1458,6 +1475,7 @@ install_local_agent_updater() {
       'if [[ "${automatic_update}" == true && "${command}" != rollback && -n "${current_version}" ]] && ! same_major "${current_version}" "${version}"; then echo "Agent 自动更新不会跨主版本：当前 ${current_version}，目标 ${version}；请人工评估后手动更新。"; exit 0; fi' \
       'if [[ "${command}" != rollback && -n "${current_version}" ]] && version_less "${version}" "${current_version}"; then echo "拒绝从 ${current_version} 降级到 ${version}；请显式使用 rollback ${version}。" >&2; exit 2; fi' \
       'download "${version}" || { echo "Agent ${version} 下载或校验失败。" >&2; exit 1; }' \
+      'actual_version="$(timeout 15 "${temp_dir}/xingchen-agent.new" --version 2>/dev/null)" || { echo "Agent 新程序版本检查失败。" >&2; exit 1; }; actual_version="$(normalize_version "${actual_version}")" || exit 1; [[ "${actual_version}" == "${version}" ]] || { echo "Agent 制品实际版本与目标版本不一致，已保留旧版本。" >&2; exit 1; }' \
       'atomic_install || { echo "Agent 更新失败，已恢复旧版本。" >&2; exit 1; }' \
       'echo "Agent 已更新到 ${version}。"'
   } > "${updater}"
@@ -1488,6 +1506,12 @@ install_local_agent() {
       fi
       echo "预编译 Agent Release 不可用，准备回退到源码构建。" >&2
       source_root="${project_root}"
+      if [[ -n "${release_version}" && "${source_ref_overridden}" != true ]]; then
+        source_ref="$(normalize_release_version "${release_version}")" || exit 2
+        if ! source_checkout_matches_release "${source_root}" "${source_ref}"; then
+          source_root=""
+        fi
+      fi
       if [[ -z "${source_root}" || ! -f "${source_root}/agent/go.mod" ]]; then
         if ! command -v git >/dev/null 2>&1; then
           if ((${#repository_urls[@]} == 0)); then
@@ -1523,6 +1547,10 @@ install_local_agent() {
   if [[ ! -f "${binary_path}" ]]; then
   echo "Agent binary not found: ${binary_path}" >&2
   exit 1
+  fi
+  if [[ -n "${release_version}" ]] && ! verify_agent_binary_version "${binary_path}" "${release_version}"; then
+    echo "Agent 制品实际版本与目标版本不一致，安装已取消。" >&2
+    exit 1
   fi
 
   exchange_enrollment_token

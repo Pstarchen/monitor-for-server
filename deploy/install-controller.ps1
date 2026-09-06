@@ -240,7 +240,7 @@ try {
         & $updateScript @updateArgs
     }
     if ($LASTEXITCODE -ne 0) { throw '总控镜像准备失败；如需本地构建请重试 -Build。' }
-    $composeUpArgs = @('up', '-d', '--remove-orphans')
+    $composeUpArgs = @('up', '-d', '--remove-orphans', '--wait', '--wait-timeout', '300')
     if ($Offline) { $composeUpArgs += @('--pull', 'never') }
     & docker compose @composeUpArgs
     if ($LASTEXITCODE -ne 0) { throw '总终端服务器启动失败。' }

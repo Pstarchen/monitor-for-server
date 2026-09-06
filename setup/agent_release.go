@@ -185,11 +185,26 @@ func (s *agentReleaseService) artifact(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	manifest, manifestSource, _, err := s.loadManifest(r.Context())
+	if err == nil && manifest.Version != requestedVersion {
+		// A release can advance between metadata selection and artifact download.
+		// Only remote releases retain previously verified download selections.
+		found := false
+		if manifestSource != "local" {
+			for _, name := range []string{"manifest.json", "manifest.previous.json"} {
+				cachedManifest, cacheErr := s.readManifestCacheFile(filepath.Join(s.cacheDir, name))
+				if cacheErr == nil && cachedManifest.decoded.Version == requestedVersion {
+					manifest, manifestSource = cachedManifest.decoded, cachedManifest.Source
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			err = fmt.Errorf("请求版本 %s 不在当前或上一份受信清单中", requestedVersion)
+		}
+	}
 	if err == nil {
 		err = s.ensureControllerCompatible(manifest)
-	}
-	if err == nil && manifest.Version != requestedVersion {
-		err = fmt.Errorf("请求版本 %s 不在当前受信清单中", requestedVersion)
 	}
 	var asset agentReleaseAsset
 	if err == nil {

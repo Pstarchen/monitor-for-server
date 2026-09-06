@@ -1013,9 +1013,9 @@ try {
     $services = @('setup', 'server', 'web')
     $imageKeys = @('XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE')
     $imageDefaults = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.17',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.17',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.17'
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.18',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.18',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.18'
     )
     $sourceContexts = @('.', 'server', 'web')
     $sourceDockerfiles = @('setup/Dockerfile', '', '')
@@ -1145,6 +1145,12 @@ try {
         return "v$actual"
     }
 
+    function Get-RunningServiceImage([string] $Service) {
+        $containerId = ([string] (& docker compose @composeArgs ps -q $Service 2>$null | Select-Object -First 1)).Trim()
+        if (-not $containerId) { return '' }
+        return ([string] (& docker inspect --format '{{.Config.Image}}' $containerId 2>$null | Select-Object -First 1)).Trim()
+    }
+
     if ($targetVersion) {
         $runningVersion = Get-RunningServiceVersion 'server'
         if ($runningVersion -and ([Version] $targetVersion.TrimStart('v')) -lt ([Version] $runningVersion.TrimStart('v'))) {
@@ -1152,8 +1158,10 @@ try {
         }
         if ($Apply) {
             $allCurrent = $true
-            foreach ($service in $services) {
-                if ((Get-RunningServiceVersion $service) -ne $targetVersion) {
+            for ($index = 0; $index -lt $services.Count; $index++) {
+                $service = $services[$index]
+                if ((Get-RunningServiceVersion $service) -ne $targetVersion -or
+                    -not [string]::Equals((Get-RunningServiceImage $service), $candidateImages[$index], [System.StringComparison]::Ordinal)) {
                     $allCurrent = $false
                     break
                 }

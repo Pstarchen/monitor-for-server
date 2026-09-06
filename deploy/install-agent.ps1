@@ -46,6 +46,11 @@ $legacyInstallDir = Join-Path $env:ProgramFiles 'GuanlanMonitor'
 $legacyDataDir = Join-Path $env:ProgramData 'GuanlanMonitor'
 $legacyConfigPath = Join-Path $legacyDataDir 'agent.json'
 $usingLegacyInstallation = $false
+$sourceRefOverridden = $PSBoundParameters.ContainsKey('SourceRef')
+if (-not $sourceRefOverridden -and -not [string]::IsNullOrWhiteSpace($env:XINGCHEN_SOURCE_REF)) {
+    $SourceRef = $env:XINGCHEN_SOURCE_REF
+    $sourceRefOverridden = $true
+}
 if ((Get-Service -Name $serviceName -ErrorAction SilentlyContinue) -eq $null -and ((Get-Service -Name $legacyServiceName -ErrorAction SilentlyContinue) -ne $null -or (Test-Path -LiteralPath $legacyConfigPath))) {
     $usingLegacyInstallation = $true
     $serviceName = $legacyServiceName
@@ -96,6 +101,20 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw '请以管理员身份运行此安装脚本。'
+}
+$preservedConfig = $null
+if ($Action -eq 'install' -and (Test-Path -LiteralPath $configPath)) {
+    try { $installedConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json }
+    catch { throw '现有 Agent 配置无法解析，安装已取消；请先修复配置或使用 update 更新程序。' }
+    if ([string]::IsNullOrWhiteSpace($ServerUrl)) { $ServerUrl = [string] $installedConfig.server_url }
+    if ([string]::IsNullOrWhiteSpace($DeviceId)) { $DeviceId = [string] $installedConfig.device_id }
+    if ($DeviceId -ceq [string] $installedConfig.device_id -and $ServerUrl.TrimEnd('/') -eq ([string] $installedConfig.server_url).TrimEnd('/')) {
+        $preservedConfig = $installedConfig
+        if ([string]::IsNullOrWhiteSpace($agentKey) -and [string]::IsNullOrWhiteSpace($enrollmentToken)) {
+            $agentKey = [string] $installedConfig.agent_key
+        }
+        if (-not $PSBoundParameters.ContainsKey('AllowInsecureHttp') -and $installedConfig.allow_insecure_http) { $AllowInsecureHttp = $true }
+    }
 }
 if ($Action -eq 'install' -and [string]::IsNullOrWhiteSpace($agentKey) -and [string]::IsNullOrWhiteSpace($enrollmentToken) -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
     $secureEnrollmentToken = Read-Host '请输入一次性 Agent 接入令牌（输入不会回显）' -AsSecureString
@@ -243,6 +262,44 @@ function Test-TrustedHttpsSource([string] $Value, [switch] $AllowQuery) {
     if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref] $parsed) -or $parsed.Scheme -ne 'https' -or $parsed.UserInfo -or $parsed.Fragment) { return $false }
     if (-not (Test-NetworkSourceAllowed $Value)) { return $false }
     return $AllowQuery -or [string]::IsNullOrWhiteSpace($parsed.Query)
+}
+
+function Assert-AgentBinaryVersion([string] $Path, [string] $Expected) {
+    $reported = [string] (& $Path --version 2>$null | Out-String)
+    if ($LASTEXITCODE -ne 0 -or (Normalize-ReleaseVersion $reported) -ne (Normalize-ReleaseVersion $Expected)) {
+        throw 'Agent 制品实际版本与目标版本不一致，已保留旧版本。'
+    }
+}
+
+function Merge-AgentConfiguration($Generated, $Existing, $ExplicitParameters) {
+    if ($null -eq $Existing) { return $Generated }
+    $parameterNames = @{
+        interval = 'Interval'; allow_command_execution = 'AllowCommandExecution'; allow_file_operations = 'AllowFileOperations'
+        monitored_services = 'MonitoredService'; monitored_processes = 'MonitoredProcess'
+        skip_process_collection = 'SkipProcesses'; collect_all_processes = 'CollectAllProcesses'; process_collection_limit = 'ProcessCollectionLimit'
+        skip_connection_count = 'SkipConnections'; skip_port_collection = 'SkipPorts'; port_collection_limit = 'PortCollectionLimit'
+        skip_container_collection = 'SkipContainers'; container_collection_limit = 'ContainerCollectionLimit'
+        disk_mountpoints = 'DiskMountpoint'; log_paths = 'LogPath'; integrity_paths = 'IntegrityPath'
+    }
+    $managed = @('server_url', 'device_id', 'agent_key', 'allow_insecure_http', 'update_status_path', 'update_request_path', 'update_launcher_path')
+    $merged = [ordered]@{}
+    foreach ($property in $Existing.PSObject.Properties) { $merged[$property.Name] = $property.Value }
+    foreach ($key in $Generated.Keys) {
+        if (-not $merged.Contains($key) -or $managed -contains $key -or ($parameterNames.ContainsKey($key) -and $ExplicitParameters.ContainsKey($parameterNames[$key]))) {
+            $merged[$key] = $Generated[$key]
+        }
+    }
+    return $merged
+}
+
+function Test-SourceCheckoutMatchesRelease([string] $Root, [string] $Ref) {
+    if ([string]::IsNullOrWhiteSpace($Root) -or -not (Get-Command git -ErrorAction SilentlyContinue)) { return $false }
+    $current = & git -C $Root rev-parse --verify --quiet HEAD 2>$null
+    if ($LASTEXITCODE -ne 0) { return $false }
+    $target = & git -C $Root rev-parse --verify --quiet "$Ref^{commit}" 2>$null
+    if ($LASTEXITCODE -ne 0 -or $current -cne $target) { return $false }
+    $changes = & git -C $Root status --porcelain --untracked-files=normal -- agent 2>$null
+    return $LASTEXITCODE -eq 0 -and [string]::IsNullOrWhiteSpace(($changes -join "`n"))
 }
 
 foreach ($source in $ReleaseManifestUrl) { Assert-NetworkSourcePolicy $source 'manifest 源' }
@@ -406,6 +463,12 @@ function Normalize-Version([string] `$Value) {
     if (`$Value.Trim() -notmatch '^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw '无效的 Agent Release 版本。' }
     return "v`$(`$Matches[1]).`$(`$Matches[2]).`$(`$Matches[3])"
 }
+function Assert-AgentBinaryVersion([string] `$Path, [string] `$Expected) {
+    `$reported = [string] (& `$Path --version 2>`$null | Out-String)
+    if (`$LASTEXITCODE -ne 0 -or (Normalize-Version `$reported) -ne (Normalize-Version `$Expected)) {
+        throw 'Agent 制品实际版本与目标版本不一致，已保留旧版本。'
+    }
+}
 function Compare-Version([string] `$Left, [string] `$Right) {
     return ([Version]`$Left.TrimStart('v')).CompareTo([Version]`$Right.TrimStart('v'))
 }
@@ -509,15 +572,25 @@ try {
     }
     if (-not `$downloaded) { throw 'Agent Release 下载或校验失败。' }
     `$newBinary = if (Test-Path -LiteralPath (Join-Path `$temp 'xingchen-agent.exe')) { Join-Path `$temp 'xingchen-agent.exe' } else { Join-Path `$temp 'guanlan-agent.exe' }
+    Assert-AgentBinaryVersion `$newBinary `$version
     `$backup = '$targetBinary.backup'
     `$staged = '$targetBinary.new'
     try { Write-AgentUpdateStatus 'APPLYING' } catch { }
-    Stop-Service -Name '$serviceName' -Force -ErrorAction SilentlyContinue
-    if (Test-Path -LiteralPath '$targetBinary') { Copy-Item -LiteralPath '$targetBinary' -Destination `$backup -Force }
-    try { Copy-Item -LiteralPath `$newBinary -Destination `$staged -Force; Move-Item -LiteralPath `$staged -Destination '$targetBinary' -Force; Start-Service -Name '$serviceName'; (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20)); Remove-Item -LiteralPath `$backup -Force -ErrorAction SilentlyContinue }
+    Copy-Item -LiteralPath '$targetBinary' -Destination `$backup -Force
+    Copy-Item -LiteralPath `$newBinary -Destination `$staged -Force
+    try {
+        Stop-Service -Name '$serviceName' -Force
+        (Get-Service -Name '$serviceName').WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20))
+        Move-Item -LiteralPath `$staged -Destination '$targetBinary' -Force
+        Start-Service -Name '$serviceName'
+        (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20))
+        Remove-Item -LiteralPath `$backup -Force -ErrorAction SilentlyContinue
+    }
     catch {
         try { Write-AgentUpdateStatus 'ROLLING_BACK' 'Agent health check failed; restoring previous binary.' } catch { }
         Remove-Item -LiteralPath `$staged -Force -ErrorAction SilentlyContinue
+        Stop-Service -Name '$serviceName' -Force -ErrorAction SilentlyContinue
+        (Get-Service -Name '$serviceName').WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20))
         if (Test-Path -LiteralPath `$backup) { Copy-Item -LiteralPath `$backup -Destination '$targetBinary' -Force }
         Start-Service -Name '$serviceName' -ErrorAction SilentlyContinue
         try { (Get-Service -Name '$serviceName').WaitForStatus('Running', [TimeSpan]::FromSeconds(20)) } catch { throw 'Agent 更新失败，且旧版本恢复后仍未存活。' }
@@ -696,6 +769,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $temporaryBinary = $null
 $temporarySource = $null
 $temporaryRelease = $null
+$temporaryConfigPath = $null
 try {
     if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
         $temporaryBinary = Join-Path ([IO.Path]::GetTempPath()) ("xingchen-agent-{0}.exe" -f [Guid]::NewGuid().ToString('N'))
@@ -711,7 +785,12 @@ try {
             }
             Write-Warning '预编译 Agent Release 不可用，回退到源码构建。'
             $sourceRoot = $projectRoot
-            if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
+            if (-not [string]::IsNullOrWhiteSpace($Version) -and -not $sourceRefOverridden) {
+                $SourceRef = Normalize-ReleaseVersion $Version
+                $sourceRoot = $null
+                if (Test-SourceCheckoutMatchesRelease $projectRoot $SourceRef) { $sourceRoot = $projectRoot }
+            }
+            if ([string]::IsNullOrWhiteSpace($sourceRoot) -or -not (Test-Path -LiteralPath (Join-Path $sourceRoot 'agent/go.mod'))) {
                 if ($RepositoryUrl.Count -eq 0) { throw '总控制品不可用，且未配置外部 Agent 源码仓库；请恢复总控、配置 -RepositoryUrl，或通过 -BinaryPath 提供已校验程序。' }
                 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw '未找到 Agent 源码。请安装 git，或通过 -BinaryPath 提供预编译 Agent。' }
                 $temporarySource = Join-Path ([IO.Path]::GetTempPath()) ("xingchen-agent-source-{0}" -f [Guid]::NewGuid().ToString('N'))
@@ -742,6 +821,7 @@ try {
     }
 
     $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
+    if (-not [string]::IsNullOrWhiteSpace($Version)) { Assert-AgentBinaryVersion $resolvedBinary $Version }
     Get-AgentEnrollmentCredential
     New-Item -ItemType Directory -Force -Path $installDir, $dataDir, (Join-Path $dataDir 'spool'), $updateRequestDir | Out-Null
     & icacls.exe $updateRequestDir /inheritance:r /grant:r 'SYSTEM:(OI)(CI)(F)' 'Administrators:(OI)(CI)(F)' | Out-Null
@@ -794,8 +874,14 @@ try {
         integrity_paths = $IntegrityPath
     }
     # Windows PowerShell 5 writes a BOM for -Encoding UTF8; Go's JSON decoder rejects it.
-    $configJson = $config | ConvertTo-Json -Depth 4
-    [IO.File]::WriteAllText($configPath, $configJson, [Text.UTF8Encoding]::new($false))
+    $config = Merge-AgentConfiguration $config $preservedConfig $PSBoundParameters
+    $configJson = $config | ConvertTo-Json -Depth 20
+    $temporaryConfigPath = "$configPath.$PID.tmp"
+    New-Item -ItemType File -Path $temporaryConfigPath -Force | Out-Null
+    & icacls.exe $temporaryConfigPath /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw '无法收紧 Agent 配置暂存文件权限。' }
+    [IO.File]::WriteAllText($temporaryConfigPath, $configJson, [Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $temporaryConfigPath -Destination $configPath -Force
     & icacls.exe $configPath /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw '无法收紧 Agent 配置文件权限。' }
 
@@ -816,6 +902,9 @@ finally {
     Remove-Item Env:XINGCHEN_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
     $agentKey = $null
     $enrollmentToken = $null
+    if ($temporaryConfigPath -and (Test-Path -LiteralPath $temporaryConfigPath)) {
+        Remove-Item -LiteralPath $temporaryConfigPath -Force
+    }
     if ($temporaryBinary -and (Test-Path -LiteralPath $temporaryBinary)) {
         Remove-Item -LiteralPath $temporaryBinary -Force
     }

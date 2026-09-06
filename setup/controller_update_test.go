@@ -183,7 +183,7 @@ func TestOverrideEnvironmentRemovesEarlierValues(t *testing.T) {
 }
 
 func TestNormalizeControllerVersionRejectsLeadingZeroes(t *testing.T) {
-	for _, value := range []string{"v01.20.5", "v1.020.5", "v1.20.05"} {
+	for _, value := range []string{"v01.20.5", "v1.020.5", "v1.20.05", "v+1.20.5", "v1.+20.5", "v1.20.+5", "v1.20.-0"} {
 		if got := normalizeControllerVersion(value); got != "" {
 			t.Fatalf("normalizeControllerVersion(%q) = %q, want empty", value, got)
 		}
@@ -243,6 +243,39 @@ func TestLatestReleaseUsesFreshCache(t *testing.T) {
 	}
 	if !cached || warning != "" || release.TagName != "v1.20.5" {
 		t.Fatalf("cached release = %+v, cached=%t warning=%q", release, cached, warning)
+	}
+}
+
+func TestManualControllerCheckRefreshesFreshCache(t *testing.T) {
+	originalWorkspace, originalEnvPath, originalStatePath := workspace, envPath, controllerUpdateStatePath
+	workspace = t.TempDir()
+	envPath = filepath.Join(workspace, ".env")
+	controllerUpdateStatePath = filepath.Join(workspace, ".controller-update-state.json")
+	t.Cleanup(func() {
+		workspace, envPath, controllerUpdateStatePath = originalWorkspace, originalEnvPath, originalStatePath
+		invalidateControllerInspectionCache()
+	})
+	now := time.Now().UTC()
+	controllerInspectionCache.Lock()
+	controllerInspectionCache.at = time.Now()
+	controllerInspectionCache.value = controllerInspection{version: "v1.20.10", services: []controllerServiceStatus{}}
+	controllerInspectionCache.Unlock()
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_ = json.NewEncoder(w).Encode(controllerRelease{TagName: "v1.20.12"})
+	}))
+	defer server.Close()
+	service := &controllerUpdateService{now: func() time.Time { return now }, client: server.Client(), apiBase: server.URL}
+	if err := writeControllerUpdateState(controllerUpdateState{
+		State: "CHECKING", LatestVersion: "v1.20.11", ReleaseFetchedAt: now.Add(-time.Minute).Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service.runCheck()
+	state := service.readState()
+	if requests.Load() != 1 || state.LatestVersion != "v1.20.12" || !state.UpdateAvailable || state.ReleaseCached {
+		t.Fatalf("manual check did not refresh the release: requests=%d state=%+v", requests.Load(), state)
 	}
 }
 

@@ -122,7 +122,7 @@ Windows 总控不会自动采集 Windows 宿主机。完成总控安装后，还
 ### 4.1 Linux：从 Gitee 安装
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.17
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.18
 ```
 
 该入口从 Gitee 取得固定版本编排文件，并从腾讯云 TCR 拉取六个公开预构建镜像；目标机不访问 GitHub/GHCR，也不编译应用。
@@ -130,7 +130,7 @@ curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for
 ### 4.2 Linux：能够访问 GitHub 时
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.17
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.18
 ```
 
 安装器会自动完成这些工作：
@@ -770,7 +770,7 @@ curl -v https://monitor.example.com/healthz
 
 ### 11.8 检查更新显示缓存或发布源不可用
 
-版本检查缓存 20 分钟是正常设计。Gitee 标签 API、GitHub Release API 或内部 manifest 临时失败时会保留 last-known-good 缓存并显示提示。中国模式若持续出现该提示，先确认服务器能访问 `gitee.com/api/v5`；判断发布是否完整时，应同时检查版本来源、四个应用镜像、PostgreSQL/Redis 依赖镜像和四个平台 Agent 制品。
+后台版本检查会缓存 20 分钟；控制台手动检查会立即刷新发布源。Gitee 标签 API、GitHub Release API 或内部 manifest 临时失败时会保留 last-known-good 缓存并显示提示。中国模式若持续出现该提示，先确认服务器能访问 `gitee.com/api/v5`；判断发布是否完整时，应同时检查版本来源、四个应用镜像、PostgreSQL/Redis 依赖镜像和四个平台 Agent 制品。
 
 命令行更新失败时查看输出中的具体镜像源。更新器按配置的内部镜像、镜像自身地址和源码仓库顺序回退；完全断网环境应使用离线 bundle，不要等待公共源超时。
 

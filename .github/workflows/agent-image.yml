@@ -6,6 +6,10 @@ on:
     tags: ['v*.*.*']
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   TCR_REGISTRY: ${{ vars.TCR_REGISTRY }}
@@ -49,6 +53,9 @@ jobs:
 
       - name: Test GitHub Release mutability guard
         run: bash deploy/check-github-release-mutable_test.sh
+
+      - name: Test release image mirroring
+        run: bash deploy/mirror-release-image_test.sh
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -113,6 +120,7 @@ jobs:
         run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ./agent
@@ -130,26 +138,14 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
 
       - name: Mirror image to Tencent Cloud TCR
-        timeout-minutes: 65
+        timeout-minutes: 70
         env:
           SOURCE_IMAGE: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
           TARGET_IMAGE: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/monitor-for-server-agent:${{ steps.meta.outputs.version }}
+          SOURCE_DIGEST: ${{ steps.build.outputs.digest }}
+          XINGCHEN_MIRROR_TIMEOUT_SECONDS: '1800'
         shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in 1 2; do
-            if timeout --signal=TERM --kill-after=30s 30m \
-              skopeo copy --all --retry-times 5 \
-                --authfile "${HOME}/.docker/config.json" \
-                "docker://${SOURCE_IMAGE}" "docker://${TARGET_IMAGE}"; then
-              exit 0
-            fi
-            [[ "${attempt}" -lt 2 ]] || break
-            echo "Tencent Cloud mirror attempt ${attempt} failed; retrying in 15 seconds." >&2
-            sleep 15
-          done
-          echo "Tencent Cloud mirror failed after 2 attempts: ${TARGET_IMAGE}" >&2
-          exit 1
+        run: bash deploy/mirror-release-image.sh "${SOURCE_IMAGE}" "${TARGET_IMAGE}" "${SOURCE_DIGEST}"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

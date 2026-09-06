@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -405,7 +406,7 @@ func TestAgentReleasePromotesOnlyCompleteReleaseAndRejectsReplay(t *testing.T) {
 	}
 
 	first := requestAgentRelease(t, service, "/api/setup/agent-release?os=linux&arch=amd64")
-	assertAgentReleaseVersion(t, first, http.StatusOK, "v1.20.10", false)
+	firstSelection := assertAgentReleaseVersion(t, first, http.StatusOK, "v1.20.10", false)
 	active, err := service.readManifestCacheFile(filepath.Join(service.cacheDir, "manifest.json"))
 	if err != nil || active.decoded.Version != "v1.20.10" || !active.ArtifactsReady {
 		t.Fatalf("initial active cache = %+v, err = %v", active, err)
@@ -431,6 +432,17 @@ func TestAgentReleasePromotesOnlyCompleteReleaseAndRejectsReplay(t *testing.T) {
 	if err != nil || previous.decoded.Version != "v1.20.10" {
 		t.Fatalf("previous cache = %+v, err = %v", previous, err)
 	}
+	inFlightDownload := requestAgentArtifact(t, service, firstSelection.ArtifactURL)
+	if inFlightDownload.Code != http.StatusOK || !bytes.Equal(inFlightDownload.Body.Bytes(), oldRelease.contents[firstSelection.File]) {
+		t.Fatalf("download selected before promotion = %d %s", inFlightDownload.Code, inFlightDownload.Body.String())
+	}
+	if inFlightDownload.Header().Get("X-Xingchen-Artifact-SHA256") != firstSelection.SHA256 {
+		t.Fatal("in-flight download did not preserve the selected checksum")
+	}
+	unknownVersion := requestAgentArtifact(t, service, "/api/setup/agent-artifact?os=linux&arch=amd64&version=v1.20.9")
+	if unknownVersion.Code != http.StatusBadGateway {
+		t.Fatalf("untrusted historical version = %d, want 502", unknownVersion.Code)
+	}
 
 	replacement := makeRelease("v1.20.11", "replacement")
 	current.Store(replacement)
@@ -447,6 +459,12 @@ func TestAgentReleasePromotesOnlyCompleteReleaseAndRejectsReplay(t *testing.T) {
 	active, err = service.readManifestCacheFile(filepath.Join(service.cacheDir, "manifest.json"))
 	if err != nil || active.decoded.Version != "v1.20.11" {
 		t.Fatalf("replayed manifest replaced active cache: %+v, err = %v", active, err)
+	}
+	newDigest := sha256.Sum256(newRelease.manifest)
+	service.manifestSHA256 = hex.EncodeToString(newDigest[:])
+	pinnedDownload := requestAgentArtifact(t, service, firstSelection.ArtifactURL)
+	if pinnedDownload.Code != http.StatusBadGateway {
+		t.Fatalf("previous manifest outside current SHA256 pin = %d, want 502", pinnedDownload.Code)
 	}
 }
 

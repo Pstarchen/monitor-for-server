@@ -132,9 +132,9 @@ type controllerImage struct {
 }
 
 var controllerImages = []controllerImage{
-	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.17"},
-	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.17"},
-	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.17"},
+	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.18"},
+	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.18"},
+	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.18"},
 }
 
 func newControllerUpdateService() *controllerUpdateService {
@@ -299,7 +299,7 @@ func (s *controllerUpdateService) runCheck() {
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateCheckTimeout)
 	defer cancel()
 	state := s.readState()
-	if err := s.refreshReleaseState(ctx, &state, false); err != nil {
+	if err := s.refreshReleaseState(ctx, &state, true); err != nil {
 		log.Printf("controller release check failed: %v", err)
 		state.State = "ERROR"
 		state.StartedAt = ""

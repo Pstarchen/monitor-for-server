@@ -75,7 +75,7 @@ grep -F 'internal 网络模式下预编译 Agent Release 不可用，拒绝源�
   release_manifest_urls=''
   release_base_urls=''
   repository_urls=()
-  agent_image=ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17
+  agent_image=ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18
   XINGCHEN_AGENT_IMAGE_MIRRORS=''
   agent_mode=native
   validate_network_configuration
@@ -239,6 +239,49 @@ mkdir -p "${rendered_dir}/systemd"
   grep -F 'write_update_status APPLYING' "${manager_updater_path}" >/dev/null
   grep -F "release_max_redirects='0'" "${manager_updater_path}" >/dev/null
   grep -F -- '--max-redirs "${release_max_redirects}"' "${manager_updater_path}" >/dev/null
+  source <(awk '/^normalize_release_version\(\)/ { capture = 1 } /^get_release_version\(\)/ { exit } capture { print }' "${installer}")
+  run_with_timeout() { shift; "$@"; }
+  version_fixture="${rendered_dir}/version-fixture"
+  mkdir -p "${version_fixture}"
+  printf '#!/usr/bin/env bash\nprintf "v1.20.14\\n"\n' > "${version_fixture}/xingchen-agent.new"
+  chmod +x "${version_fixture}/xingchen-agent.new"
+  verify_agent_binary_version "${version_fixture}/xingchen-agent.new" v1.20.14
+  (
+    git() {
+      if [[ "$*" == *' status '* ]]; then printf '%s' "${test_source_changes:-}"; return; fi
+      if [[ "${*: -1}" == HEAD ]]; then printf 'current-commit'; else printf '%s' "${test_target_commit:-current-commit}"; fi
+    }
+    source_checkout_matches_release "${rendered_dir}" v1.20.14
+    if test_target_commit=other-commit source_checkout_matches_release "${rendered_dir}" v1.20.14; then
+      echo 'Pinned source fallback accepted a different local commit.' >&2
+      exit 1
+    fi
+    if test_source_changes=' M agent/main.go' source_checkout_matches_release "${rendered_dir}" v1.20.14; then
+      echo 'Pinned source fallback accepted modified local source.' >&2
+      exit 1
+    fi
+  )
+  if verify_agent_binary_version "${version_fixture}/xingchen-agent.new" v1.20.18; then
+    echo 'Installer accepted a binary with a mismatched version.' >&2
+    exit 1
+  fi
+  preflight="$(awk '/^actual_version=/ { print }' "${manager_updater_path}")"
+  [[ -n "${preflight}" ]]
+  (
+    normalize_version() { normalize_release_version "$@"; }
+    temp_dir="${version_fixture}"
+    version=v1.20.14
+    source <(printf '%s\n' "${preflight}")
+  )
+  if (
+    normalize_version() { normalize_release_version "$@"; }
+    temp_dir="${version_fixture}"
+    version=v1.20.18
+    source <(printf '%s\n' "${preflight}")
+  ); then
+    echo 'Generated updater accepted a binary with a mismatched version.' >&2
+    exit 1
+  fi
 )
 if [[ "${EUID}" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
   echo 'install-agent.sh behavior tests skipped: root or sudo is required.'
@@ -260,7 +303,7 @@ elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
   [[ "${TEST_CONTAINER_EXISTS:-0}" == "1" ]]
 elif [[ "${1:-}" == "image" && "${2:-}" == "inspect" && "${3:-}" == "--format" ]]; then
   if [[ "${4:-}" == *'org.opencontainers.image.version'* ]]; then
-    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.17}"
+    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.18}"
   else
     printf 'new-agent-image\n'
   fi
@@ -438,8 +481,8 @@ run_installer_stdin() {
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
-grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18' "${log_file}" >/dev/null
 grep -F 'docker run -d --name xingchen-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
@@ -528,8 +571,8 @@ TEST_FAIL_GITEE_BUILD=1
 TEST_REPOSITORY_URLS='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git'
 TEST_ALLOW_GITEE=true
 run_installer 1
-grep -F 'docker build --pull --build-arg VERSION=v1.20.17 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17 https://gitee.com/starchen520/monitor-for-server.git#v1.20.17:agent' "${log_file}" >/dev/null
-grep -F 'docker build --pull --build-arg VERSION=v1.20.17 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17 https://github.com/Pstarchen/monitor-for-server.git#v1.20.17:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.18 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18 https://gitee.com/starchen520/monitor-for-server.git#v1.20.18:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.18 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18 https://github.com/Pstarchen/monitor-for-server.git#v1.20.18:agent' "${log_file}" >/dev/null
 TEST_FAIL_AGENT_PULLS=0
 TEST_FAIL_GITEE_BUILD=0
 TEST_REPOSITORY_URLS=''
@@ -576,7 +619,7 @@ fi
 : > "${log_file}"
 release_fixture="${temp_dir}/release-fixture"
 mkdir -p "${release_fixture}/content"
-printf '#!/usr/bin/env bash\nexit 0\n' > "${release_fixture}/content/xingchen-agent"
+printf '#!/usr/bin/env bash\nprintf "v1.20.14\\n"\n' > "${release_fixture}/content/xingchen-agent"
 chmod +x "${release_fixture}/content/xingchen-agent"
 TEST_RELEASE_FILE=xingchen-agent_1.20.14_linux_amd64.tar.gz
 TEST_RELEASE_ARCHIVE="${release_fixture}/${TEST_RELEASE_FILE}"
@@ -637,7 +680,7 @@ fi
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1 --binary "${binary_path}"
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18' "${log_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
@@ -652,7 +695,7 @@ grep -F '"allow_file_operations": true' "${config_file}" >/dev/null
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer_stdin 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 
 : > "${log_file}"
@@ -845,8 +888,8 @@ run_as_root grep -F 'NETWORK_MODE=offline' "${temp_dir}/manager/install.env" >/d
 run_as_root grep -F "network_mode='offline'" "${temp_dir}/manager/update-agent.sh" >/dev/null
 
 : > "${log_file}"
-env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_AGENT_IMAGE_VERSION=v1.20.17" \
-  bash "${temp_dir}/manager/update-agent.sh" update v1.20.17
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_AGENT_IMAGE_VERSION=v1.20.18" \
+  bash "${temp_dir}/manager/update-agent.sh" update v1.20.18
 if grep -Eq '^(curl|docker pull|docker build|git) ' "${log_file}"; then
   echo 'offline Agent updater performed an outbound-capable operation.' >&2
   exit 1

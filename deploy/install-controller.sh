@@ -294,6 +294,7 @@ write_env_value() {
 
 ensure_controller_agent_env() {
   [[ "$(uname -s)" == "Linux" ]] || return
+  [[ "${controller_agent_enabled}" == true ]] || return 0
 
   local device_id agent_key
   device_id="$(read_env_value CONTROLLER_AGENT_DEVICE_ID)"
@@ -304,8 +305,8 @@ ensure_controller_agent_env() {
   write_env_value CONTROLLER_AGENT_ENABLED true
   write_env_value CONTROLLER_AGENT_DEVICE_ID "${device_id}"
   write_env_value CONTROLLER_AGENT_KEY "${agent_key}"
-  write_env_value CONTROLLER_AGENT_NAME "总控服务器"
-  write_env_value CONTROLLER_AGENT_GROUP "控制平面"
+  [[ -n "$(read_env_value CONTROLLER_AGENT_NAME)" ]] || write_env_value CONTROLLER_AGENT_NAME "总控服务器"
+  [[ -n "$(read_env_value CONTROLLER_AGENT_GROUP)" ]] || write_env_value CONTROLLER_AGENT_GROUP "控制平面"
 }
 
 write_bootstrap_env() {
@@ -391,9 +392,18 @@ if [[ "${offline}" == true ]]; then
 fi
 
 profile_args=()
+controller_agent_enabled="${CONTROLLER_AGENT_ENABLED:-$(read_env_value CONTROLLER_AGENT_ENABLED)}"
+controller_agent_enabled="${controller_agent_enabled:-true}"
+controller_agent_enabled="${controller_agent_enabled,,}"
+if [[ "${controller_agent_enabled}" != true && "${controller_agent_enabled}" != false ]]; then
+  echo "CONTROLLER_AGENT_ENABLED 必须是 true 或 false。" >&2
+  exit 2
+fi
 if [[ "$(uname -s)" == "Linux" ]]; then
+  write_env_value CONTROLLER_AGENT_ENABLED "${controller_agent_enabled}"
+  export CONTROLLER_AGENT_ENABLED="${controller_agent_enabled}"
   ensure_controller_agent_env
-  profile_args=(--profile host-monitoring)
+  [[ "${controller_agent_enabled}" != true ]] || profile_args=(--profile host-monitoring)
 else
   echo "当前系统不是 Linux，已跳过总控宿主机自动监控。"
 fi
@@ -413,7 +423,7 @@ fi
 
 docker compose "${profile_args[@]}" config --quiet
 controller_services=(setup server web)
-if [[ "$(uname -s)" == "Linux" ]]; then
+if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled}" == true ]]; then
   controller_services+=(controller-agent)
 fi
 if [[ "${build}" == true && "${source_build}" == true ]]; then
@@ -439,7 +449,7 @@ else
   fi
   bash "${script_dir}/update-controller.sh" "${update_args[@]}"
 fi
-compose_up_args=(-d --remove-orphans)
+compose_up_args=(-d --remove-orphans --wait --wait-timeout 300)
 if [[ "${offline}" == true ]]; then
   compose_up_args+=(--pull never)
 fi

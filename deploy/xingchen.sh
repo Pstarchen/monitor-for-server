@@ -26,13 +26,22 @@ Options:
 
 Environment:
   CN=true selects Gitee when --source is omitted. An existing installation
-  keeps using the host configured as its git origin.
+  keeps its configured sources and images. Explicit --source switches the
+  installation to that public source. Installed commands infer their directory.
 USAGE
 }
 
 command_name=""
 requested_version="${XINGCHEN_VERSION:-}"
 install_dir="${XINGCHEN_INSTALL_DIR:-${DEFAULT_INSTALL_DIR}}"
+if [[ -z "${XINGCHEN_INSTALL_DIR:-}" ]]; then
+  manager_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
+  manager_root="$(dirname -- "$(dirname -- "${manager_path}")")"
+  if [[ -d "${manager_root}/.git" && -f "${manager_root}/docker-compose.yml" &&
+        ( -L "${BASH_SOURCE[0]}" || -f "${manager_root}/.env" ) ]]; then
+    install_dir="${manager_root}"
+  fi
+fi
 source_name="${XINGCHEN_SOURCE:-}"
 source_explicit=false
 assume_yes=false
@@ -335,6 +344,65 @@ configure_release_environment() {
   fi
 }
 
+read_installation_setting() {
+  local key="$1" value
+  [[ -e "${install_dir}/.env" || -L "${install_dir}/.env" ]] || return 1
+  [[ -f "${install_dir}/.env" && -r "${install_dir}/.env" && ! -L "${install_dir}/.env" ]] || return 2
+  value="$(awk -v key="${key}" '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      sub(/^[ \t]+/, "", line)
+      if (index(line, key "=") == 1) { value = substr(line, length(key) + 2); count++ }
+      else if (line ~ ("^(export[ \t]+)?" key "([^A-Za-z0-9_]|$)")) invalid = 1
+    }
+    END { if (invalid || count > 1) exit 2; if (!count) exit 1; print value }
+  ' "${install_dir}/.env")" || return $?
+  if [[ "${value}" == [\"\']* || "${value}" == *[\"\'] ]]; then
+    [[ ${#value} -ge 2 && "${value:0:1}" == "${value: -1}" ]] || return 2
+    value="${value:1:${#value}-2}"
+  fi
+  [[ "${value}" != *\"* && "${value}" != *\'* ]] || return 2
+  printf '%s' "${value}"
+}
+
+configure_update_environment() {
+  local version="$1" key value leaf repository read_status
+  configure_release_environment "${version}"
+  [[ "${source_explicit}" == false ]] || return 0
+  for key in \
+    XINGCHEN_NETWORK_MODE XINGCHEN_ALLOW_GITEE XINGCHEN_SOURCE_REPOSITORIES \
+    XINGCHEN_CONTROLLER_ALLOW_GITHUB_API XINGCHEN_RELEASE_MANIFEST_PATH \
+    XINGCHEN_RELEASE_MANIFEST_URLS XINGCHEN_RELEASE_MANIFEST_SHA256 \
+    XINGCHEN_AGENT_RELEASE_BASE_URLS XINGCHEN_AGENT_OFFLINE_DIR \
+    XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE XINGCHEN_AGENT_IMAGE \
+    XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE; do
+    if value="$(read_installation_setting "${key}")"; then
+      :
+    else
+      read_status=$?
+      [[ "${read_status}" -ne 1 ]] || continue
+      echo "现有 .env 中的 ${key} 无法安全解析，拒绝覆盖。" >&2
+      return 2
+    fi
+    case "${key}" in
+      XINGCHEN_*_IMAGE)
+        if [[ -n "${value}" && "${value}" != *@* ]]; then
+          leaf="${value##*/}"
+          repository="${leaf%:*}"
+          if [[ "${key}" != XINGCHEN_POSTGRES_IMAGE && "${key}" != XINGCHEN_REDIS_IMAGE ]] ||
+             [[ "${value}" == */* && ( "${repository}" == monitor-for-server-postgres || "${repository}" == monitor-for-server-redis ) ]]; then
+            [[ "${leaf}" != *:* ]] || value="${value%:*}"
+            value="${value}:${version}"
+          fi
+        fi
+        ;;
+    esac
+    printf -v "${key}" '%s' "${value}"
+    export "${key}"
+  done
+}
+
 persist_manager_settings() {
   local env_file="${install_dir}/.env" settings_file temporary key value
   local keys=(
@@ -364,6 +432,7 @@ persist_manager_settings() {
     {
       separator = index($0, "=")
       key = separator ? substr($0, 1, separator - 1) : ""
+      gsub(/^[ \t]+|[ \t]+$/, "", key)
       if (key in values) {
         if (!(key in written)) { print key "=" values[key]; written[key] = 1 }
         next
@@ -528,6 +597,19 @@ handle_update_signal() {
 run_update() {
   require_root
   require_deployment
+  if [[ "${source_explicit}" == false ]]; then
+    local network_mode
+    if network_mode="$(read_installation_setting XINGCHEN_NETWORK_MODE)"; then
+      :
+    elif [[ $? -ne 1 ]]; then
+      echo "现有 .env 中的 XINGCHEN_NETWORK_MODE 无法安全解析，拒绝在线更新。" >&2
+      exit 2
+    fi
+    if [[ -n "${network_mode}" && "${network_mode,,}" != public ]]; then
+      echo "当前部署不是 public 网络模式；请使用对应的内部或离线更新流程，或明确 --source 切换在线源。" >&2
+      exit 2
+    fi
+  fi
   install_bootstrap_dependencies
   if [[ -n "$(git -C "${install_dir}" status --porcelain --untracked-files=no)" ]]; then
     echo "部署目录存在已修改的受版本控制文件，拒绝覆盖；请先处理这些改动。" >&2
@@ -578,7 +660,7 @@ run_update() {
     || { echo "取得的源码标签校验失败。" >&2; exit 1; }
   git -C "${install_dir}" checkout --detach "${version}"
 
-  configure_release_environment "${version}"
+  configure_update_environment "${version}"
   persist_manager_settings
 
   set +e
@@ -597,7 +679,10 @@ run_update() {
 
 run_compose() {
   require_deployment
-  (cd "${install_dir}" && docker compose --profile host-monitoring "$@")
+  local enabled profile_args=()
+  enabled="$(read_installation_setting CONTROLLER_AGENT_ENABLED || true)"
+  [[ "${enabled,,}" == false ]] || profile_args=(--profile host-monitoring)
+  (cd "${install_dir}" && docker compose "${profile_args[@]}" "$@")
 }
 
 case "${command_name}" in

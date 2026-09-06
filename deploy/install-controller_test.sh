@@ -41,7 +41,11 @@ SCRIPT
 printf 'curl %s\n' "$*" >> "${TEST_LOG}"
 exit 0
 SCRIPT
-  chmod +x "${root}/docker" "${root}/curl"
+  cat > "${root}/uname" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' Linux
+SCRIPT
+  chmod +x "${root}/docker" "${root}/curl" "${root}/uname"
 }
 
 run_installer() {
@@ -82,6 +86,37 @@ grep -Fx 'CUSTOM_SETTING="preserve-me"' "${existing_root}/.env" >/dev/null \
   || fail 'Unrelated existing settings were changed.'
 grep -F 'updater mode=internal allow_gitee=true' "${existing_root}/commands.log" >/dev/null \
   || fail 'Inherited network policy was not passed to the updater.'
+grep -F -- 'up -d --remove-orphans --wait --wait-timeout 300' "${existing_root}/commands.log" >/dev/null \
+  || fail 'Installer did not wait for all Controller services to become healthy.'
+
+disabled_agent_root="$(make_fixture disabled-controller-agent)"
+make_fake_runtime "${disabled_agent_root}/bin"
+cat > "${disabled_agent_root}/.env" <<'ENV'
+POSTGRES_PASSWORD="existing-password"
+CONTROLLER_AGENT_ENABLED=false
+CONTROLLER_AGENT_NAME="custom-controller"
+CONTROLLER_AGENT_GROUP="custom-group"
+ENV
+run_installer "${disabled_agent_root}" env
+grep -Fx 'CONTROLLER_AGENT_ENABLED=false' "${disabled_agent_root}/.env" >/dev/null \
+  || fail 'Installer enabled a disabled Controller Agent.'
+if grep -F -- '--profile host-monitoring' "${disabled_agent_root}/commands.log" >/dev/null; then
+  fail 'Installer started host monitoring when disabled.'
+fi
+
+named_agent_root="$(make_fixture named-controller-agent)"
+make_fake_runtime "${named_agent_root}/bin"
+cat > "${named_agent_root}/.env" <<'ENV'
+POSTGRES_PASSWORD="existing-password"
+CONTROLLER_AGENT_ENABLED=true
+CONTROLLER_AGENT_NAME="custom-controller"
+CONTROLLER_AGENT_GROUP="custom-group"
+ENV
+run_installer "${named_agent_root}" env
+for expected in 'CONTROLLER_AGENT_NAME="custom-controller"' 'CONTROLLER_AGENT_GROUP="custom-group"'; do
+  grep -Fx "${expected}" "${named_agent_root}/.env" >/dev/null \
+    || fail 'Installer replaced the configured Controller Agent identity.'
+done
 
 process_root="$(make_fixture process-policy)"
 make_fake_runtime "${process_root}/bin"

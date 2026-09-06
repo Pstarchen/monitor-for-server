@@ -127,6 +127,7 @@ CUSTOM_SETTING="preserve-me"
     Assert-True ($lines -contains 'XINGCHEN_ALLOW_GITEE="true"') 'Existing Gitee policy was not preserved.'
     Assert-True ($lines -contains 'CUSTOM_SETTING="preserve-me"') 'An unrelated existing setting was changed.'
     Assert-True ([System.IO.File]::ReadAllText($fixture.Log).Contains('updater mode=internal allow_gitee=true')) 'Inherited policy was not passed to the updater.'
+    Assert-True ([System.IO.File]::ReadAllText($fixture.Log).Contains('up -d --remove-orphans --wait --wait-timeout 300')) 'Installer did not wait for all Controller services to become healthy.'
 
     $fixture = New-TestFixture 'process-policy' @'
 POSTGRES_PASSWORD="existing-password"

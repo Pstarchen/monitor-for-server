@@ -524,13 +524,13 @@ image_value() {
 
 image_keys=(XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE)
 source_images=(
-  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.17)"
-  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.17)"
-  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.17)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.18)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.18)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.18)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   image_keys+=(XINGCHEN_AGENT_IMAGE)
-  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.17)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18)")
 fi
 dependency_image_keys=(XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE)
 dependency_source_images=(
@@ -673,6 +673,13 @@ running_service_version() {
   printf 'v%s' "${normalized}"
 }
 
+running_service_image() {
+  local service="$1" container_id
+  container_id="$(docker compose "${compose_args[@]}" ps -q "${service}" 2>/dev/null || true)"
+  [[ -n "${container_id}" ]] || return 1
+  docker inspect --format '{{.Config.Image}}' "${container_id}" 2>/dev/null
+}
+
 guard_target_version() {
   [[ -n "${target_version}" ]] || return 0
   local current_version service service_version index all_current=true
@@ -682,9 +689,11 @@ guard_target_version() {
     exit 2
   fi
   [[ "${mode}" == apply ]] || return 0
-  for service in "${services[@]}"; do
+  for index in "${!services[@]}"; do
+    service="${services[index]}"
     service_version="$(running_service_version "${service}" || true)"
-    if [[ "${service_version}" != "${target_version}" ]]; then
+    if [[ "${service_version}" != "${target_version}" ||
+          "$(running_service_image "${service}" || true)" != "${candidate_images[index]}" ]]; then
       all_current=false
       break
     fi

@@ -202,13 +202,14 @@ run_manager() {
     PATH="${fake_bin}:${PATH}" \
     HOME="${root}/home" \
     TMPDIR="${root}/tmp" \
+    MSYS="${MSYS:-}" \
     TEST_LOG="${root}/commands.log" \
     TEST_CASE_ROOT="${root}" \
     TEST_XINGCHEN_SOURCE="${manager}" \
     XINGCHEN_MANAGER_ALLOW_NON_ROOT=true \
     XINGCHEN_MANAGER_LINK="${root}/manager-bin/xingchen" \
     CN="${cn}" \
-    bash "${manager}" "$@"
+    bash "${TEST_MANAGER_ENTRY:-${manager}}" "$@"
 }
 
 assert_failed_without_external_calls() {
@@ -285,6 +286,12 @@ for expected_setting in \
     || fail "CN install did not export ${expected_setting}."
 done
 
+TEST_MANAGER_ENTRY="${cn_root}/manager-bin/xingchen" run_manager "${cn_root}" false status
+grep -F "git -C ${cn_root}/controller remote get-url origin" "${cn_root}/commands.log" >/dev/null \
+  || fail 'Installed manager link did not infer the custom installation directory.'
+grep -E '^docker compose .*ps( |$)' "${cn_root}/commands.log" >/dev/null \
+  || fail 'Installed manager link did not reach the custom deployment.'
+
 source_override_root="$(new_case source-override)"
 run_manager "${source_override_root}" true install \
   --version v1.20.16 \
@@ -354,12 +361,12 @@ make_update_deployment() {
   printf '%s\n' 'services: {}' > "${deployment}/docker-compose.yml"
   printf '%s\n' \
     'XINGCHEN_TARGET_VERSION=v1.20.16' \
-    'XINGCHEN_NETWORK_MODE=offline' \
-    'XINGCHEN_RELEASE_MANIFEST_PATH=/workspace/release/versions/v1.20.16/manifest.json' \
-    'XINGCHEN_RELEASE_MANIFEST_URLS=https://github.com/Pstarchen/monitor-for-server/releases/latest/download/manifest.json' \
-    'XINGCHEN_RELEASE_MANIFEST_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-    'XINGCHEN_AGENT_RELEASE_BASE_URLS=https://github.com/Pstarchen/monitor-for-server/releases/download' \
-    'XINGCHEN_AGENT_OFFLINE_DIR=/workspace/release/versions/v1.20.16/assets' \
+    'XINGCHEN_NETWORK_MODE=public' \
+    'XINGCHEN_RELEASE_MANIFEST_PATH=' \
+    'XINGCHEN_RELEASE_MANIFEST_URLS=' \
+    'XINGCHEN_RELEASE_MANIFEST_SHA256=' \
+    'XINGCHEN_AGENT_RELEASE_BASE_URLS=' \
+    'XINGCHEN_AGENT_OFFLINE_DIR=' \
     'CUSTOM_SETTING=preserve-me' > "${deployment}/.env"
   printf '%s\n' '2222222222222222222222222222222222222222' > "${deployment}/.fake-commit"
   printf '%s\n' '2222222222222222222222222222222222222222' > "${deployment}/.fake-tag-v1.20.16"
@@ -432,6 +439,67 @@ for expected_setting in \
     || fail "Successful updater did not receive ${expected_setting}."
 done
 
+custom_source_root="$(new_case update-custom-source)"
+make_update_deployment "${custom_source_root}" 0
+cat >> "${custom_source_root}/controller/.env" <<'ENV'
+XINGCHEN_SERVER_IMAGE=custom.tencentcloudcr.com/team/dashboard-server:v1.20.16
+XINGCHEN_WEB_IMAGE=custom.tencentcloudcr.com/team/dashboard-web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+XINGCHEN_POSTGRES_IMAGE=custom.tencentcloudcr.com/team/postgres:16-alpine
+XINGCHEN_REDIS_IMAGE=custom.tencentcloudcr.com/team/monitor-for-server-redis:v1.20.16
+XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=true
+ENV
+sed -i 's#^XINGCHEN_RELEASE_MANIFEST_URLS=.*#XINGCHEN_RELEASE_MANIFEST_URLS=https://releases.example.test/latest/manifest.json#' "${custom_source_root}/controller/.env"
+sed -i 's#^XINGCHEN_AGENT_RELEASE_BASE_URLS=.*#XINGCHEN_AGENT_RELEASE_BASE_URLS=https://releases.example.test/download#' "${custom_source_root}/controller/.env"
+run_manager "${custom_source_root}" false update \
+  --version v1.20.17 --install-dir "${custom_source_root}/controller" --yes
+for expected_setting in \
+  'XINGCHEN_SERVER_IMAGE=custom.tencentcloudcr.com/team/dashboard-server:v1.20.17' \
+  'XINGCHEN_WEB_IMAGE=custom.tencentcloudcr.com/team/dashboard-web@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  'XINGCHEN_POSTGRES_IMAGE=custom.tencentcloudcr.com/team/postgres:16-alpine' \
+  'XINGCHEN_REDIS_IMAGE=custom.tencentcloudcr.com/team/monitor-for-server-redis:v1.20.17' \
+  'XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=true' \
+  'XINGCHEN_RELEASE_MANIFEST_URLS=https://releases.example.test/latest/manifest.json' \
+  'XINGCHEN_AGENT_RELEASE_BASE_URLS=https://releases.example.test/download'; do
+  grep -Fx "${expected_setting}" "${custom_source_root}/controller/.env" >/dev/null \
+    || fail "Update did not preserve the configured source: ${expected_setting}."
+done
+
+for restricted_mode in internal offline; do
+  restricted_root="$(new_case "update-${restricted_mode}")"
+  make_update_deployment "${restricted_root}" 0
+  sed -i "s/^XINGCHEN_NETWORK_MODE=.*/XINGCHEN_NETWORK_MODE=${restricted_mode}/" "${restricted_root}/controller/.env"
+  cp "${restricted_root}/controller/.env" "${restricted_root}/env.before"
+  if run_manager "${restricted_root}" false update \
+    --version v1.20.17 --install-dir "${restricted_root}/controller" --yes; then
+    fail 'Online manager silently changed a restricted deployment to public mode.'
+  fi
+  cmp -s "${restricted_root}/env.before" "${restricted_root}/controller/.env" \
+    || fail 'Rejected online update modified restricted settings.'
+  if grep -E '^git (ls-remote|.*fetch)|^curl |^updater ' "${restricted_root}/commands.log" >/dev/null; then
+    fail 'Restricted deployment contacted a public source before explicit selection.'
+  fi
+  run_manager "${restricted_root}" false update \
+    --version v1.20.17 --install-dir "${restricted_root}/controller" --source gitee --yes
+  grep -Fx 'XINGCHEN_NETWORK_MODE=public' "${restricted_root}/controller/.env" >/dev/null \
+    || fail 'Explicit public source selection did not switch network mode.'
+done
+
+for policy_line in '  XINGCHEN_NETWORK_MODE="internal"' 'XINGCHEN_NETWORK_MODE=public'; do
+  policy_root="$(new_case "update-invalid-policy-${RANDOM}")"
+  make_update_deployment "${policy_root}" 0
+  if [[ "${policy_line}" == '  '* ]]; then
+    sed -i '/^XINGCHEN_NETWORK_MODE=/d' "${policy_root}/controller/.env"
+  fi
+  printf '%s\n' "${policy_line}" >> "${policy_root}/controller/.env"
+  if run_manager "${policy_root}" false update \
+    --version v1.20.17 --install-dir "${policy_root}/controller" --yes; then
+    fail 'Manager bypassed an indented or duplicate network policy.'
+  fi
+  if grep -E '^git (ls-remote|.*fetch)|^curl |^updater ' "${policy_root}/commands.log" >/dev/null; then
+    fail 'Manager accessed release sources before validating the network policy.'
+  fi
+done
+
 same_version_root="$(new_case update-same-version)"
 make_update_deployment "${same_version_root}" 0
 run_manager "${same_version_root}" true update \
@@ -496,5 +564,12 @@ grep -E '^docker compose .*logs( |$)' "${compose_root}/commands.log" >/dev/null 
 run_manager "${compose_root}" false restart --install-dir "${compose_root}/controller"
 grep -E '^docker compose .*up .*--force-recreate( |$)' "${compose_root}/commands.log" >/dev/null \
   || fail 'restart did not recreate services with Docker Compose.'
+
+printf '%s\n' 'CONTROLLER_AGENT_ENABLED=false' >> "${compose_root}/controller/.env"
+: > "${compose_root}/commands.log"
+run_manager "${compose_root}" false restart --install-dir "${compose_root}/controller"
+if grep -F -- '--profile host-monitoring' "${compose_root}/commands.log" >/dev/null; then
+  fail 'restart enabled host monitoring that was disabled in the deployment.'
+fi
 
 echo 'xingchen.sh behavior tests passed.'

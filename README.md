@@ -50,13 +50,13 @@ Linux 总控推荐使用 `deploy/xingchen.sh`。它提供类似哪吒监控的�
 能够访问 GitHub 和 GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.17
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.18
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.17/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.17
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.18
 ```
 
 `CN=true` 会固定使用 Gitee 取得对应版本的编排文件，并直接从腾讯云 TCR 拉取 setup、server、web、agent、PostgreSQL 和 Redis 六个预构建镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。它仍是在线安装：目标机至少需要访问 Gitee、腾讯云 TCR 和 Linux 发行版包源。完全断网时必须使用已校验的离线 bundle。
@@ -70,7 +70,9 @@ sudo xingchen restart
 sudo xingchen update
 ```
 
-管理器会从现有部署的 Git origin 记住 GitHub 或 Gitee 来源，所以中国模式后续直接运行 `sudo xingchen update` 也不会切换到 GitHub/GHCR；必要时可显式使用 `sudo xingchen update --source gitee`。普通更新在切换 Compose 服务前必须先创建 PostgreSQL 备份，备份失败则不切换；控制台自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时。
+管理器会沿用现有部署的 Git 来源、镜像前缀和制品配置，安装到自定义目录后也能直接使用 `xingchen`。中国模式后续运行 `sudo xingchen update` 不会切换到 GitHub/GHCR；需要主动切源时使用 `sudo xingchen update --source gitee`，即使版本相同也会核对并切换实际运行的镜像。普通更新在切换 Compose 服务前必须先创建 PostgreSQL 备份，备份失败则不切换；控制台自动更新只在同一主版本内前进，连续 3 次失败会暂停 24 小时。
+
+腾讯云发布复用已有 TCR 登录和仓库配置。六个镜像均以源 digest 复制，校验 `amd64/arm64` 和目标摘要；离线包与腾讯云在线安装使用同一批 PostgreSQL/Redis 基础镜像。完整的[哪吒机制对照与腾讯云发布说明](docs/deployment.md#哪吒机制对照与腾讯云发布)包含入口、凭据配置和发布检查。
 
 高级部署仍可直接使用仓库内的 `deploy/install-controller.sh` 和 `deploy/update-controller.sh`。`internal` 与 `offline` 不访问公网软件包源：前者要求预装依赖并使用内部 Registry/制品服务，后者只允许已校验 bundle 与本地 Docker image store。生产环境如果连 Gitee、腾讯云 TCR 或系统包源也不可达，应使用 `internal` 或 `offline`，而不是 `CN=true`。
 

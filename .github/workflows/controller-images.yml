@@ -6,6 +6,10 @@ on:
     tags: ['v*.*.*']
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   TCR_REGISTRY: ${{ vars.TCR_REGISTRY }}
@@ -35,7 +39,7 @@ jobs:
         run: sudo bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/*.sh && bash deploy/xingchen_test.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
+        run: bash -n deploy/*.sh && bash deploy/xingchen_test.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/mirror-release-image_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
 
       - name: Check PowerShell scripts and generated updater
         shell: pwsh
@@ -198,6 +202,7 @@ jobs:
         run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -215,26 +220,13 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
 
       - name: Mirror image to Tencent Cloud TCR
-        timeout-minutes: 305
+        timeout-minutes: 310
         env:
           SOURCE_IMAGE: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
           TARGET_IMAGE: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/monitor-for-server-${{ matrix.name }}:${{ steps.meta.outputs.version }}
+          SOURCE_DIGEST: ${{ steps.build.outputs.digest }}
         shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in 1 2; do
-            if timeout --signal=TERM --kill-after=30s 150m \
-              skopeo copy --all --retry-times 5 \
-                --authfile "${HOME}/.docker/config.json" \
-                "docker://${SOURCE_IMAGE}" "docker://${TARGET_IMAGE}"; then
-              exit 0
-            fi
-            [[ "${attempt}" -lt 2 ]] || break
-            echo "Tencent Cloud mirror attempt ${attempt} failed; retrying in 15 seconds." >&2
-            sleep 15
-          done
-          echo "Tencent Cloud mirror failed after 2 attempts: ${TARGET_IMAGE}" >&2
-          exit 1
+        run: bash deploy/mirror-release-image.sh "${SOURCE_IMAGE}" "${TARGET_IMAGE}" "${SOURCE_DIGEST}"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -330,32 +322,25 @@ jobs:
             done
           done
 
+      - name: Install registry copy tool
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
+
       - name: Mirror base images to Tencent Cloud TCR
+        id: base-images
+        timeout-minutes: 140
+        env:
+          XINGCHEN_MIRROR_TIMEOUT_SECONDS: '1800'
         shell: bash
         run: |
           set -euo pipefail
-          mirror_image() {
-            local source_image="$1"
-            local target_image="$2"
-            local manifest
-
-            docker buildx imagetools create --tag "${target_image}" "${source_image}"
-            manifest="$(docker buildx imagetools inspect --raw "${target_image}")"
-            jq -e '
-              [.manifests[]?.platform
-                | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64"))
-                | .architecture]
-              | unique
-              | sort == ["amd64", "arm64"]
-            ' <<<"${manifest}" >/dev/null
-          }
-
-          mirror_image \
+          postgres_digest="$(bash deploy/mirror-release-image.sh \
             docker.io/library/postgres:16-alpine \
-            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres:${GITHUB_REF_NAME}"
-          mirror_image \
+            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres:${GITHUB_REF_NAME}")"
+          redis_digest="$(bash deploy/mirror-release-image.sh \
             docker.io/library/redis:7.4-alpine \
-            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis:${GITHUB_REF_NAME}"
+            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis:${GITHUB_REF_NAME}")"
+          echo "postgres-digest=${postgres_digest}" >> "${GITHUB_OUTPUT}"
+          echo "redis-digest=${redis_digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify Tencent Cloud images allow anonymous pulls
         shell: bash
@@ -390,6 +375,9 @@ jobs:
 
       - name: Build offline bundles
         shell: bash
+        env:
+          POSTGRES_DIGEST: ${{ steps.base-images.outputs.postgres-digest }}
+          REDIS_DIGEST: ${{ steps.base-images.outputs.redis-digest }}
         run: |
           set -euo pipefail
           repository="${GITHUB_REPOSITORY,,}"
@@ -399,6 +387,10 @@ jobs:
             release_images+=("${REGISTRY}/${repository}-${component}:${GITHUB_REF_NAME}")
           done
           base_images=("postgres:16-alpine" "redis:7.4-alpine")
+          base_sources=(
+            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres@${POSTGRES_DIGEST}"
+            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis@${REDIS_DIGEST}"
+          )
           images=("${release_images[@]}" "${base_images[@]}")
           installer_linux_sha="$(sha256sum deploy/install-agent.sh | awk '{print $1}')"
           installer_windows_sha="$(sha256sum deploy/install-agent.ps1 | awk '{print $1}')"
@@ -415,8 +407,9 @@ jobs:
                   "test \"\$(sha256sum /usr/local/share/xingchen/installers/install-agent.sh | awk '{print \$1}')\" = '${installer_linux_sha}' && test \"\$(sha256sum /usr/local/share/xingchen/installers/install-agent.ps1 | awk '{print \$1}')\" = '${installer_windows_sha}' && test -f /usr/local/share/xingchen/release/manifest.json && test \"\$(find /usr/local/share/xingchen/release/assets -maxdepth 1 -type f -name 'xingchen-agent_*' | wc -l)\" -eq 4"
               fi
             done
-            for image in "${base_images[@]}"; do
-              docker pull --platform "linux/${arch}" "${image}"
+            for index in "${!base_images[@]}"; do
+              docker pull --platform "linux/${arch}" "${base_sources[index]}"
+              docker tag "${base_sources[index]}" "${base_images[index]}"
             done
             archive="dist/controller-images-${GITHUB_REF_NAME}-${arch}.tar"
             docker save --output "${archive}" "${images[@]}"
