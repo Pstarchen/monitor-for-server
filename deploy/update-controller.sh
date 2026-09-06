@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage: update-controller.sh [--check|--apply|--auto] [--build|--source-build] [--offline] [--no-mirror] [--no-source-fallback]
-                            [--project-root PATH --offline-bundle PATH]
+                            [--project-root PATH] [--offline-bundle PATH|--online-release PATH]
 
   --check       pull candidate images and report that an update is ready.
   --apply       pull images and restart the controller services.
@@ -16,6 +16,7 @@ Usage: update-controller.sh [--check|--apply|--auto] [--build|--source-build] [-
   --no-source-fallback  fail instead of building from source when all image registries are unavailable.
   --project-root  operate on an existing deployment at the absolute PATH.
   --offline-bundle  verify and apply the extracted offline bundle at PATH.
+  --online-release  apply verified deployment files extracted by the online bootstrap.
 USAGE
 }
 
@@ -27,6 +28,7 @@ use_mirror=true
 offline=false
 project_root_override=""
 offline_bundle=""
+online_release=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) mode=check; shift ;;
@@ -47,11 +49,20 @@ while [[ $# -gt 0 ]]; do
       offline_bundle="$2"
       shift 2
       ;;
+    --online-release)
+      [[ $# -ge 2 && -n "${2:-}" ]] || { echo "--online-release 需要绝对路径。" >&2; exit 2; }
+      online_release="$2"
+      shift 2
+      ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
+if [[ -n "${online_release}" && ( -n "${offline_bundle}" || "${offline}" == true || "${build}" == true || "${source_build}" == true || "${mode}" == auto ) ]]; then
+  echo "--online-release 不能与离线、源码构建或自动更新配置参数混用。" >&2
+  exit 2
+fi
 if [[ -n "${offline_bundle}" ]]; then
   offline=true
   source_fallback=false
@@ -323,11 +334,16 @@ if [[ ! "${minimum_free_bytes}" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
+timeout_args=()
+if command -v timeout >/dev/null 2>&1 && timeout --help 2>&1 | grep -q -- '--foreground'; then
+  timeout_args=(--foreground)
+fi
+
 run_with_timeout() {
   local seconds="$1"
   shift
   if command -v timeout >/dev/null 2>&1; then
-    if timeout "${seconds}s" "$@"; then
+    if timeout "${timeout_args[@]}" "${seconds}s" "$@"; then
       return 0
     else
       status=$?
@@ -371,7 +387,11 @@ if [[ -z "${offline_bundle}" || "${mode}" != check ]]; then
     echo "总控更新需要 flock 提供跨进程互斥；请先安装 util-linux。" >&2
     exit 1
   fi
-  exec 9>"${lock_file}"
+  [[ ! -L "${lock_file}" ]] || { echo "更新锁不能是符号链接。" >&2; exit 1; }
+  # The bootstrap keeps this exact file description locked while the target updater runs.
+  if [[ ! -e /proc/self/fd/9 || ! /proc/self/fd/9 -ef "${lock_file}" ]]; then
+    exec 9>"${lock_file}"
+  fi
   if ! flock -n 9; then
     echo "已有总控更新任务正在执行，请稍后重试。" >&2
     exit 75
@@ -461,6 +481,14 @@ else
   source_ref="${XINGCHEN_SOURCE_REF:-$(read_env_value XINGCHEN_SOURCE_REF)}"
   source_ref="${source_ref:-main}"
 fi
+if [[ -n "${online_release}" ]]; then
+  [[ "${offline}" != true && -n "${target_version}" && "${online_release}" == /* && -d "${online_release}" && ! -L "${online_release}" ]] \
+    || { echo "在线发布目录或目标版本无效，拒绝更新。" >&2; exit 2; }
+  online_release="$(cd -- "${online_release}" && pwd -P)"
+  [[ "${online_release}" != "${project_root}" ]] || { echo "在线发布目录不能是当前部署目录。" >&2; exit 2; }
+  bash "${script_dir}/bootstrap-controller-update.sh" --verify-package "${online_release}" --version "${target_version}"
+  source_fallback=false
+fi
 if [[ "${offline}" == true && -z "${target_version}" ]]; then
   echo "离线模式要求通过 XINGCHEN_TARGET_VERSION 指定稳定版本。" >&2
   exit 2
@@ -524,13 +552,13 @@ image_value() {
 
 image_keys=(XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE)
 source_images=(
-  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.18)"
-  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.18)"
-  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.18)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.19)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.19)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.19)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   image_keys+=(XINGCHEN_AGENT_IMAGE)
-  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.18)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19)")
 fi
 dependency_image_keys=(XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE)
 dependency_source_images=(
@@ -682,7 +710,7 @@ running_service_image() {
 
 guard_target_version() {
   [[ -n "${target_version}" ]] || return 0
-  local current_version service service_version index all_current=true
+  local current_version service service_version index relative all_current=true
   current_version="$(running_service_version server || true)"
   if [[ -n "${current_version}" ]] && version_less "${target_version}" "${current_version}"; then
     echo "拒绝将总控从 ${current_version} 降级到 ${target_version}。" >&2
@@ -698,6 +726,14 @@ guard_target_version() {
       break
     fi
   done
+  if [[ "${all_current}" == true && -n "${online_release}" ]]; then
+    for relative in docker-compose.yml deploy/update-controller.sh deploy/update-controller.ps1 deploy/bootstrap-controller-update.sh deploy/xingchen.sh; do
+      if ! cmp -s -- "${online_release}/${relative}" "${project_root}/${relative}"; then
+        all_current=false
+        break
+      fi
+    done
+  fi
   if [[ "${all_current}" == true ]]; then
     for index in "${!dependency_source_images[@]}"; do
       if [[ "${dependency_source_images[index]}" != "${dependency_images[index]}" ]]; then
@@ -947,6 +983,7 @@ bundle_process_keys=(
   XINGCHEN_RELEASE_MANIFEST_PATH XINGCHEN_RELEASE_MANIFEST_SHA256 XINGCHEN_AGENT_OFFLINE_DIR
   XINGCHEN_RELEASE_MANIFEST_URLS XINGCHEN_AGENT_RELEASE_BASE_URLS XINGCHEN_CONTROLLER_ALLOW_GITHUB_API
   XINGCHEN_NETWORK_MODE XINGCHEN_ALLOW_GITEE
+  XINGCHEN_SOURCE_REPOSITORIES XINGCHEN_SOURCE_REF
 )
 bundle_process_was_set=()
 bundle_process_values=()
@@ -1379,6 +1416,121 @@ finish_bundle_transaction() {
   cleanup_bundle_snapshot
 }
 
+online_transaction_active=false
+online_candidate_attempted=false
+online_images_mutated=false
+online_aux_files=(deploy/bootstrap-controller-update.sh deploy/xingchen.sh)
+online_aux_existed=()
+online_aux_modes=()
+previous_image_references=()
+
+begin_online_transaction() {
+  local path index relative
+  for path in "${project_root}"/.controller-update-snapshot.*; do
+    if [[ -e "${path}" || -L "${path}" ]]; then
+      echo "存在未完成的更新快照，请先检查并恢复部署：${path}" >&2
+      return 1
+    fi
+  done
+  begin_bundle_transaction || return 1
+  for index in "${!online_aux_files[@]}"; do
+    relative="${online_aux_files[index]}"
+    path="${project_root}/${relative}"
+    assert_safe_deployment_path "${path}" "在线更新文件" || return 1
+    if [[ -e "${path}" ]]; then
+      [[ -f "${path}" ]] || { echo "在线更新目标不是普通文件：${relative}" >&2; return 1; }
+      online_aux_existed+=(true)
+      online_aux_modes+=("$(stat -c '%a' "${path}")")
+      cp -- "${path}" "${bundle_snapshot_dir}/online-${index}" || return 1
+    else
+      online_aux_existed+=(false)
+      online_aux_modes+=(755)
+    fi
+  done
+  online_transaction_active=true
+  trap online_exit_handler EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+}
+
+restore_online_files() {
+  local index path failed=false
+  restore_bundle_files || failed=true
+  for index in "${!online_aux_files[@]}"; do
+    path="${project_root}/${online_aux_files[index]}"
+    if [[ "${online_aux_existed[index]}" == true ]]; then
+      restore_snapshot_file "${bundle_snapshot_dir}/online-${index}" "${path}" "${online_aux_modes[index]}" || failed=true
+    elif assert_safe_deployment_path "${path}" "在线更新恢复目标"; then
+      rm -f -- "${path}" || failed=true
+    else
+      failed=true
+    fi
+  done
+  [[ "${failed}" == false ]]
+}
+
+online_exit_handler() {
+  local status=$? rollback_failed=false index reference restored_reference key
+  trap - EXIT HUP INT TERM
+  if [[ "${online_transaction_active}" == true ]]; then
+    set +e
+    ((status != 0)) || status=1
+    echo "在线更新未完成，正在恢复原始部署文件。数据库不会自动回退。" >&2
+    restore_online_files || rollback_failed=true
+    # Candidate environment overrides must not win over the restored deployment's .env.
+    for key in "${bundle_process_keys[@]}"; do unset "${key}"; done
+    if [[ "${online_images_mutated}" == true ]]; then
+      for index in "${!previous_image_ids[@]}"; do
+        reference="${previous_image_references[index]}"
+        restored_reference="$(read_env_value "${image_keys[index]}")"
+        if [[ "${restored_reference}" == *@* ]]; then
+          reference="xingchen-controller-rollback-${services[index]}:${$}"
+          set_env_value "${image_keys[index]}" "${reference}" || rollback_failed=true
+        elif [[ "${restored_reference}" != "${reference}" ]]; then
+          set_env_value "${image_keys[index]}" "${reference}" || rollback_failed=true
+        fi
+        [[ "${reference}" == *@* ]] && continue
+        docker tag "${previous_image_ids[index]}" "${reference}" || rollback_failed=true
+      done
+    fi
+    if [[ "${online_candidate_attempted}" == true ]]; then
+      compose_apply || rollback_failed=true
+      if [[ "${rollback_failed}" == false ]]; then
+        status=10
+        echo "旧部署文件和旧镜像已恢复并通过健康检查；数据库兼容性需人工确认。" >&2
+      fi
+    fi
+    if [[ "${rollback_failed}" == true ]]; then
+      echo "自动恢复未完成，原始配置快照已保留：${bundle_snapshot_dir}" >&2
+      exit 11
+    fi
+  fi
+  cleanup_bundle_snapshot
+  exit "${status}"
+}
+
+switch_online_files() {
+  [[ -n "${online_release}" ]] || return 0
+  local relative
+  install_bundle_file "${online_release}/docker-compose.yml" "${project_root}/docker-compose.yml" 644 || return 1
+  for relative in deploy/update-controller.sh deploy/update-controller.ps1 deploy/bootstrap-controller-update.sh deploy/xingchen.sh; do
+    install_bundle_file "${online_release}/${relative}" "${project_root}/${relative}" 755 || return 1
+  done
+}
+
+persist_online_policy() {
+  [[ -n "${online_release}" ]] || return 0
+  local key settings=()
+  for key in XINGCHEN_NETWORK_MODE XINGCHEN_ALLOW_GITEE XINGCHEN_CONTROLLER_ALLOW_GITHUB_API \
+    XINGCHEN_SOURCE_REPOSITORIES XINGCHEN_SOURCE_REF XINGCHEN_RELEASE_MANIFEST_PATH \
+    XINGCHEN_RELEASE_MANIFEST_URLS XINGCHEN_RELEASE_MANIFEST_SHA256 XINGCHEN_AGENT_RELEASE_BASE_URLS XINGCHEN_AGENT_OFFLINE_DIR \
+    XINGCHEN_AGENT_IMAGE; do
+    if [[ -v "${key}" ]]; then settings+=("${key}" "${!key}"); fi
+  done
+  ((${#settings[@]} == 0)) || set_env_values "${settings[@]}"
+}
+
 configure_auto_update() {
   if [[ ! -f "${project_root}/.env" ]]; then
     echo "Controller .env is missing; complete installation first." >&2
@@ -1404,19 +1556,25 @@ if [[ -n "${offline_bundle}" ]]; then
     cleanup_bundle_snapshot
     exit 1
   fi
+elif [[ "${mode}" == apply && "${offline}" != true ]]; then
+  begin_online_transaction
 fi
-ensure_compose_project_name
+[[ "${mode}" != apply ]] || ensure_compose_project_name
 
 previous_image_ids=()
 previous_target_setting="$(read_env_value XINGCHEN_TARGET_VERSION)"
 snapshot_previous_images() {
-  local index container_id image_id
+  local index container_id image_id reference
   previous_image_ids=()
+  previous_image_references=()
   for ((index = 0; index < ${#services[@]}; index++)); do
     container_id="$(docker compose "${compose_args[@]}" ps -q "${services[index]}" 2>/dev/null || true)"
     image_id=""
+    reference="${source_images[index]}"
     if [[ -n "${container_id}" ]]; then
       image_id="$(docker inspect --format '{{.Image}}' "${container_id}" 2>/dev/null || true)"
+      reference="$(docker inspect --format '{{.Config.Image}}' "${container_id}" 2>/dev/null || true)"
+      [[ -n "${reference}" ]] || reference="${source_images[index]}"
     fi
     if [[ -z "${image_id}" ]]; then
       image_id="$(docker image inspect --format '{{.Id}}' "${source_images[index]}" 2>/dev/null || true)"
@@ -1426,6 +1584,7 @@ snapshot_previous_images() {
       return 1
     fi
     previous_image_ids+=("${image_id}")
+    previous_image_references+=("${reference}")
   done
 }
 
@@ -1460,10 +1619,7 @@ persist_images() {
 }
 
 compose_apply() {
-  local args=(up -d --force-recreate --wait --wait-timeout 300)
-  if [[ "${offline}" == true ]]; then
-    args+=(--pull never)
-  fi
+  local args=(up -d --force-recreate --wait --wait-timeout 300 --pull never --no-build)
   if [[ "${CONTROLLER_UPDATE_RUNNER:-false}" != true ]]; then
     args+=(--remove-orphans)
   fi
@@ -1497,6 +1653,12 @@ if [[ "${mode}" == apply ]]; then
   fi
 fi
 
+if [[ -n "${online_release}" ]]; then
+  run_with_timeout "${compose_timeout_seconds}" docker compose \
+    -f "${online_release}/docker-compose.yml" --project-directory "${compose_project_root}" \
+    --env-file "${project_root}/.env" config --quiet
+fi
+
 if [[ -n "${offline_bundle}" ]]; then
   create_controller_database_backup
   bundle_image_mutation_started=true
@@ -1517,6 +1679,7 @@ if [[ -n "${offline_bundle}" ]]; then
   exit 0
 fi
 
+[[ "${online_transaction_active}" != true ]] || online_images_mutated=true
 if [[ "${offline}" == true ]]; then
   verify_local_images
 elif [[ "${build}" == true && "${source_build}" == true ]]; then
@@ -1551,13 +1714,20 @@ if [[ "${mode}" == check ]]; then
   exit 0
 fi
 
+switch_online_files
+persist_online_policy
 if [[ -n "${target_version}" ]]; then
   persist_images true "${target_version}" "${candidate_images[@]}" "${dependency_images[@]}"
 else
   persist_images false "" "${candidate_images[@]}" "${dependency_images[@]}"
 fi
 
+[[ "${online_transaction_active}" != true ]] || online_candidate_attempted=true
 if ! compose_apply; then
+  if [[ "${online_transaction_active}" == true ]]; then
+    echo "在线总控候选版本健康检查失败。" >&2
+    exit 1
+  fi
   echo "总控健康检查失败，正在恢复更新前镜像。数据库不会自动回退。" >&2
   if restore_previous_images; then
     echo "总控镜像已恢复并通过健康检查；如新版本执行过数据库迁移，请人工确认数据库兼容性。" >&2
@@ -1565,5 +1735,11 @@ if ! compose_apply; then
   fi
   echo "总控镜像自动恢复失败，需要人工处理；不要在未评估迁移兼容性前恢复数据库备份。" >&2
   exit 11
+fi
+online_transaction_active=false
+if [[ -n "${bundle_snapshot_dir}" ]]; then
+  bundle_transaction_committed=true
+  trap - EXIT HUP INT TERM
+  cleanup_bundle_snapshot
 fi
 echo "总控服务已更新并重启。"

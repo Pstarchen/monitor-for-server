@@ -12,7 +12,7 @@ Usage: xingchen.sh [install|update|status|logs|restart|help] [options]
 
 Commands:
   install   install a new Controller with Docker Compose
-  update    update an existing Controller to a stable version
+  update    update Controller images and deployment files to a stable version
   status    show Controller service status
   logs      show the latest Controller logs
   restart   recreate Controller services and wait for health checks
@@ -21,7 +21,7 @@ Commands:
 Options:
   --version vX.Y.Z       install or update to an exact stable version
   --install-dir PATH     Controller directory (default: /opt/guanlan-monitor)
-  --source gitee|github  source used for tags and repository content
+  --source gitee|github  release source (Gitee/Tencent Cloud or GitHub/GHCR)
   --yes                  skip an interactive confirmation
 
 Environment:
@@ -37,8 +37,7 @@ install_dir="${XINGCHEN_INSTALL_DIR:-${DEFAULT_INSTALL_DIR}}"
 if [[ -z "${XINGCHEN_INSTALL_DIR:-}" ]]; then
   manager_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
   manager_root="$(dirname -- "$(dirname -- "${manager_path}")")"
-  if [[ -d "${manager_root}/.git" && -f "${manager_root}/docker-compose.yml" &&
-        ( -L "${BASH_SOURCE[0]}" || -f "${manager_root}/.env" ) ]]; then
+  if [[ -f "${manager_root}/docker-compose.yml" && -f "${manager_root}/.env" ]]; then
     install_dir="${manager_root}"
   fi
 fi
@@ -108,9 +107,41 @@ if [[ -n "${requested_version}" ]] && ! stable_version "${requested_version}"; t
 fi
 validate_install_dir
 
+read_installation_setting() {
+  local key="$1" value
+  [[ -e "${install_dir}/.env" || -L "${install_dir}/.env" ]] || return 1
+  [[ -f "${install_dir}/.env" && -r "${install_dir}/.env" && ! -L "${install_dir}/.env" ]] || return 2
+  value="$(awk -v key="${key}" '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      sub(/^[ \t]+/, "", line)
+      if (index(line, key "=") == 1) { value = substr(line, length(key) + 2); count++ }
+      else if (line ~ ("^(export[ \t]+)?" key "([^A-Za-z0-9_]|$)")) invalid = 1
+    }
+    END { if (invalid || count > 1) exit 2; if (!count) exit 1; print value }
+  ' "${install_dir}/.env")" || return $?
+  if [[ "${value}" == [\"\']* || "${value}" == *[\"\'] ]]; then
+    [[ ${#value} -ge 2 && "${value:0:1}" == "${value: -1}" ]] || return 2
+    value="${value:1:${#value}-2}"
+  fi
+  [[ "${value}" != *\"* && "${value}" != *\'* ]] || return 2
+  printf '%s' "${value}"
+}
+
 infer_source_from_installation() {
-  [[ "${source_explicit}" == false && -d "${install_dir}/.git" ]] || return 0
-  local origin
+  [[ "${source_explicit}" == false ]] || return 0
+  local origin repositories
+  if repositories="$(read_installation_setting XINGCHEN_SOURCE_REPOSITORIES)"; then
+    case "${repositories%%,*}" in
+      https://gitee.com/*) source_name=gitee; return 0 ;;
+      https://github.com/*) source_name=github; return 0 ;;
+    esac
+  elif [[ $? -ne 1 ]]; then
+    echo "现有 .env 中的 XINGCHEN_SOURCE_REPOSITORIES 无法安全解析。" >&2
+    exit 2
+  fi
+  [[ -d "${install_dir}/.git" ]] || return 0
   origin="$(git -C "${install_dir}" remote get-url origin 2>/dev/null || true)"
   case "${origin,,}" in
     *gitee.com/*) source_name=gitee ;;
@@ -137,7 +168,7 @@ else
 fi
 
 deployment_exists() {
-  [[ -d "${install_dir}/.git" && -f "${install_dir}/docker-compose.yml" && -f "${install_dir}/deploy/install-controller.sh" ]]
+  [[ -f "${install_dir}/docker-compose.yml" && -f "${install_dir}/.env" ]]
 }
 
 install_marker_path() {
@@ -146,9 +177,7 @@ install_marker_path() {
 
 current_version() {
   local value=""
-  if [[ -f "${install_dir}/.env" ]]; then
-    value="$(awk -F= '$1 == "XINGCHEN_TARGET_VERSION" {value=$0; sub(/^[^=]*=/, "", value); gsub(/^"|"$/, "", value); print value; exit}' "${install_dir}/.env")"
-  fi
+  value="$(read_installation_setting XINGCHEN_TARGET_VERSION || true)"
   if ! stable_version "${value}" && [[ -d "${install_dir}/.git" ]]; then
     value="$(git -C "${install_dir}" describe --tags --exact-match 2>/dev/null || true)"
   fi
@@ -344,28 +373,6 @@ configure_release_environment() {
   fi
 }
 
-read_installation_setting() {
-  local key="$1" value
-  [[ -e "${install_dir}/.env" || -L "${install_dir}/.env" ]] || return 1
-  [[ -f "${install_dir}/.env" && -r "${install_dir}/.env" && ! -L "${install_dir}/.env" ]] || return 2
-  value="$(awk -v key="${key}" '
-    {
-      line = $0
-      sub(/\r$/, "", line)
-      sub(/^[ \t]+/, "", line)
-      if (index(line, key "=") == 1) { value = substr(line, length(key) + 2); count++ }
-      else if (line ~ ("^(export[ \t]+)?" key "([^A-Za-z0-9_]|$)")) invalid = 1
-    }
-    END { if (invalid || count > 1) exit 2; if (!count) exit 1; print value }
-  ' "${install_dir}/.env")" || return $?
-  if [[ "${value}" == [\"\']* || "${value}" == *[\"\'] ]]; then
-    [[ ${#value} -ge 2 && "${value:0:1}" == "${value: -1}" ]] || return 2
-    value="${value:1:${#value}-2}"
-  fi
-  [[ "${value}" != *\"* && "${value}" != *\'* ]] || return 2
-  printf '%s' "${value}"
-}
-
 configure_update_environment() {
   local version="$1" key value leaf repository read_status
   configure_release_environment "${version}"
@@ -403,63 +410,15 @@ configure_update_environment() {
   done
 }
 
-persist_manager_settings() {
-  local env_file="${install_dir}/.env" settings_file temporary key value
-  local keys=(
-    XINGCHEN_TARGET_VERSION XINGCHEN_NETWORK_MODE XINGCHEN_ALLOW_GITEE
-    XINGCHEN_SOURCE_REPOSITORIES XINGCHEN_SOURCE_REF XINGCHEN_CONTROLLER_ALLOW_GITHUB_API
-    XINGCHEN_RELEASE_MANIFEST_PATH XINGCHEN_RELEASE_MANIFEST_URLS XINGCHEN_RELEASE_MANIFEST_SHA256
-    XINGCHEN_AGENT_RELEASE_BASE_URLS XINGCHEN_AGENT_OFFLINE_DIR
-    XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE XINGCHEN_AGENT_IMAGE
-    XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE
-  )
-  [[ -f "${env_file}" && ! -L "${env_file}" ]] \
-    || { echo "无法安全持久化管理设置：${env_file} 不存在或是符号链接。" >&2; return 1; }
-  settings_file="$(mktemp "${install_dir}/.xingchen-settings.XXXXXX")"
-  temporary="$(mktemp "${install_dir}/.env.xingchen.XXXXXX")"
-  chmod 600 "${settings_file}" "${temporary}"
-  for key in "${keys[@]}"; do
-    value="${!key}"
-    if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* || "${value}" == *$'\t'* ]]; then
-      rm -f -- "${settings_file}" "${temporary}"
-      echo "${key} 包含不安全的控制字符。" >&2
-      return 1
-    fi
-    printf '%s\t%s\n' "${key}" "${value}" >> "${settings_file}"
-  done
-  if ! awk -F '\t' '
-    NR == FNR { values[$1] = substr($0, index($0, "\t") + 1); order[++count] = $1; next }
-    {
-      separator = index($0, "=")
-      key = separator ? substr($0, 1, separator - 1) : ""
-      gsub(/^[ \t]+|[ \t]+$/, "", key)
-      if (key in values) {
-        if (!(key in written)) { print key "=" values[key]; written[key] = 1 }
-        next
-      }
-      print
-    }
-    END {
-      for (position = 1; position <= count; position++) {
-        key = order[position]
-        if (!(key in written)) print key "=" values[key]
-      }
-    }
-  ' "${settings_file}" "${env_file}" > "${temporary}"; then
-    rm -f -- "${settings_file}" "${temporary}"
-    return 1
-  fi
-  rm -f -- "${settings_file}"
-  mv -- "${temporary}" "${env_file}"
-}
-
 run_install() {
   require_root
   local version expected actual origin parent stage marker marker_version marker_repository install_status
   local resume_install=false installer_args=(--no-source-fallback)
   if [[ -e "${install_dir}" || -L "${install_dir}" ]]; then
     marker="$(install_marker_path)"
-    if [[ ! -L "${install_dir}" && -f "${marker}" && ! -L "${marker}" ]] && deployment_exists; then
+    if [[ ! -L "${install_dir}" && -f "${marker}" && ! -L "${marker}" &&
+          -d "${install_dir}/.git" && -f "${install_dir}/docker-compose.yml" &&
+          -f "${install_dir}/deploy/install-controller.sh" ]]; then
       resume_install=true
     else
       echo "安装目录已存在，拒绝覆盖：${install_dir}。已有总控请运行 update。" >&2
@@ -531,72 +490,14 @@ require_deployment() {
     || { echo "未在 ${install_dir} 找到有效总控部署。" >&2; exit 1; }
 }
 
-update_transaction_active=false
-update_old_commit=""
-update_old_origin=""
-update_env_snapshot=""
-update_env_existed=false
-update_was_interrupted=false
-
-cleanup_update_snapshot() {
-  if [[ -n "${update_env_snapshot}" && -f "${update_env_snapshot}" && ! -L "${update_env_snapshot}" ]]; then
-    rm -f -- "${update_env_snapshot}"
-  fi
-  update_env_snapshot=""
-}
-
-restore_update_state() {
-  local failed=false
-  if ! git -C "${install_dir}" checkout --detach "${update_old_commit}" >/dev/null 2>&1; then
-    echo "恢复更新前源码提交失败：${update_old_commit}" >&2
-    failed=true
-  fi
-  if ! git -C "${install_dir}" remote set-url origin "${update_old_origin}"; then
-    echo "恢复更新前 Git origin 失败。" >&2
-    failed=true
-  fi
-  if [[ "${update_env_existed}" == true ]]; then
-    if ! cp -p -- "${update_env_snapshot}" "${install_dir}/.env"; then
-      echo "恢复更新前 .env 失败。" >&2
-      failed=true
-    fi
-  elif ! rm -f -- "${install_dir}/.env"; then
-    echo "移除更新期间创建的 .env 失败。" >&2
-    failed=true
-  fi
-  cleanup_update_snapshot
-  [[ "${failed}" == false ]]
-}
-
-handle_update_exit() {
-  local status=$?
-  trap - EXIT HUP INT TERM
-  if [[ "${update_transaction_active}" == true ]]; then
-    ((status != 0)) || status=1
-    echo "总控更新未完成，正在恢复更新前源码与配置。" >&2
-    if restore_update_state; then
-      echo "更新前源码与配置已恢复。" >&2
-    else
-      echo "自动恢复不完整，需要人工检查部署目录。" >&2
-      status=12
-    fi
-    if [[ "${update_was_interrupted}" == true ]]; then
-      echo "更新曾被系统信号中断；请运行 xingchen status 确认实际容器状态。" >&2
-    fi
-  else
-    cleanup_update_snapshot
-  fi
-  exit "${status}"
-}
-
-handle_update_signal() {
-  update_was_interrupted=true
-  exit "$1"
-}
-
 run_update() {
   require_root
   require_deployment
+  local bootstrap="${install_dir}/deploy/bootstrap-controller-update.sh"
+  if [[ ! -f "${bootstrap}" || ! -r "${bootstrap}" || -L "${bootstrap}" ]]; then
+    echo "在线更新 bootstrap 不可用：${bootstrap}。请先使用已验证的发布包补齐更新入口，再重试 xingchen update。" >&2
+    exit 1
+  fi
   if [[ "${source_explicit}" == false ]]; then
     local network_mode
     if network_mode="$(read_installation_setting XINGCHEN_NETWORK_MODE)"; then
@@ -610,69 +511,19 @@ run_update() {
       exit 2
     fi
   fi
-  install_bootstrap_dependencies
-  if [[ -n "$(git -C "${install_dir}" status --porcelain --untracked-files=no)" ]]; then
-    echo "部署目录存在已修改的受版本控制文件，拒绝覆盖；请先处理这些改动。" >&2
-    exit 1
-  fi
+  [[ -n "${requested_version}" ]] || install_bootstrap_dependencies
 
-  local version current expected existing update_status installer_args=(--apply --no-source-fallback)
+  local version current
   version="$(resolve_target_version)"
   current="$(current_version || true)"
   if [[ -n "${current}" ]] && version_less "${version}" "${current}"; then
     echo "拒绝从 ${current} 降级到 ${version}。" >&2
     exit 1
   fi
-  expected="$(remote_tag_commit "${version}")"
-  existing="$(git -C "${install_dir}" rev-parse -q --verify "refs/tags/${version}^{commit}" 2>/dev/null || true)"
-  if [[ -n "${existing}" && "${existing,,}" != "${expected}" ]]; then
-    echo "本地标签 ${version} 与 ${source_name} 不一致，拒绝更新。" >&2
-    exit 1
-  fi
   confirm_action "将总控从 ${current:-未知版本} 更新到 ${version}" || { echo "已取消。"; return 0; }
 
-  update_old_commit="$(git -C "${install_dir}" rev-parse HEAD)"
-  update_old_origin="$(git -C "${install_dir}" remote get-url origin)"
-  update_env_snapshot="$(mktemp "${install_dir}/.env.xingchen-update.XXXXXX")"
-  chmod 600 "${update_env_snapshot}"
-  if [[ -f "${install_dir}/.env" && ! -L "${install_dir}/.env" ]]; then
-    cp -p -- "${install_dir}/.env" "${update_env_snapshot}"
-    update_env_existed=true
-  elif [[ -e "${install_dir}/.env" || -L "${install_dir}/.env" ]]; then
-    cleanup_update_snapshot
-    echo "部署 .env 不是安全的普通文件，拒绝更新。" >&2
-    exit 1
-  else
-    : > "${update_env_snapshot}"
-    update_env_existed=false
-  fi
-  update_transaction_active=true
-  trap handle_update_exit EXIT
-  trap 'handle_update_signal 129' HUP
-  trap 'handle_update_signal 130' INT
-  trap 'handle_update_signal 143' TERM
-
-  git -C "${install_dir}" remote set-url origin "${repository_url}"
-  if [[ -z "${existing}" ]]; then
-    git -C "${install_dir}" fetch --depth 1 origin "refs/tags/${version}:refs/tags/${version}"
-  fi
-  [[ "$(git -C "${install_dir}" rev-parse "refs/tags/${version}^{commit}")" == "${expected}" ]] \
-    || { echo "取得的源码标签校验失败。" >&2; exit 1; }
-  git -C "${install_dir}" checkout --detach "${version}"
-
   configure_update_environment "${version}"
-  persist_manager_settings
-
-  set +e
-  bash "${install_dir}/deploy/update-controller.sh" "${installer_args[@]}"
-  update_status=$?
-  set -e
-  if ((update_status != 0)); then
-    return "${update_status}"
-  fi
-  update_transaction_active=false
-  trap - EXIT HUP INT TERM
-  cleanup_update_snapshot
+  bash "${bootstrap}" --project-root "${install_dir}" --version "${version}" --apply
   install_manager_link
   echo "总控在线更新完成：${version}。"
 }

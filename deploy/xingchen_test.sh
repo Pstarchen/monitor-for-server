@@ -86,6 +86,8 @@ for key in \
   XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE; do
   printf 'installer-env %s=%s\n' "${key}" "${!key:-}" >> "${TEST_LOG}"
 done
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+printf 'XINGCHEN_TARGET_VERSION=%s\n' "${XINGCHEN_TARGET_VERSION}" > "${project_root}/.env"
 install_status=0
 if [[ -f "${TEST_CASE_ROOT}/installer-status" ]]; then
   install_status="$(cat "${TEST_CASE_ROOT}/installer-status")"
@@ -355,9 +357,10 @@ assert_failed_without_external_calls "${existing_root}" true install \
   --yes
 
 make_update_deployment() {
-  local root="$1" updater_status="$2" deployment
+  local root="$1" updater_status="$2" with_git="${3:-true}" deployment
   deployment="${root}/controller"
-  mkdir -p "${deployment}/.git" "${deployment}/deploy"
+  mkdir -p "${deployment}/deploy"
+  [[ "${with_git}" != true ]] || mkdir -p "${deployment}/.git"
   printf '%s\n' 'services: {}' > "${deployment}/docker-compose.yml"
   printf '%s\n' \
     'XINGCHEN_TARGET_VERSION=v1.20.16' \
@@ -374,11 +377,13 @@ make_update_deployment() {
   printf '%s\n' "${updater_status}" > "${deployment}/.fake-updater-status"
   cp "${manager}" "${deployment}/deploy/xingchen.sh"
   printf '%s\n' '#!/usr/bin/env bash' > "${deployment}/deploy/install-controller.sh"
-  cat > "${deployment}/deploy/update-controller.sh" <<'UPDATER'
+  cat > "${deployment}/deploy/bootstrap-controller-update.sh" <<'UPDATER'
 #!/usr/bin/env bash
 set -euo pipefail
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-printf 'updater %s\n' "$*" >> "${TEST_LOG}"
+printf 'bootstrap %s\n' "$*" >> "${TEST_LOG}"
+grep -Fx 'XINGCHEN_TARGET_VERSION=v1.20.16' "${project_root}/.env" >/dev/null \
+  || { echo 'Manager rewrote the deployment before bootstrap acquired its update lock.' >&2; exit 93; }
 for key in \
   XINGCHEN_TARGET_VERSION XINGCHEN_NETWORK_MODE XINGCHEN_ALLOW_GITEE \
   XINGCHEN_SOURCE_REPOSITORIES XINGCHEN_SOURCE_REF XINGCHEN_CONTROLLER_ALLOW_GITHUB_API \
@@ -386,35 +391,33 @@ for key in \
   XINGCHEN_AGENT_RELEASE_BASE_URLS XINGCHEN_AGENT_OFFLINE_DIR \
   XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE XINGCHEN_AGENT_IMAGE \
   XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE; do
-  printf 'updater-env %s=%s\n' "${key}" "${!key:-}" >> "${TEST_LOG}"
+  printf 'bootstrap-env %s=%s\n' "${key}" "${!key:-}" >> "${TEST_LOG}"
 done
 exit "$(cat "${project_root}/.fake-updater-status")"
 UPDATER
   chmod +x "${deployment}/deploy/xingchen.sh" \
     "${deployment}/deploy/install-controller.sh" \
-    "${deployment}/deploy/update-controller.sh"
+    "${deployment}/deploy/bootstrap-controller-update.sh"
 }
 
 update_success_root="$(new_case update-success)"
 make_update_deployment "${update_success_root}" 0
+cp "${update_success_root}/controller/.env" "${update_success_root}/env.before"
 run_manager "${update_success_root}" true update \
   --version v1.20.17 \
   --install-dir "${update_success_root}/controller" \
   --yes
-grep -F "git -C ${update_success_root}/controller checkout --detach v1.20.17" \
+grep -Fx "bootstrap --project-root ${update_success_root}/controller --version v1.20.17 --apply" \
   "${update_success_root}/commands.log" >/dev/null \
-  || fail 'Successful update did not checkout v1.20.17.'
-grep -Fx 'updater --apply --no-source-fallback' \
-  "${update_success_root}/commands.log" >/dev/null \
-  || fail 'Successful Gitee update did not use the required updater arguments.'
-if grep -E '^updater .*--build( |$)' "${update_success_root}/commands.log" >/dev/null; then
-  fail 'Successful Gitee update unexpectedly requested a local image build.'
+  || fail 'Successful Gitee update did not use the shared bootstrap arguments.'
+if grep -E '^git .* (checkout|fetch|set-url|status)( |$)|^git ls-remote' "${update_success_root}/commands.log" >/dev/null; then
+  fail 'Pinned online update accessed Git deployment state or remote tags.'
 fi
-grep -Fx '3333333333333333333333333333333333333333' \
+grep -Fx '2222222222222222222222222222222222222222' \
   "${update_success_root}/controller/.fake-commit" >/dev/null \
-  || fail 'Successful update did not leave HEAD at v1.20.17.'
-grep -Fx 'CUSTOM_SETTING=preserve-me' "${update_success_root}/controller/.env" >/dev/null \
-  || fail 'Successful update removed an unrelated environment setting.'
+  || fail 'Manager changed the source checkout during online update.'
+cmp -s "${update_success_root}/env.before" "${update_success_root}/controller/.env" \
+  || fail 'Manager changed .env outside the bootstrap transaction.'
 for expected_setting in \
   'XINGCHEN_TARGET_VERSION=v1.20.17' \
   'XINGCHEN_NETWORK_MODE=public' \
@@ -433,10 +436,8 @@ for expected_setting in \
   'XINGCHEN_AGENT_IMAGE=ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-agent:v1.20.17' \
   'XINGCHEN_POSTGRES_IMAGE=ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-postgres:v1.20.17' \
   'XINGCHEN_REDIS_IMAGE=ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-redis:v1.20.17'; do
-  grep -Fx "${expected_setting}" "${update_success_root}/controller/.env" >/dev/null \
-    || fail "Successful update did not persist ${expected_setting}."
-  grep -Fx "updater-env ${expected_setting}" "${update_success_root}/commands.log" >/dev/null \
-    || fail "Successful updater did not receive ${expected_setting}."
+  grep -Fx "bootstrap-env ${expected_setting}" "${update_success_root}/commands.log" >/dev/null \
+    || fail "Bootstrap did not receive ${expected_setting}."
 done
 
 custom_source_root="$(new_case update-custom-source)"
@@ -460,7 +461,7 @@ for expected_setting in \
   'XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=true' \
   'XINGCHEN_RELEASE_MANIFEST_URLS=https://releases.example.test/latest/manifest.json' \
   'XINGCHEN_AGENT_RELEASE_BASE_URLS=https://releases.example.test/download'; do
-  grep -Fx "${expected_setting}" "${custom_source_root}/controller/.env" >/dev/null \
+  grep -Fx "bootstrap-env ${expected_setting}" "${custom_source_root}/commands.log" >/dev/null \
     || fail "Update did not preserve the configured source: ${expected_setting}."
 done
 
@@ -475,13 +476,15 @@ for restricted_mode in internal offline; do
   fi
   cmp -s "${restricted_root}/env.before" "${restricted_root}/controller/.env" \
     || fail 'Rejected online update modified restricted settings.'
-  if grep -E '^git (ls-remote|.*fetch)|^curl |^updater ' "${restricted_root}/commands.log" >/dev/null; then
+  if grep -E '^git (ls-remote|.*fetch)|^curl |^bootstrap ' "${restricted_root}/commands.log" >/dev/null; then
     fail 'Restricted deployment contacted a public source before explicit selection.'
   fi
   run_manager "${restricted_root}" false update \
     --version v1.20.17 --install-dir "${restricted_root}/controller" --source gitee --yes
-  grep -Fx 'XINGCHEN_NETWORK_MODE=public' "${restricted_root}/controller/.env" >/dev/null \
-    || fail 'Explicit public source selection did not switch network mode.'
+  grep -Fx 'bootstrap-env XINGCHEN_NETWORK_MODE=public' "${restricted_root}/commands.log" >/dev/null \
+    || fail 'Explicit public source selection was not passed to bootstrap.'
+  cmp -s "${restricted_root}/env.before" "${restricted_root}/controller/.env" \
+    || fail 'Source selection was persisted before the bootstrap transaction.'
 done
 
 for policy_line in '  XINGCHEN_NETWORK_MODE="internal"' 'XINGCHEN_NETWORK_MODE=public'; do
@@ -495,7 +498,7 @@ for policy_line in '  XINGCHEN_NETWORK_MODE="internal"' 'XINGCHEN_NETWORK_MODE=p
     --version v1.20.17 --install-dir "${policy_root}/controller" --yes; then
     fail 'Manager bypassed an indented or duplicate network policy.'
   fi
-  if grep -E '^git (ls-remote|.*fetch)|^curl |^updater ' "${policy_root}/commands.log" >/dev/null; then
+  if grep -E '^git (ls-remote|.*fetch)|^curl |^bootstrap ' "${policy_root}/commands.log" >/dev/null; then
     fail 'Manager accessed release sources before validating the network policy.'
   fi
 done
@@ -506,12 +509,9 @@ run_manager "${same_version_root}" true update \
   --version v1.20.16 \
   --install-dir "${same_version_root}/controller" \
   --yes
-grep -Fx 'updater --apply --no-source-fallback' \
+grep -Fx "bootstrap --project-root ${same_version_root}/controller --version v1.20.16 --apply" \
   "${same_version_root}/commands.log" >/dev/null \
-  || fail 'Same-version update skipped the updater.'
-grep -F "git -C ${same_version_root}/controller checkout --detach v1.20.16" \
-  "${same_version_root}/commands.log" >/dev/null \
-  || fail 'Same-version update did not verify and checkout its stable tag.'
+  || fail 'Same-version update skipped deployment-package synchronization.'
 
 update_failure_root="$(new_case update-failure)"
 make_update_deployment "${update_failure_root}" 23
@@ -523,32 +523,83 @@ if run_manager "${update_failure_root}" true update \
   --yes >"${update_failure_root}/stdout.log" 2>"${update_failure_root}/stderr.log"; then
   fail 'Update unexpectedly succeeded after the updater failed.'
 fi
-grep -F "git -C ${update_failure_root}/controller checkout --detach v1.20.17" \
+grep -Fx "bootstrap --project-root ${update_failure_root}/controller --version v1.20.17 --apply" \
   "${update_failure_root}/commands.log" >/dev/null \
-  || fail 'Failed update never checked out the candidate tag.'
-grep -Fx 'updater --apply --no-source-fallback' \
+  || fail 'Failed update did not invoke the shared bootstrap.'
+grep -Fx 'bootstrap-env XINGCHEN_SETUP_IMAGE=ghcr.io/pstarchen/monitor-for-server-setup:v1.20.17' \
   "${update_failure_root}/commands.log" >/dev/null \
-  || fail 'Failed update did not invoke the updater with the required arguments.'
-grep -F "git -C ${update_failure_root}/controller remote set-url origin https://github.com/Pstarchen/monitor-for-server.git" \
+  || fail 'Explicit GitHub source did not select the GHCR bootstrap image.'
+grep -Fx 'bootstrap-env XINGCHEN_SOURCE_REPOSITORIES=https://github.com/Pstarchen/monitor-for-server.git' \
   "${update_failure_root}/commands.log" >/dev/null \
-  || fail 'Failure fixture never switched origin before invoking the updater.'
-grep -F "git -C ${update_failure_root}/controller checkout --detach 2222222222222222222222222222222222222222" \
-  "${update_failure_root}/commands.log" >/dev/null \
-  || fail 'Updater failure did not checkout the previous commit.'
+  || fail 'Explicit GitHub source was not forwarded to bootstrap.'
+if grep -E '^git .* (checkout|fetch|set-url)( |$)' "${update_failure_root}/commands.log" >/dev/null; then
+  fail 'Bootstrap failure caused manager to mutate Git state.'
+fi
 grep -Fx '2222222222222222222222222222222222222222' \
   "${update_failure_root}/controller/.fake-commit" >/dev/null \
-  || fail 'Updater failure did not restore the previous HEAD.'
+  || fail 'Bootstrap failure changed the previous HEAD.'
 grep -Fx 'https://gitee.com/starchen520/monitor-for-server.git' \
   "${update_failure_root}/controller/.fake-origin" >/dev/null \
-  || fail 'Updater failure did not restore the previous origin.'
+  || fail 'Bootstrap failure changed the previous origin.'
 cmp -s "${update_failure_root}/env.before" "${update_failure_root}/controller/.env" \
-  || fail 'Updater failure did not restore the previous .env exactly.'
+  || fail 'Bootstrap failure changed the previous .env.'
+
+gitless_root="$(new_case update-without-git)"
+make_update_deployment "${gitless_root}" 0 false
+rm -f -- "${gitless_root}/controller/deploy/install-controller.sh"
+printf '%s\n' 'XINGCHEN_SOURCE_REPOSITORIES=https://gitee.com/starchen520/monitor-for-server.git' >> "${gitless_root}/controller/.env"
+cp "${gitless_root}/controller/.env" "${gitless_root}/env.before"
+run_manager "${gitless_root}" false update \
+  --version v1.20.17 --install-dir "${gitless_root}/controller" --yes
+grep -Fx "bootstrap --project-root ${gitless_root}/controller --version v1.20.17 --apply" \
+  "${gitless_root}/commands.log" >/dev/null \
+  || fail 'Existing deployment without .git did not reach the update bootstrap.'
+grep -Fx 'bootstrap-env XINGCHEN_SETUP_IMAGE=ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-setup:v1.20.17' \
+  "${gitless_root}/commands.log" >/dev/null \
+  || fail 'Gitless deployment lost its saved Tencent Cloud release source.'
+if grep -E '^git |^curl ' "${gitless_root}/commands.log" >/dev/null; then
+  fail 'Pinned gitless update queried Git or remote release metadata.'
+fi
+cmp -s "${gitless_root}/env.before" "${gitless_root}/controller/.env" \
+  || fail 'Gitless update modified configuration outside the bootstrap transaction.'
+
+TEST_MANAGER_ENTRY="${gitless_root}/manager-bin/xingchen" run_manager "${gitless_root}" false status
+grep -E '^docker compose .*ps( |$)' "${gitless_root}/commands.log" >/dev/null \
+  || fail 'Installed manager did not infer the gitless deployment directory.'
+
+: > "${gitless_root}/commands.log"
+run_manager "${gitless_root}" false update --install-dir "${gitless_root}/controller" --yes
+grep -F 'git ls-remote --tags --refs https://gitee.com/starchen520/monitor-for-server.git' \
+  "${gitless_root}/commands.log" >/dev/null \
+  || fail 'Gitless latest-version discovery did not use the saved Gitee source.'
+grep -Fx "bootstrap --project-root ${gitless_root}/controller --version v2.0.0 --apply" \
+  "${gitless_root}/commands.log" >/dev/null \
+  || fail 'Gitless latest-version discovery did not select the latest stable release.'
+if grep -E '^git -C |github.com' "${gitless_root}/commands.log" >/dev/null; then
+  fail 'Gitless Gitee update used a deployment checkout or GitHub.'
+fi
+
+: > "${gitless_root}/commands.log"
+assert_failed_without_external_calls "${gitless_root}" false install \
+  --version v1.20.17 --install-dir "${gitless_root}/controller" --yes
+cmp -s "${gitless_root}/env.before" "${gitless_root}/controller/.env" \
+  || fail 'Repeated install overwrote an existing gitless deployment.'
+
+missing_bootstrap_root="$(new_case update-missing-bootstrap)"
+make_update_deployment "${missing_bootstrap_root}" 0 false
+rm -f -- "${missing_bootstrap_root}/controller/deploy/bootstrap-controller-update.sh"
+cp "${missing_bootstrap_root}/controller/.env" "${missing_bootstrap_root}/env.before"
+assert_failed_without_external_calls "${missing_bootstrap_root}" true update \
+  --version v1.20.17 --install-dir "${missing_bootstrap_root}/controller" --yes
+grep -F 'bootstrap 不可用' "${missing_bootstrap_root}/stderr.log" >/dev/null \
+  || fail 'Legacy deployment did not report the missing verified bootstrap clearly.'
+cmp -s "${missing_bootstrap_root}/env.before" "${missing_bootstrap_root}/controller/.env" \
+  || fail 'Missing bootstrap failure modified the existing environment.'
 
 compose_root="$(new_case compose-commands)"
-mkdir -p "${compose_root}/controller/.git" "${compose_root}/controller/deploy"
+mkdir -p "${compose_root}/controller"
 printf '%s\n' 'services: {}' > "${compose_root}/controller/docker-compose.yml"
 printf '%s\n' 'POSTGRES_PASSWORD=test-only' > "${compose_root}/controller/.env"
-printf '%s\n' '#!/usr/bin/env bash' > "${compose_root}/controller/deploy/install-controller.sh"
 
 : > "${compose_root}/commands.log"
 run_manager "${compose_root}" false status --install-dir "${compose_root}/controller"

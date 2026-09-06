@@ -4,7 +4,7 @@ ARG GOPROXY=https://mirrors.cloud.tencent.com/go
 ENV GOPROXY=$GOPROXY
 COPY setup/go.mod setup/go.sum* ./
 RUN go mod download
-COPY setup/main.go setup/controller_update.go setup/controller_update_state_lock_linux.go setup/controller_release.go setup/controller_backup.go setup/agent_release.go setup/network_policy.go ./
+COPY setup/main.go setup/controller_update.go setup/controller_update_command_linux.go setup/controller_update_state_lock_linux.go setup/controller_release.go setup/controller_backup.go setup/agent_release.go setup/network_policy.go ./
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/setup .
@@ -63,8 +63,16 @@ RUN set -eux; \
 COPY --from=build /out/setup /usr/local/bin/xingchen-setup
 COPY deploy/install-agent.sh deploy/install-agent.ps1 /usr/local/share/xingchen/installers/
 COPY deploy/update-controller.sh /usr/local/share/xingchen/updaters/update-controller.sh
+COPY deploy/bootstrap-controller-update.sh /usr/local/share/xingchen/updaters/bootstrap-controller-update.sh
+COPY docker-compose.yml /usr/local/share/xingchen/controller-update/docker-compose.yml
+COPY deploy/update-controller.sh deploy/update-controller.ps1 deploy/bootstrap-controller-update.sh deploy/xingchen.sh /usr/local/share/xingchen/controller-update/deploy/
 COPY --from=agent-release /out/release /usr/local/share/xingchen/release/
-RUN chmod 0444 /usr/local/share/xingchen/installers/install-agent.sh /usr/local/share/xingchen/installers/install-agent.ps1 \
-    && chmod 0555 /usr/local/share/xingchen/updaters/update-controller.sh
+RUN set -eux; \
+    cd /usr/local/share/xingchen/controller-update; \
+    printf '%s\n' "$VERSION" > version; \
+    sha256sum version docker-compose.yml deploy/update-controller.sh deploy/update-controller.ps1 deploy/bootstrap-controller-update.sh deploy/xingchen.sh > SHA256SUMS; \
+    chmod 0444 version SHA256SUMS docker-compose.yml deploy/*; \
+    chmod 0444 /usr/local/share/xingchen/installers/install-agent.sh /usr/local/share/xingchen/installers/install-agent.ps1; \
+    chmod 0555 /usr/local/share/xingchen/updaters/update-controller.sh /usr/local/share/xingchen/updaters/bootstrap-controller-update.sh
 EXPOSE 8090
 ENTRYPOINT ["/usr/local/bin/xingchen-setup"]

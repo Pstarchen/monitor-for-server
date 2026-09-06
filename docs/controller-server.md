@@ -23,16 +23,16 @@
 能够访问 GitHub 和 GHCR 时，使用固定版本的一行入口：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.18
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.19
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时，使用 Gitee 和腾讯云 TCR：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.18
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.19
 ```
 
-两个入口都固定到 `v1.20.18`，不要替换为可变的 `main`。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。`CN=true` 直接拉取 `ccr.ccs.tencentyun.com/xc_monitor` 下的六个公开预构建镜像，不在目标机编译；它不代表离线，如果目标机也无法访问 Gitee、腾讯云 TCR 或系统包源，就应使用内部源或已校验的离线 bundle。
+两个入口都固定到 `v1.20.19`，不要替换为可变的 `main`。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。`CN=true` 直接拉取 `ccr.ccs.tencentyun.com/xc_monitor` 下的六个公开预构建镜像，不在目标机编译；它不代表离线，如果目标机也无法访问 Gitee、腾讯云 TCR 或系统包源，就应使用内部源或已校验的离线 bundle。
 
 需要禁止所有公共代码托管和镜像服务时，先在可联网发布机把 setup、server、web、agent、PostgreSQL、Redis 六个 digest 固定镜像晋级到内部 Registry，并把四平台 Agent 制品发布到内部 HTTPS 域。目标机配置 `.env` 后执行：
 
@@ -46,7 +46,7 @@ bash ./deploy/install-controller.sh --network-mode internal --no-source-fallback
 XINGCHEN_NETWORK_MODE=internal
 XINGCHEN_ALLOW_GITEE=false
 XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.18/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.19/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<受信 manifest 摘要>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 ```

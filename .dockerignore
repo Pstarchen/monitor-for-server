@@ -1,4 +1,5 @@
 **
+!docker-compose.yml
 !setup/
 !setup/Dockerfile
 !setup/*.go
@@ -18,3 +19,6 @@
 !deploy/install-agent.sh
 !deploy/install-agent.ps1
 !deploy/update-controller.sh
+!deploy/update-controller.ps1
+!deploy/bootstrap-controller-update.sh
+!deploy/xingchen.sh

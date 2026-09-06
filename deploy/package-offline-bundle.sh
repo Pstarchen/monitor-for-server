@@ -43,6 +43,7 @@ mkdir -p "${stage}/deploy" "${stage}/release/assets" "${stage}/images"
 
 cp "${project_root}/docker-compose.yml" "${stage}/docker-compose.yml"
 cp "${project_root}/deploy/install-controller.sh" "${project_root}/deploy/update-controller.sh" "${project_root}/deploy/install-agent.sh" "${stage}/deploy/"
+cp "${project_root}/deploy/bootstrap-controller-update.sh" "${project_root}/deploy/xingchen.sh" "${stage}/deploy/"
 cp "${project_root}/deploy/install-controller.ps1" "${project_root}/deploy/update-controller.ps1" "${project_root}/deploy/install-agent.ps1" "${stage}/deploy/"
 cp "${integrity_helper}" "${stage}/deploy/offline-bundle-integrity.sh"
 cp "${assets_dir}/manifest.json" "${stage}/release/manifest.json"

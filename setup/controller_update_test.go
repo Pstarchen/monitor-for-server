@@ -100,6 +100,92 @@ func TestControllerUpdaterAllowsExplicitWorkspaceFallback(t *testing.T) {
 	}
 }
 
+func TestOnlineControllerUpdateUsesPackagedBootstrap(t *testing.T) {
+	originalPackagedPath, originalBootstrapPath, originalWorkspace := packagedControllerUpdaterPath, packagedControllerBootstrapPath, workspace
+	root := t.TempDir()
+	packagedControllerUpdaterPath = filepath.Join(root, "missing", "update-controller.sh")
+	packagedControllerBootstrapPath = filepath.Join(root, "image", "bootstrap-controller-update.sh")
+	workspace = filepath.Join(root, "workspace")
+	t.Cleanup(func() {
+		packagedControllerUpdaterPath, packagedControllerBootstrapPath, workspace = originalPackagedPath, originalBootstrapPath, originalWorkspace
+	})
+	writeControllerUpdaterFixture(t, packagedControllerBootstrapPath)
+	writeControllerUpdaterFixture(t, filepath.Join(workspace, "deploy", "bootstrap-controller-update.sh"))
+	t.Setenv(controllerUpdateWorkspaceFallbackEnvironment, "")
+
+	for _, mode := range []string{networkModePublic, networkModeInternal} {
+		t.Run(mode, func(t *testing.T) {
+			path, arguments, err := resolveControllerUpdateInvocation(mode, "1.20.18")
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := updateControllerCommand(context.Background(), path, arguments...)
+			want := []string{"bash", packagedControllerBootstrapPath, "--version", "v1.20.18", "--apply"}
+			if !reflect.DeepEqual(command.Args, want) {
+				t.Fatalf("online update command = %v, want %v", command.Args, want)
+			}
+		})
+	}
+}
+
+func TestOfflineControllerUpdateDoesNotRequireOnlineBootstrap(t *testing.T) {
+	originalPackagedPath, originalBootstrapPath := packagedControllerUpdaterPath, packagedControllerBootstrapPath
+	root := t.TempDir()
+	packagedControllerUpdaterPath = filepath.Join(root, "image", "update-controller.sh")
+	packagedControllerBootstrapPath = filepath.Join(root, "missing", "bootstrap-controller-update.sh")
+	t.Cleanup(func() {
+		packagedControllerUpdaterPath, packagedControllerBootstrapPath = originalPackagedPath, originalBootstrapPath
+	})
+	writeControllerUpdaterFixture(t, packagedControllerUpdaterPath)
+	t.Setenv(controllerUpdateWorkspaceFallbackEnvironment, "")
+
+	path, arguments, err := resolveControllerUpdateInvocation(networkModeOffline, "v1.20.18")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := updateControllerCommand(context.Background(), path, arguments...)
+	want := []string{"bash", packagedControllerUpdaterPath, "--apply", "--offline", "--no-source-fallback"}
+	if !reflect.DeepEqual(command.Args, want) {
+		t.Fatalf("offline update command = %v, want %v", command.Args, want)
+	}
+}
+
+func TestOnlineControllerBootstrapFailsClosedWithoutPackagedScript(t *testing.T) {
+	originalBootstrapPath, originalWorkspace := packagedControllerBootstrapPath, workspace
+	root := t.TempDir()
+	packagedControllerBootstrapPath = filepath.Join(root, "missing", "bootstrap-controller-update.sh")
+	workspace = filepath.Join(root, "workspace")
+	t.Cleanup(func() {
+		packagedControllerBootstrapPath, workspace = originalBootstrapPath, originalWorkspace
+	})
+	workspaceBootstrap := filepath.Join(workspace, "deploy", "bootstrap-controller-update.sh")
+	writeControllerUpdaterFixture(t, workspaceBootstrap)
+	t.Setenv(controllerUpdateWorkspaceFallbackEnvironment, "")
+	if path, _, err := resolveControllerUpdateInvocation(networkModePublic, "v1.20.18"); err == nil {
+		t.Fatalf("online update used %q without an available packaged bootstrap", path)
+	}
+
+	t.Setenv(controllerUpdateWorkspaceFallbackEnvironment, " TrUe ")
+	path, _, err := resolveControllerUpdateInvocation(networkModePublic, "v1.20.18")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != workspaceBootstrap {
+		t.Fatalf("explicit bootstrap fallback = %q, want %q", path, workspaceBootstrap)
+	}
+}
+
+func TestControllerUpdateInvocationRejectsInvalidOnlineTarget(t *testing.T) {
+	for _, target := range []string{"", "latest", "main", "v1.20.18-rc1", "v1.20.018"} {
+		if _, _, err := resolveControllerUpdateInvocation(networkModePublic, target); err == nil {
+			t.Fatalf("online update accepted invalid target %q", target)
+		}
+	}
+	if _, _, err := resolveControllerUpdateInvocation("invalid", "v1.20.18"); err == nil {
+		t.Fatal("controller update accepted an invalid network mode")
+	}
+}
+
 func writeControllerUpdaterFixture(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -848,8 +934,9 @@ func TestControllerUpdateStaleWindowsOutliveCommandTimeouts(t *testing.T) {
 	if controllerUpdateCheckStaleAfter <= controllerUpdateCheckTimeout {
 		t.Fatalf("check stale window %s must exceed command timeout %s", controllerUpdateCheckStaleAfter, controllerUpdateCheckTimeout)
 	}
-	if controllerUpdateApplyStaleAfter <= controllerUpdateApplyTimeout {
-		t.Fatalf("apply stale window %s must exceed command timeout %s", controllerUpdateApplyStaleAfter, controllerUpdateApplyTimeout)
+	updateTimeout := controllerUpdateRunnerGracePeriod + controllerReleaseCheckTimeout + controllerBackupCreateTimeout + controllerUpdateApplyTimeout + controllerUpdateRecoveryGracePeriod + controllerUpdateOutputDrainTimeout
+	if controllerUpdateApplyStaleAfter <= updateTimeout {
+		t.Fatalf("apply stale window %s must exceed startup, release check, backup, command and recovery timeouts %s", controllerUpdateApplyStaleAfter, updateTimeout)
 	}
 }
 

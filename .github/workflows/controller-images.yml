@@ -45,7 +45,16 @@ jobs:
         run: sudo bash deploy/install-agent_test.sh
 
       - name: Check update scripts
-        run: bash -n deploy/*.sh && bash deploy/xingchen_test.sh && bash deploy/install-controller_test.sh && bash deploy/check-github-release-mutable_test.sh && bash deploy/mirror-release-image_test.sh && bash deploy/pull-release-platform_test.sh && bash deploy/update-controller_test.sh && bash deploy/package-offline-bundle_test.sh
+        run: |
+          for script in deploy/*.sh; do bash -n "$script"; done
+          bash deploy/xingchen_test.sh
+          bash deploy/install-controller_test.sh
+          bash deploy/check-github-release-mutable_test.sh
+          bash deploy/mirror-release-image_test.sh
+          bash deploy/pull-release-platform_test.sh
+          bash deploy/bootstrap-controller-update_test.sh
+          bash deploy/update-controller_test.sh
+          bash deploy/package-offline-bundle_test.sh
 
       - name: Check PowerShell scripts and generated updater
         shell: pwsh
@@ -453,6 +462,10 @@ jobs:
               if [[ "${image}" == *-setup:* ]]; then
                 docker run --rm --platform "linux/${arch}" --entrypoint sh "${image}" -ec \
                   "test \"\$(sha256sum /usr/local/share/xingchen/installers/install-agent.sh | awk '{print \$1}')\" = '${installer_linux_sha}' && test \"\$(sha256sum /usr/local/share/xingchen/installers/install-agent.ps1 | awk '{print \$1}')\" = '${installer_windows_sha}' && test -f /usr/local/share/xingchen/release/manifest.json && test \"\$(find /usr/local/share/xingchen/release/assets -maxdepth 1 -type f -name 'xingchen-agent_*' | wc -l)\" -eq 4"
+                if [[ -f deploy/bootstrap-controller-update.sh ]]; then
+                  docker run --rm --platform "linux/${arch}" --entrypoint sh "${image}" -ec \
+                    "cd /usr/local/share/xingchen/controller-update && test \"\$(cat version)\" = '${RELEASE_VERSION}' && test \"\$(wc -l < SHA256SUMS)\" -eq 6 && sha256sum -c SHA256SUMS"
+                fi
               fi
             done
             for index in "${!base_images[@]}"; do

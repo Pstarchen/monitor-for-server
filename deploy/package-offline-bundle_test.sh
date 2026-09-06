@@ -78,6 +78,11 @@ grep -E "^[a-f0-9]{64}  $(basename "${archive}")$" "${archive}.sha256" >/dev/nul
   grep -E '^[a-f0-9]{64}  bundle-metadata\.txt$' SHA256SUMS >/dev/null
   grep -E '^[a-f0-9]{64}  upgrade-offline\.sh$' SHA256SUMS >/dev/null
   grep -E '^[a-f0-9]{64}  upgrade-offline\.ps1$' SHA256SUMS >/dev/null
+  for online_script in bootstrap-controller-update.sh xingchen.sh; do
+    [[ -f "deploy/${online_script}" && -x "deploy/${online_script}" ]]
+    cmp -s "${script_dir}/${online_script}" "deploy/${online_script}"
+    grep -E "^[a-f0-9]{64}  deploy/${online_script//./\\.}$" SHA256SUMS >/dev/null
+  done
   for ps_script in import-images.ps1 install-offline.ps1 upgrade-offline.ps1; do
     if [[ "$(od -An -tx1 -N3 "${ps_script}" | tr -d '[:space:]')" != efbbbf ]]; then
       echo "Generated PowerShell entry point is missing its UTF-8 BOM: ${ps_script}" >&2

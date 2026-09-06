@@ -25,18 +25,21 @@ const controllerUpdateRunnerProjectSuffix = "-update-runner"
 const controllerUpdateWorkspaceFallbackEnvironment = "XINGCHEN_CONTROLLER_UPDATE_ALLOW_WORKSPACE_FALLBACK"
 
 var packagedControllerUpdaterPath = "/usr/local/share/xingchen/updaters/update-controller.sh"
+var packagedControllerBootstrapPath = "/usr/local/share/xingchen/updaters/bootstrap-controller-update.sh"
 
 const (
-	controllerUpdateCheckTimeout       = controllerReleaseCheckTimeout
-	controllerUpdateApplyTimeout       = 4 * time.Hour
-	controllerUpdateRunnerStartTimeout = 30 * time.Second
-	controllerUpdateRunnerGracePeriod  = 2 * time.Minute
-	controllerUpdateInspectTimeout     = 2 * time.Second
-	controllerUpdateInspectionCache    = 2 * time.Second
-	controllerUpdateCheckStaleAfter    = controllerUpdateCheckTimeout + 2*time.Minute
-	controllerUpdateApplyStaleAfter    = 4*time.Hour + 15*time.Minute
-	controllerAutoFailureLimit         = 3
-	controllerAutoPauseDuration        = 24 * time.Hour
+	controllerUpdateCheckTimeout        = controllerReleaseCheckTimeout
+	controllerUpdateApplyTimeout        = 4 * time.Hour
+	controllerUpdateRunnerStartTimeout  = 30 * time.Second
+	controllerUpdateRunnerGracePeriod   = 2 * time.Minute
+	controllerUpdateRecoveryGracePeriod = 6 * time.Minute
+	controllerUpdateOutputDrainTimeout  = 10 * time.Second
+	controllerUpdateInspectTimeout      = 2 * time.Second
+	controllerUpdateInspectionCache     = 2 * time.Second
+	controllerUpdateCheckStaleAfter     = controllerUpdateCheckTimeout + 2*time.Minute
+	controllerUpdateApplyStaleAfter     = controllerUpdateRunnerGracePeriod + controllerReleaseCheckTimeout + controllerBackupCreateTimeout + controllerUpdateApplyTimeout + controllerUpdateRecoveryGracePeriod + controllerUpdateOutputDrainTimeout + 15*time.Minute
+	controllerAutoFailureLimit          = 3
+	controllerAutoPauseDuration         = 24 * time.Hour
 )
 
 type controllerUpdateService struct {
@@ -132,9 +135,9 @@ type controllerImage struct {
 }
 
 var controllerImages = []controllerImage{
-	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.18"},
-	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.18"},
-	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.18"},
+	{service: "setup", environment: "XINGCHEN_SETUP_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-setup:v1.20.19"},
+	{service: "server", environment: "XINGCHEN_SERVER_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-server:v1.20.19"},
+	{service: "web", environment: "XINGCHEN_WEB_IMAGE", defaultImage: "ghcr.io/pstarchen/monitor-for-server-web:v1.20.19"},
 }
 
 func newControllerUpdateService() *controllerUpdateService {
@@ -455,7 +458,7 @@ func (s *controllerUpdateService) runUpdate() error {
 		state.CheckedAt = s.currentTime().UTC().Format(time.RFC3339)
 		return s.writeRuntimeState(state, preserveControllerAutomaticState)
 	}
-	updaterPath, err := resolveControllerUpdaterPath()
+	updaterPath, arguments, err := resolveControllerUpdateInvocation(s.effectiveNetworkMode(), targetVersion)
 	if err != nil {
 		log.Printf("controller updater preflight failed: %v", err)
 		state.State = "ERROR"
@@ -497,17 +500,13 @@ func (s *controllerUpdateService) runUpdate() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), controllerUpdateApplyTimeout)
 	defer cancel()
-	arguments := []string{"--apply"}
-	if s.effectiveNetworkMode() == networkModeOffline {
-		arguments = append(arguments, "--offline", "--no-source-fallback")
-	}
 	command := updateControllerCommand(ctx, updaterPath, arguments...)
 	command.Env = overrideEnvironment(
 		controllerUpdateEnvironment(targetVersion),
 		"XINGCHEN_PREUPDATE_BACKUP_PATH="+filepath.Join(workspace, "backups", backupName),
 		"XINGCHEN_PREUPDATE_BACKUP_SHA256="+backupSHA256,
 	)
-	output, err := command.CombinedOutput()
+	output, err := runControllerUpdateCommand(ctx, command)
 	state = s.readState()
 	if err != nil {
 		log.Printf("controller update failed: %v (%d bytes)", err, len(output))
@@ -891,13 +890,33 @@ func commandOutput(name string, args ...string) string {
 }
 
 func resolveControllerUpdaterPath() (string, error) {
-	if controllerUpdaterIsRegular(packagedControllerUpdaterPath) {
-		return packagedControllerUpdaterPath, nil
+	return resolvePackagedControllerUpdater(packagedControllerUpdaterPath, "update-controller.sh")
+}
+
+func resolveControllerUpdateInvocation(mode, targetVersion string) (string, []string, error) {
+	if mode == networkModeOffline {
+		path, err := resolveControllerUpdaterPath()
+		return path, []string{"--apply", "--offline", "--no-source-fallback"}, err
+	}
+	if mode != networkModePublic && mode != networkModeInternal {
+		return "", nil, errors.New("invalid controller update network mode")
+	}
+	version := normalizeControllerVersion(targetVersion)
+	if version == "" {
+		return "", nil, errors.New("online controller update requires a stable target version")
+	}
+	path, err := resolvePackagedControllerUpdater(packagedControllerBootstrapPath, "bootstrap-controller-update.sh")
+	return path, []string{"--version", version, "--apply"}, err
+}
+
+func resolvePackagedControllerUpdater(packagedPath, filename string) (string, error) {
+	if controllerUpdaterIsRegular(packagedPath) {
+		return packagedPath, nil
 	}
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv(controllerUpdateWorkspaceFallbackEnvironment)), "true") {
-		return "", fmt.Errorf("packaged controller updater is unavailable: %s", packagedControllerUpdaterPath)
+		return "", fmt.Errorf("packaged controller updater is unavailable: %s", packagedPath)
 	}
-	workspacePath := filepath.Join(workspace, "deploy", "update-controller.sh")
+	workspacePath := filepath.Join(workspace, "deploy", filename)
 	if !controllerUpdaterIsRegular(workspacePath) {
 		return "", fmt.Errorf("workspace controller updater is unavailable: %s", workspacePath)
 	}
@@ -911,11 +930,6 @@ func (s *controllerUpdateService) effectiveNetworkMode() string {
 func controllerUpdaterIsRegular(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular() && info.Size() > 0
-}
-
-func updateControllerCommand(ctx context.Context, updaterPath string, arguments ...string) *exec.Cmd {
-	// Invoke through Bash so a root-owned packaged script does not need a writable mount.
-	return exec.CommandContext(ctx, "bash", append([]string{updaterPath}, arguments...)...)
 }
 
 func controllerUpdateRunnerArgs() []string {

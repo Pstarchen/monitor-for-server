@@ -18,13 +18,13 @@ Linux 生产环境推荐使用 `deploy/xingchen.sh`。它保留一条命令准�
 能够访问 GitHub 和 GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.18
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.19
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.18/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.18
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.19
 ```
 
 `CN=true` 固定使用 Gitee 的对应版本编排文件，并直接从 `ccr.ccs.tencentyun.com/xc_monitor` 拉取 setup、server、web、agent、PostgreSQL 和 Redis 六个多架构镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。该模式仍然联网：依赖补齐需要 Linux 发行版包源，运行镜像需要腾讯云 TCR。所有这些外部源都不可达时必须改用内部源或离线 bundle。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。
@@ -110,11 +110,26 @@ sudo xingchen restart
 sudo xingchen update
 ```
 
-不带动作运行 `sudo xingchen` 会打开交互菜单。`status` 展示 Compose 服务状态，`logs` 显示最近 200 行总控日志，`restart` 重新创建并等待现有服务健康，`update` 执行稳定版本更新。快捷命令会从实际安装脚本推断自定义部署目录；管理器沿用已有 Git origin、镜像前缀、制品源和网络策略。`restart` 与重复安装尊重 `CONTROLLER_AGENT_ENABLED=false`，保留已有宿主 Agent 名称和分组。
+不带动作运行 `sudo xingchen` 会打开交互菜单。`status` 展示 Compose 服务状态，`logs` 显示最近 200 行总控日志，`restart` 重新创建并等待现有服务健康，`update` 执行稳定版本更新。快捷命令会从实际安装脚本推断自定义部署目录；管理器沿用已有制品源、Git origin（若存在）、镜像前缀和网络策略。已有部署无需包含 `.git`，明确指定稳定版本时也不需要查询 Git。`restart` 与重复安装尊重 `CONTROLLER_AGENT_ENABLED=false`，保留已有宿主 Agent 名称和分组。
 
 只有显式 `--source gitee|github` 才会改用对应的在线来源。切源时，即使版本号相同，更新器也会核对容器实际使用的镜像引用并重新部署。已有 `internal/offline` 部署不能通过普通 `xingchen update` 隐式改成公网模式，应继续使用底层更新器或离线 bundle。
 
-需要精细控制时，底层更新器可以先检查候选版本，再决定是否重启：
+### 在线更新
+
+控制台与 `xingchen update` 通过同一在线引导器更新。引导器拉取已配置仓库中目标版本的 Setup 镜像，检查 OCI 版本、实际架构和本地镜像 ID；从该固定 ID 提取更新包，校验六个受管文件的 SHA256 后，运行包内的新版更新器。更新包包含目标 Compose、Linux/Windows 更新器、在线引导器和管理命令，避免旧 Setup 长期使用旧脚本与旧 Compose。整个过程持有同一文件锁，不依赖服务器上的源码仓库，也不会因镜像拉取失败转为源码构建。
+
+已包含在线引导器的部署，可先对已选版本执行在线预检。下面的版本号需替换为实际已发布且包含更新包的版本：
+
+```bash
+sudo bash ./deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version vX.Y.Z --check
+sudo xingchen update --install-dir /opt/guanlan-monitor --source gitee --version vX.Y.Z
+```
+
+`--check` 拉取并验证候选镜像和部署文件，不修改 `.env` 或重启现有服务。显式 `--source gitee` 将离线安装迁移到 Gitee 版本发现与腾讯云镜像；只有候选验证和备份完成后才写入新网络策略，同时清除旧的固定 manifest 配置。普通在线更新保持现有来源。`v1.20.18` 及更早版本的 Setup 不含这个更新包；首次迁移需要先从后续正式发行版取得已校验的管理命令和引导器。缺少包或校验失败会终止，不执行 `main` 分支上的脚本。
+
+在线切换保存原始 `.env`、Compose 和受管脚本；健康检查失败或收到 HUP/INT/TERM 时，恢复原文件与实际运行过的旧镜像，再做一次健康检查。候选和回滚启动均禁止 Compose 隐式拉取或构建。恢复失败保留权限受限的 `.controller-update-snapshot.*`，后续更新拒绝覆盖，需先检查该快照和容器状态；强制断电或 SIGKILL 后遗留的快照也按此处理。数据库备份单独保留，数据库不会自动回退。
+
+底层更新器是执行指定镜像目标的引擎，不负责发现最新版。维护已有脚本调用或配置自动任务时可使用：
 
 ```bash
 sudo bash ./deploy/update-controller.sh --check
@@ -128,7 +143,7 @@ sudo bash ./deploy/update-controller.sh --auto
 
 稳定发布使用 `vX.Y.Z`。`CN=true` 部署从 Gitee 稳定标签发现新版本，并且只在 TCR 验证完成后才向 Gitee 推送版本标签；GitHub 部署从已公开 Release 发现版本。内部或离线部署优先读取本地或 `XINGCHEN_RELEASE_MANIFEST_URLS` 配置的 HTTPS manifest，并保存 last-known-good 缓存。联网 CI 先创建 draft Release，等待四个项目镜像、四个平台 Agent 制品、manifest、校验文件和两个架构离线包全部验证完成后才公开发布，避免目标机看见半成品版本。
 
-更新器不内置公共镜像加速器。控制台发起更新时拉取固定的 `vX.Y.Z` 或管理员配置的 OCI digest，并校验 OCI 版本标签，避免旧 `latest` 混入升级。自动更新只允许同一主版本内前进，跨主版本必须由管理员评估后手动执行。镜像源全部失败后，再按 `XINGCHEN_SOURCE_REPOSITORIES` 顺序使用目标版本标签作为 Docker 远程构建上下文；GitHub 只有显式配置时才会参与。`--source-build` 直接走配置的源码列表，`--no-source-fallback` 在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
+更新器不内置公共镜像加速器。控制台发起更新时拉取固定的 `vX.Y.Z` 或管理员配置的 OCI digest，并校验 OCI 版本标签，避免旧 `latest` 混入升级。自动更新只允许同一主版本内前进，跨主版本必须由管理员评估后手动执行。控制台和统一管理命令的在线入口关闭源码回退。底层更新器仍保留显式维护能力：按 `XINGCHEN_SOURCE_REPOSITORIES` 使用目标版本标签构建，GitHub 只有显式配置时才参与；`--source-build` 直接走配置的源码列表，`--no-source-fallback` 在镜像拉取失败时直接报错，`--build` 只构建当前目录源码。
 
 ### 哪吒机制对照与腾讯云发布
 
@@ -151,7 +166,7 @@ sudo bash ./deploy/update-controller.sh --auto
 若镜像和 Agent 工作流已经成功，而离线打包或上传失败，可在修复发布工具后续跑现有草稿：
 
 ```bash
-gh workflow run controller-images.yml --ref main -f release_version=v1.20.18
+gh workflow run controller-images.yml --ref main -f release_version=v1.20.19
 ```
 
 `release_version` 必须是已存在的稳定版本草稿；已公开或不存在的 Release 会被拒绝。续跑使用指定版本标签的源码、安装器和已成功的 Agent 工作流，复用腾讯云已有基础镜像，不重新构建或同步镜像；发布工具来自本次选定的 workflow ref。续跑与同版本标签发布共用并发锁，仍需通过镜像、Agent 制品和离线包校验才会公开。留空该参数维持原有镜像构建流程。
@@ -159,7 +174,7 @@ gh workflow run controller-images.yml --ref main -f release_version=v1.20.18
 发布机可用以下只读命令核验已经公开的版本；无需启动本机 Docker 引擎：
 
 ```bash
-docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-setup:v1.20.18
+docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-setup:v1.20.19
 ```
 
 仓库中的未发布改动不会自动进入上述版本或生产服务器。新版本应完成 CI、腾讯云制品和离线包校验后，再将相同稳定标签同步到 Gitee，以免国内安装先发现尚未就绪的版本。
@@ -212,7 +227,7 @@ XINGCHEN_WEB_IMAGE=registry.internal.example/xingchen/web@sha256:<digest>
 XINGCHEN_AGENT_IMAGE=registry.internal.example/xingchen/agent@sha256:<digest>
 XINGCHEN_POSTGRES_IMAGE=registry.internal.example/xingchen/postgres@sha256:<digest>
 XINGCHEN_REDIS_IMAGE=registry.internal.example/xingchen/redis@sha256:<digest>
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.18/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.19/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<manifest.json 的 SHA256>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 XINGCHEN_SOURCE_REPOSITORIES=
