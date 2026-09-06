@@ -40,8 +40,8 @@ PostgreSQL、Redis 和服务端端口默认只在 Docker 内网开放。公网�
 第一次使用时，建议严格按下面的顺序操作：
 
 1. 准备一台 Linux 总控服务器和一个域名。
-2. 安装 Docker Engine 与 Docker Compose v2。
-3. 克隆项目并运行总控安装器。
+2. 选择公共源、内部源或离线包；内部和离线环境提前准备 Docker Engine 与 Compose v2。
+3. 使用固定版本的统一管理脚本安装总控，或运行已校验离线包中的安装入口。
 4. 打开 `/setup`，填写站点和管理员信息。
 5. 登录控制台，创建第一个数据库备份。
 6. 配置并测试至少一种通知渠道。
@@ -77,7 +77,7 @@ docker info
 git --version
 ```
 
-成功标准：四条命令都能正常返回，`docker info` 不出现连接守护进程失败。
+已准备好环境时，这些命令应正常返回，`docker info` 不出现连接守护进程失败。公共在线安装器可以补齐受支持的依赖；内部和离线安装必须提前准备所需工具。固定版本在线更新不要求部署目录保留 `.git`，也不需要 Git 查询版本。
 
 如果普通用户执行 Docker 命令提示权限不足，可以临时在命令前加 `sudo`。是否把用户加入 `docker` 组应按你的服务器安全策略决定，因为该组接近 root 权限。
 
@@ -142,7 +142,7 @@ curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarch
 5. 启动数据库和临时安装环境。
 6. 等待 `http://127.0.0.1:18080/healthz` 健康检查通过。
 
-Linux 安装成功后可直接使用 `sudo xingchen status`、`sudo xingchen logs`、`sudo xingchen restart` 和 `sudo xingchen update`。安装中断或网络失败时，修复问题后重新执行原 `install` 命令即可安全续装。
+Linux 安装成功后可直接使用 `sudo xingchen status`、`sudo xingchen logs`、`sudo xingchen restart` 和 `sudo xingchen update`。首次安装中断或网络失败时，修复问题后可使用相同目录、来源和版本重新执行原 `install` 命令续装；已有部署应使用 `update`。
 
 安装完成后，终端会提示打开：
 
@@ -162,18 +162,18 @@ powershell -ExecutionPolicy Bypass -File .\deploy\install-controller.ps1
 
 ### 4.4 安装器常用选项
 
-Linux 和 Windows 选项一一对应：
+下表适用于已取得对应版本源码目录后使用的底层 `deploy/install-controller.sh` 和 `deploy/install-controller.ps1`，不是 `xingchen` 管理命令的参数表：
 
 | 用途 | Linux | Windows |
 | --- | --- | --- |
 | 安装后启用每日 04:00 自动更新 | `--auto-update` | `-AutoUpdate` |
 | 使用当前目录源码构建 | `--build` | `-Build` |
-| 跳过镜像，直接从双源码仓库构建 | `--source-build` | `-SourceBuild` |
+| 跳过镜像，直接从配置的源码仓库构建 | `--source-build` | `-SourceBuild` |
 | 跳过配置的镜像前缀 | `--no-mirror` | `-NoMirror` |
 | 镜像失败后不回退源码构建 | `--no-source-fallback` | `-NoSourceFallback` |
 | 清理本项目旧容器和本地镜像 | `--cleanup` | `-Cleanup` |
 
-例如，Linux 首次安装并启用自动更新：
+例如，在已取得并验证的源码目录内，Linux 首次安装并启用自动更新：
 
 ```bash
 sudo bash ./deploy/install-controller.sh --auto-update
@@ -280,7 +280,7 @@ docker compose up -d --force-recreate server web
 - “轻量采集”：低配置或连接很多的服务器可启用，它会跳过进程和连接统计。
 - “完整进程”：只有确实需要完整进程清单时启用，并设置合理上限。
 
-参数选好后分别点击“复制令牌”和“复制安装命令”。命令包含正确的设备 ID 和总控地址，但不包含接入令牌或长期 Agent 密钥；执行安装器前会校验总控返回的 SHA256，安装器提权并准备好制品后再在终端中静默询问令牌。应优先使用该流程，不要手工拼接。
+参数选好后分别点击“复制令牌”和“复制安装命令”。命令包含正确的设备 ID 和总控地址，但不包含接入令牌或长期 Agent 密钥；执行安装器前会校验总控返回的 SHA256。安装器取得权限后在终端中隐藏读取令牌，准备并校验制品，最后交换令牌并写入受限配置文件。应优先使用该流程，不要手工拼接。
 
 ### 7.3 Linux 安装 Agent
 
@@ -319,7 +319,7 @@ Get-Service XingchenAgent
 %ProgramData%\XingchenMonitor\agent.json
 ```
 
-Windows 没有预编译程序时，安装器需要 Git 和 Go 1.24+ 从源码构建；生产服务器更推荐通过 `-BinaryPath` 提供可信的预编译 `xingchen-agent.exe`。完整参数见[受监控服务器搭建材料](monitored-agent.md)。旧版主机会继续显示旧服务名和路径，重新运行安装命令即可平滑升级。
+Windows 安装器默认取得总控提供的预编译程序并校验摘要，不需要 Git 或 Go。离线安装可通过 `-BinaryPath` 提供可信的 `xingchen-agent.exe`；只有存在本地源码或显式设置 `-RepositoryUrl` 时才允许源码构建，内部网络模式禁止源码回退。完整参数见[受监控服务器搭建材料](monitored-agent.md)。旧版主机会继续显示旧服务名和路径，重新运行安装命令可以迁移配置并更新服务。
 
 ### 7.5 确认接入成功
 
@@ -335,14 +335,16 @@ Windows 没有预编译程序时，安装器需要 Git 和 Go 1.24+ 从源码构
 
 若 1 分钟后仍是“待接入”，先看目标服务器 Agent 日志，再检查它能否访问 `<公网入口>/healthz`。
 
-### 7.6 轮换密钥和重新安装
+### 7.6 重新签发接入令牌和安装
 
-只有管理员能轮换密钥。轮换后旧密钥立即失效，因此应：
+管理员可以为普通设备重新签发一次性接入令牌。签发本身不会中断现有 Agent；安装器成功消费令牌时才生成新密钥并使旧密钥失效：
 
-1. 在“设备管理”点击该设备的密钥图标。
-2. 保存新密钥或复制新安装命令。
-3. 立即到目标服务器重新运行安装器。
-4. 确认设备重新在线后再关闭凭据弹窗。
+1. 在“设备管理”找到目标设备，点击“签发接入令牌”图标。
+2. 在“Agent 接入”弹窗中点击“复制令牌”和“复制安装命令”。令牌只显示一次，15 分钟内有效。
+3. 到目标服务器运行同域安装命令，在安装器提示时隐藏输入令牌。
+4. 确认设备重新在线，检查 Agent 日志和指标时间。
+
+再次签发会替换该设备尚未使用的旧令牌。不要把同一个设备令牌用于另一台仍需独立监控的服务器。
 
 修改设备名称、分组、资产信息不需要重装 Agent。总控中修改默认上报周期后，在线 Agent 会在下一次成功上报时同步。
 
@@ -550,7 +552,7 @@ API Token 用于移动端、脚本或 MCP 客户端，不要用管理员 Cookie 
 5. 控制台重启期间耐心等待；恢复后页面会自动刷新状态。
 6. 检查总控组件版本、设备在线状态和通知投递。
 
-稳定版本使用 `vX.Y.Z`。发布流程只有在 setup、server、web 和 Agent 的同版本镜像全部构建完成后才发布制品和离线包；中国模式通过 Gitee 稳定标签发现新版本，GitHub 模式只读取已公开 Release，内部或离线模式使用受信 manifest。控制台会显示版本来源及 last-known-good 缓存状态。
+稳定版本使用 `vX.Y.Z`。发布流程会先准备草稿，确认六个腾讯云 TCR 镜像、四个平台 Agent 制品和架构对应离线包齐备后才公开 Release 并同步 Gitee 稳定标签；中国模式通过 Gitee 稳定标签发现新版本，GitHub 模式只读取已公开 Release，内部或离线模式使用受信 manifest。控制台会显示版本来源及 last-known-good 缓存状态。
 
 ### 9.4.1 更新页面的逐项操作和判断标准
 
@@ -561,7 +563,7 @@ API Token 用于移动端、脚本或 MCP 客户端，不要用管理员 Cookie 
 3. **检查候选版本**：返回“系统更新”，点击“检查更新”。等待按钮结束加载，确认出现“发现可用更新”，核对目标版本、发布时间和 Release 说明。若目标版本低于当前版本，先停止并确认是否真的需要降级。
 4. **检查变更窗口**：确认没有人在执行数据库恢复、Agent 密钥轮换、批量任务或其他发布操作；通知值班人员控制台会短暂不可访问。
 5. **启动更新**：点击“立即更新”，在确认框中阅读“拉取镜像、依次重启服务、不会删除监控数据”的提示，确认无误后点击“开始更新”。一次点击即可，不要刷新后重复提交。
-6. **等待重启**：更新状态会变为“正在更新并重启”。这段时间出现登录失败、首页打不开或 WebSocket 断开属于预期现象。通常等待 2-5 分钟；不要手工启动旧容器，也不要同时执行恢复。
+6. **等待重启**：更新状态会变为“正在更新并重启”。这段时间出现登录失败、首页打不开或 WebSocket 断开属于预期现象。耗时取决于镜像下载、备份大小和健康检查；不要手工启动旧容器，也不要同时执行恢复。
 7. **验证服务版本**：页面恢复后重新进入“系统设置 > 系统更新”，确认 setup、server、web 版本一致，健康状态均为“运行正常”。
 8. **验证业务链路**：依次打开运行总览、设备管理、告警事件和通知投递记录，确认至少一台设备重新在线、趋势产生新数据、告警列表可读、测试通知可以发送。
 9. **记录结果**：把升级前后的版本、开始/完成时间、备份文件名和异常信息写入交接记录。没有完成业务验证前，不要关闭维护窗口。
@@ -576,35 +578,38 @@ docker compose logs --tail 100 web
 curl -fsS https://<你的域名>/healthz
 ```
 
-如果控制台仍可访问，优先查看“系统更新”页的错误提示和服务状态；如果控制台不可访问，先看 `setup` 日志和 `/healthz`，不要连续重试。更新任务失败不会删除数据卷；候选服务健康检查失败时，更新器会尝试恢复旧应用镜像并再次检查。数据库不会自动回滚，新版本可能已经执行 Flyway 迁移，因此恢复镜像后仍要确认数据库兼容性。需要完整降级时，先确认目标版本兼容性，再结合升级前 PostgreSQL 备份恢复。
+如果控制台仍可访问，优先查看“系统更新”页的错误提示和服务状态；如果控制台不可访问，先看 `setup` 日志和 `/healthz`，不要连续重试。更新任务失败不会删除数据卷；候选服务健康检查失败时，更新器会尝试恢复原 `.env`、Compose、受管脚本和实际运行的旧镜像，并再次检查服务健康状态。数据库不会自动回滚，新版本可能已经执行 Flyway 迁移，因此恢复镜像后仍要确认数据库兼容性。需要完整降级时，先确认目标版本兼容性，再结合升级前 PostgreSQL 备份恢复。
 
 ### 9.5 命令行检查和更新
 
-Linux：
+Linux 已有公共源部署使用统一管理命令更新到最新稳定版本：
 
 ```bash
-sudo bash ./deploy/update-controller.sh --check
-sudo bash ./deploy/update-controller.sh --apply
+sudo xingchen update
 ```
 
-Windows：
+需要固定版本时，先用目标版本 bootstrap 预检，再应用。以下示例假定安装目录为 `/opt/guanlan-monitor`，目标版本已发布且包含更新包：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\update-controller.ps1 -Check
-powershell -ExecutionPolicy Bypass -File .\deploy\update-controller.ps1 -Apply
+```bash
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.19 --check
+sudo xingchen update --version v1.20.19
 ```
 
-`--check`/`-Check` 只准备候选镜像并报告，`--apply`/`-Apply` 会应用并重启总控服务。
+bootstrap 从目标 Setup 镜像提取更新包，验证版本、架构、镜像 ID 和包内摘要。`--check` 准备并校验候选，不切换运行服务；正式更新由目标版本更新器备份数据库后执行。
+
+普通更新保留 `.env` 中的来源、镜像和网络策略，优先按 `XINGCHEN_SOURCE_REPOSITORIES` 判断发布来源，未配置时才参考 Git origin；部署目录可以没有 `.git`。`--source gitee` 或 `--source github` 会显式切换公共来源、六个镜像及相关发布策略，并清除原 manifest 和 Agent 离线来源设置。内部或离线部署运行普通在线更新会被拒绝，预检命令也不会自动改变网络模式。
+
+`v1.20.18` 及更早版本首次迁移时，需先使用已验证的发布包补齐新版管理器和 bootstrap，见[部署与运维](deployment.md)。Windows Docker Desktop 部署可使用控制台更新或已校验的离线升级包；底层 `update-controller.sh/.ps1` 用于当前目录源码和高级维护，不作为跨版本在线更新入口。
 
 自动更新在控制台开启后每天 04:00 按服务时区执行。更新过程不会删除 PostgreSQL 和 Redis 数据卷。
 
 ### 9.6 健康检查失败时如何回滚
 
-候选服务健康检查失败时，更新器会尝试恢复更新前的应用镜像并再次检查；它不会删除数据卷，也不会自动恢复 PostgreSQL。服务端启动时，Flyway 可能已经执行前向迁移，旧应用镜像不一定兼容新数据库结构，因此镜像恢复成功仍不等于数据库已经安全降级。
+候选服务健康检查失败时，更新器会尝试恢复更新前的 `.env`、Compose、受管脚本和实际运行的旧镜像，并再次检查服务健康状态；它不会删除数据卷，也不会自动恢复 PostgreSQL。服务端启动时，Flyway 可能已经执行前向迁移，旧应用镜像不一定兼容新数据库结构，因此镜像恢复成功仍不等于数据库已经安全降级。
 
 需要降级时，必须先确认目标版本的数据库兼容性；必要时同时恢复升级前 PostgreSQL 备份和对应版本镜像。不要只改镜像标签后直接启动旧版本。
 
-若命令被 `SIGINT`、`SIGTERM` 等系统信号打断，管理器会恢复源码、Git origin 和 `.env`，但仍应先执行 `sudo xingchen status` 确认运行容器，再决定是否重跑同版本更新。
+在线更新捕获到 `SIGHUP`、`SIGINT` 或 `SIGTERM` 时，也会执行上述恢复和健康检查；管理器不修改源码检出或 Git origin。回滚健康时退出码为 `10`，恢复不完整时为 `11`，并保留受保护的 `.controller-update-snapshot.*`。`SIGKILL` 或断电无法触发信号处理；恢复连接后先执行 `sudo xingchen status`，检查日志和保留快照。存在未处理快照时，后续在线更新会拒绝继续，应先人工确认并完成恢复，不要盲目重跑同版本或删除快照、数据卷。
 
 ## 10. 日常运维速查
 
@@ -748,7 +753,7 @@ curl -v https://monitor.example.com/healthz
 
 常见原因：总控地址写错、DNS 解析失败、证书不受信任、出口防火墙阻断、设备 ID/密钥不匹配、管理员已经轮换密钥、Agent 服务未运行。
 
-密钥问题不要反复猜测。管理员直接轮换一次，使用新生成的完整命令重新安装。
+密钥问题不要反复猜测。管理员可重新签发一次性接入令牌，再使用同域安装命令重新安装，按提示输入令牌。
 
 ### 11.6 设备在线，但看不到进程、容器或磁盘
 
@@ -772,7 +777,7 @@ curl -v https://monitor.example.com/healthz
 
 后台版本检查会缓存 20 分钟；控制台手动检查会立即刷新发布源。Gitee 标签 API、GitHub Release API 或内部 manifest 临时失败时会保留 last-known-good 缓存并显示提示。中国模式若持续出现该提示，先确认服务器能访问 `gitee.com/api/v5`；判断发布是否完整时，应同时检查版本来源、四个应用镜像、PostgreSQL/Redis 依赖镜像和四个平台 Agent 制品。
 
-命令行更新失败时查看输出中的具体镜像源。更新器按配置的内部镜像、镜像自身地址和源码仓库顺序回退；完全断网环境应使用离线 bundle，不要等待公共源超时。
+命令行更新失败时查看输出中的具体镜像源和失败阶段。控制台及 `xingchen update` 的在线更新会校验目标版本更新包和镜像，不会自动回退到源码构建；源码构建仅用于显式选择的底层维护流程。完全断网环境应使用已校验离线 bundle 中的升级入口，不要等待公共源超时。
 
 ### 11.9 数据库恢复或更新后控制台暂时不可用
 

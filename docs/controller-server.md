@@ -10,7 +10,7 @@
 - 安装器支持 `public`、`internal`、`offline`。`CN=true` 属于 `public` 国内在线路径：从 Gitee 取得固定版本编排文件，从腾讯云 TCR 拉取六个预构建镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。`internal` 和 `offline` 才会禁止公网依赖安装。
 - Docker Compose 会自动拉取 PostgreSQL 16 镜像并创建私有数据卷；数据库、用户和密码由控制端安装器自动生成，端口只在 Compose 内网可见。
 - 一个生产域名及 TLS 证书。公网只暴露 Web 入口，PostgreSQL、Redis 和 Spring Boot 端口保持内网。若先用 IP 初始化，必须显式启用临时 HTTP，完成宝塔反向代理和 HTTPS 后立即关闭。
-- 安装服务需要短暂访问宿主机 Docker socket，以便向导完成后自动重建生产容器；不要把安装端口以外的 Docker API 暴露到公网。
+- 安装服务需要访问宿主机 Docker socket，以便完成首次配置，并执行后续更新和备份恢复；不要把 Docker API 暴露到公网。
 
 ### 内置 PostgreSQL
 
@@ -57,9 +57,9 @@ XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 
 1. 确认 PostgreSQL 服务健康，安装器已自动生成数据库凭据。
 2. 设置公网入口、来源、站点名、时区和首个管理员密码。
-3. 提交后页面会自动进入登录页；生产服务就绪前登录按钮会暂时锁定，就绪后即可登录。
+3. 提交后页面会进入公开状态页；生产服务重启期间可能短暂断开，健康检查通过后即可从登录入口进入控制台。
 
-管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、发布来源、缓存、校验、失败阶段和镜像回滚结果，也可启用每日 04:00 自动更新。`CN=true` 部署通过 Gitee 稳定标签发现新版本，GitHub 部署只读取已公开 Release；内部或离线部署继续优先使用受信 manifest 和 last-known-good 缓存。连续 3 次自动失败会暂停 24 小时，手动更新不受影响。命令行仍可使用 `deploy/update-controller.sh --check`、`--apply` 和 `--auto`。
+管理员可在控制台“系统设置 > 系统更新”中查看当前/最新语义版本、发布来源、缓存、校验、失败阶段和镜像回滚结果，也可启用按服务时区每日 04:00 自动更新。`CN=true` 部署通过 Gitee 稳定标签发现新版本，GitHub 部署只读取已公开 Release；内部或离线部署继续优先使用受信 manifest 和 last-known-good 缓存。连续 3 次自动失败会暂停 24 小时，手动更新不受影响。Linux 命令行使用 `sudo xingchen update`，固定版本预检方式见下文。
 
 如果暂时没有域名，可以先用 `http://<服务器IP>:18080`；HTTPS 和宝塔反代配置完成后，再在系统设置中切换为正式域名。
 
@@ -75,7 +75,7 @@ WEB_BIND_ADDRESS=127.0.0.1
 ALLOW_INSECURE_HTTP=false
 ```
 
-使用 IP 临时部署时，安装器会生成 `ALLOW_INSECURE_HTTP=true` 和 `SESSION_COOKIE_SECURE=false`。宝塔反代和证书生效后，把 `PUBLIC_BASE_URL`、`ALLOWED_ORIGINS` 改为 `https://monitor.xciy.cn`，将 `SESSION_COOKIE_SECURE` 和 `ALLOW_INSECURE_HTTP` 分别改为 `true`、`false`，再执行 `docker compose up -d --force-recreate server web`。
+使用 IP 临时部署时，安装器会生成 `ALLOW_INSECURE_HTTP=true` 和 `SESSION_COOKIE_SECURE=false`。宝塔反代和证书生效后，把 `PUBLIC_BASE_URL`、`ALLOWED_ORIGINS` 改为自己的 HTTPS 域名，例如 `https://monitor.example.com`，将 `SESSION_COOKIE_SECURE` 和 `ALLOW_INSECURE_HTTP` 分别改为 `true`、`false`，再执行 `docker compose up -d --force-recreate server web`。
 
 首次未完成安装时，Compose 使用临时 H2 bootstrap 配置，只用于让向导可访问；未完成安装不会创建管理员，也不会进入生产监控状态。向导完成后检查：
 
@@ -107,31 +107,44 @@ sudo xingchen restart
 sudo xingchen update
 ```
 
-不带动作运行 `sudo xingchen` 会打开交互菜单。管理器会从现有部署的 Git origin 沿用 GitHub 或 Gitee 来源；中国模式后续直接更新不会回退到 GitHub/GHCR，也可以用 `sudo xingchen update --source gitee` 显式指定。
+不带动作运行 `sudo xingchen` 会打开交互菜单。普通更新保留 `.env` 中的来源、镜像和网络策略；发布来源优先取 `XINGCHEN_SOURCE_REPOSITORIES`，未配置时才参考 Git origin。部署目录不需要 `.git`，指定 `--version` 后也不需要通过 Git 查询最新版本。中国模式后续更新继续使用 Gitee 和腾讯云 TCR。
 
-更新前仍应备份 PostgreSQL 和当前 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`。`update` 会调用受保护的总控更新流程，完成候选版本准备、数据库备份、Compose 切换、健康检查和必要的应用镜像回滚。高级场景可直接执行 `bash ./deploy/update-controller.sh --apply`；`--source-build` 强制从配置的仓库构建，`--build` 构建当前目录源码。Flyway 会在新服务启动时自动运行数据库迁移。
+`sudo xingchen update --source gitee` 或 `--source github` 会显式切换到对应公共来源，同时切换六个镜像、网络模式及相关发布策略，清除原 manifest 和 Agent 离线来源设置。内部或离线部署运行普通在线更新会被拒绝；需要保留隔离网络时，应使用对应内部源或离线升级流程。
+
+更新前仍应备份 PostgreSQL 和当前 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，并为数据库备份和新旧镜像共存预留磁盘空间。`update` 会从目标版本 Setup 镜像提取更新包，校验版本、架构、镜像 ID 和包内文件摘要，再由目标版本更新器完成数据库备份、配置切换和健康检查。在线流程不自动回退到源码构建；Flyway 会在新服务启动时自动运行数据库迁移。
+
+已有公共源部署可先检查一个已发布且包含更新包的目标版本，再执行更新。默认目录示例：
+
+```bash
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.19 --check
+sudo xingchen update --version v1.20.19
+```
+
+`--check` 沿用当前来源准备并校验候选，不切换运行服务；它不会把离线部署自动转为公共源。`v1.20.18` 及更早版本首次迁移时，先使用已验证的发布包补齐新版管理器和 bootstrap，详见[部署与运维](deployment.md)。底层 `update-controller.sh/.ps1` 的当前源码构建和其他维护参数也在该文档说明，不作为跨版本在线更新入口。
 
 站点名、入口 URL、采集周期、离线阈值和通知配置继续在“系统设置”修改；敏感值会加密存储。
 
-更新失败不会删除数据卷。健康检查失败时更新器会尝试恢复旧应用镜像并再次检查，但不会自动回滚 PostgreSQL；新版本 `server` 可能已经执行前向 Flyway 迁移，因此镜像恢复后仍必须确认数据库兼容性。需要完整降级时，应使用升级前备份恢复 PostgreSQL。
+更新失败不会删除数据卷。候选服务健康检查失败时，更新器会尝试恢复更新前的 `.env`、Compose、受管脚本及实际运行的旧镜像，并再次检查服务健康状态，但不会自动回滚 PostgreSQL；新版本 `server` 可能已经执行前向 Flyway 迁移，因此镜像恢复后仍必须确认数据库兼容性。需要完整降级时，应先确认兼容性，再结合升级前备份恢复 PostgreSQL。
 
-若操作系统信号恰好中断 Compose 切换，外层管理器会恢复源码、Git origin 和 `.env`，但不能据此断定运行中的容器已恢复。重新登录后先运行 `sudo xingchen status`；状态不一致时在维护窗口内重新执行同一条 `sudo xingchen update --version <版本>`，不要手工删除数据卷。
+在线更新捕获到 `SIGHUP`、`SIGINT` 或 `SIGTERM` 时，也会执行上述恢复和健康检查；管理器不修改源码检出或 Git origin。回滚健康时退出码为 `10`，恢复不完整时为 `11`，并保留受保护的 `.controller-update-snapshot.*`。`SIGKILL` 或断电无法触发信号处理；重新登录后先运行 `sudo xingchen status` 并检查日志和保留快照。存在未处理快照时，后续在线更新会拒绝继续，应先人工确认并完成恢复，不要盲目重跑同版本或删除快照、数据卷。
 
-完全断网的已有部署必须使用离线包内的 `upgrade-offline.sh/.ps1`，不能再次运行新装入口。例如从 `v1.20.15` 升级到 `v1.20.16`：
+完全断网的已有部署必须使用离线包内的 `upgrade-offline.sh/.ps1`，不能再次运行新装入口。例如将已有 amd64 部署升级到 `v1.20.19`：
 
 ```bash
-sha256sum -c xingchen-monitor-offline-v1.20.16-amd64.tar.gz.sha256
-tar -xzf xingchen-monitor-offline-v1.20.16-amd64.tar.gz
-cd xingchen-monitor-offline-v1.20.16-amd64
+sha256sum -c xingchen-monitor-offline-v1.20.19-amd64.tar.gz.sha256
+tar -xzf xingchen-monitor-offline-v1.20.19-amd64.tar.gz
+cd xingchen-monitor-offline-v1.20.19-amd64
 sudo ./upgrade-offline.sh --project-root /opt/guanlan-monitor --check
 sudo ./upgrade-offline.sh --project-root /opt/guanlan-monitor --apply
 ```
 
 升级入口会保留现有 `.env`、端口、Compose 项目名和数据卷，切换前创建 PostgreSQL 逻辑备份；它不会重新生成数据库密码。即使应用镜像回滚成功，也仍需单独判断 Flyway 迁移后的数据库兼容性。
 
-```powershell
-docker compose exec -T postgres pg_dump -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2)" "$(grep '^POSTGRES_DB=' .env | cut -d= -f2)" > monitor-backup.sql
-docker compose --profile host-monitoring up -d
+手动创建额外备份时，在已有部署目录使用 Bash 执行，并妥善保存生成的 SQL：
+
+```bash
+umask 077
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > monitor-backup.sql
 ```
 
 ## 鸿蒙 App 搭配边界

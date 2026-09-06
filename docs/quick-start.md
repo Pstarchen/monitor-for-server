@@ -49,7 +49,9 @@ sudo xingchen restart
 sudo xingchen update
 ```
 
-管理器会从现有部署的 Git origin 自动沿用 GitHub 或 Gitee 来源；必要时也可使用 `sudo xingchen update --source gitee` 显式指定。不要把下载 URL 改成可变的 `main` 分支；入口和安装目标都应固定稳定 `vX.Y.Z`。高级的内部 manifest、固定 digest、源码构建和存量离线升级方式见[部署与运维](./deployment.md)。
+普通更新沿用现有 `.env` 中的来源、镜像和网络策略，优先按 `XINGCHEN_SOURCE_REPOSITORIES` 判断发布来源，未配置时才参考 Git origin；部署目录不需要保留 `.git`。使用 `sudo xingchen update --version v1.20.19` 可固定目标版本。确需切换公共来源时，使用 `--source gitee` 或 `--source github`，这也会切换六个镜像及相关发布策略；内部或离线部署不能直接运行普通在线更新。
+
+在线更新会先从目标版本 Setup 镜像提取并校验更新包，再备份数据库、切换服务和检查健康状态。`v1.20.18` 及更早版本首次迁移时，须先按[部署与运维](./deployment.md)使用已验证的发布包补齐新版管理器和 bootstrap。不要把下载 URL 改成可变的 `main` 分支；入口和安装目标都应固定稳定 `vX.Y.Z`。内部 manifest、固定 digest、源码构建和存量离线升级也见该文档。
 
 ### Windows
 
@@ -99,7 +101,7 @@ http://<总控服务器IP>:18080/setup
 1. 打开“设备管理”，点击“添加设备”。
 2. 填写设备名称、分组和资产信息。
 3. 保存后取得只显示一次的一次性接入令牌，并复制控制台生成的一条 Controller 同域短命令；命令本身不包含任何凭据。
-4. 在目标服务器运行短命令。bootstrap 会分别下载完整安装器与 SHA256，校验匹配后才执行；安装器准备好 Agent 制品后再隐藏读取令牌。
+4. 在目标服务器运行短命令。bootstrap 会分别下载完整安装器与 SHA256，校验匹配后才执行；安装器取得权限后隐藏读取令牌，准备并校验 Agent 制品，最后交换令牌并写入受限配置文件。
 5. 等待设备状态从“待接入”变为“在线”。需要内部源、离线二进制或额外采集参数时，继续使用[受监控服务器搭建材料](./monitored-agent.md)中的高级入口。
 
 接入令牌 15 分钟后过期且只能消费一次；过期时可在设备列表或详情重新签发。不要把令牌发送到聊天群、工单或截图中。

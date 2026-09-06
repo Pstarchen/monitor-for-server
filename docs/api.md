@@ -100,7 +100,7 @@
 
 设备资产字段均为可选；`environment` 可使用 `production`、`staging`、`testing`、`development` 或 `disaster-recovery`，日期使用 `YYYY-MM-DD`。设备状态从待接入变为在线、从在线变为离线或恢复在线时，系统会自动生成状态历史事件。
 
-创建和轮换密钥的响应为兼容旧客户端，仍包含 `{ "device": { ... }, "agentKey": "..." }`。新控制台不会展示或写入安装命令，而是调用 enrollment-token 接口；响应为 `{ "token": "...", "expiresAt": "..." }`。安装器随后向 `/api/agent/v1/enroll` 发送 `{ "deviceId": "...", "token": "..." }`，成功后令牌原子失效并返回 `{ "agentKey": "..." }`。服务端只保存接入令牌的 SHA-256；错误、过期和已消费令牌统一返回 `401`。
+创建和轮换密钥的响应为兼容旧客户端，仍包含 `{ "device": { ... }, "agentKey": "..." }`。控制台创建设备和令牌安装流程不展示长期密钥，也不把它写入安装命令，而是调用 enrollment-token 接口，响应为 `{ "token": "...", "expiresAt": "..." }`；签发令牌本身不影响现有密钥。管理员在设备详情显式“轮换密钥”时，旧密钥立即失效，新密钥仍会显示一次。安装器向 `/api/agent/v1/enroll` 发送 `{ "deviceId": "...", "token": "..." }`，成功后原子消费令牌、替换长期密钥并返回 `{ "agentKey": "..." }`。服务端只保存接入令牌的 SHA-256；错误、过期和已消费令牌统一返回 `401`。
 
 设备列表和详情中的 `health` 字段与上述诊断接口一致。`state` 为 `HEALTHY`、`PENDING`、`OFFLINE` 或 `DEGRADED`：
 

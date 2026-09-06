@@ -35,10 +35,11 @@ let revealObserver: IntersectionObserver | undefined
 let scrollFrame = 0
 
 const commands: Record<InstallMode, string> = {
-  linux: `git clone https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
-cd xingchen-monitor
-sudo bash ./deploy/install-controller.sh`,
-  windows: `git clone https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
+  linux: `curl -fsSL --proto '=https' --tlsv1.2 \\
+  'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.19/deploy/xingchen.sh' -o xingchen.sh &&
+sudo bash xingchen.sh install --source gitee --version v1.20.19`,
+  windows: `git clone --depth 1 --branch v1.20.19 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
+if ($LASTEXITCODE -ne 0) { throw 'Clone failed' }
 Set-Location xingchen-monitor
 powershell -ExecutionPolicy Bypass -File .\\deploy\\install-controller.ps1`,
 }
@@ -89,7 +90,7 @@ const signalItems = [
 ]
 
 const boundaries = [
-  { icon: KeyRound, number: '01', title: '一次性设备密钥', copy: '明文仅在创建或轮换时显示，遗失后重新签发。' },
+  { icon: KeyRound, number: '01', title: '一次性接入令牌', copy: '15 分钟内单次使用，长期密钥由安装器写入受限配置。' },
   { icon: FileKey2, number: '02', title: '远程能力默认关闭', copy: '命令执行与文件操作需要在每台 Agent 上显式启用。' },
   { icon: DatabaseBackup, number: '03', title: '变更全程可追踪', copy: '恢复点、版本检查、更新任务与敏感操作都有明确记录。' },
 ]
@@ -282,13 +283,13 @@ async function copyCommand() {
             </button>
           </div>
           <pre role="tabpanel"><code>{{ currentCommand }}</code></pre>
-          <div class="console-status"><span><i /> INSTALLER READY</span><span>PORT 18080</span></div>
+          <div class="console-status"><span><i /> v1.20.19</span><span>PORT 18080</span></div>
           <p class="sr-only" aria-live="polite">{{ copyState === 'copied' ? '安装命令已复制到剪贴板' : copyState === 'error' ? '复制失败，请手动选择命令' : '' }}</p>
         </div>
         <div class="install-copy reveal-item" data-reveal="right">
           <span class="section-index">03 / 部署</span>
           <h2 id="install-title">一条清晰路径，完成首次上线</h2>
-          <p>安装器会准备 PostgreSQL、Redis、服务端与 Web，随后引导你完成站点和首个管理员配置。</p>
+          <p>Linux 入口从 Gitee 获取固定版本，使用腾讯云镜像完成安装。首次配置后，可在控制台检查并执行在线更新。</p>
           <ol class="install-steps">
             <li><span>01</span><div><strong>运行安装器</strong><small>准备容器与服务</small></div></li>
             <li><span>02</span><div><strong>完成初始化</strong><small>配置域名与管理员</small></div></li>

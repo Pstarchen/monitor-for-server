@@ -29,7 +29,7 @@ flowchart LR
     B -->|本地平台制品| N
 ```
 
-生产来源顺序是本地离线制品、Setup 镜像内同版本基线、完整验证的 last-known-good 缓存、内部 HTTPS 制品、内部 Registry，最后才是在 `public` 模式显式允许的公共源。`internal` 拒绝 GitHub、GitHub API、GitHubusercontent、GHCR、Docker Hub 和默认 Gitee；`offline` 进一步禁止所有远程 URL、DNS、镜像拉取和源码回退。
+各组件分别按配置选择来源：总控通过配置的 Release、标签或 manifest 确定版本，并从配置的 Registry 获取镜像；原生 Agent 从总控同域获取由受信 manifest 描述并校验的制品。Setup 镜像内置同版本 Agent 制品，作为本地基线；显式配置的内部 manifest 和已验证缓存优先于该基线。离线安装与升级使用已校验的本地 bundle。`internal` 拒绝 GitHub、GitHub API、GitHubusercontent、GHCR、Docker Hub 和默认 Gitee；`offline` 进一步禁止所有远程 URL、DNS、镜像拉取和源码回退。
 
 ## 组件职责
 
@@ -47,7 +47,7 @@ flowchart LR
 ### 服务端
 
 - 基于 Spring Boot 3、Spring Security、JPA 与 Flyway。
-- 设备密钥只存 BCrypt 哈希；明文仅在创建和轮换响应中返回一次。
+- 设备密钥只存 BCrypt 哈希；明文仅在创建、显式轮换或成功消费接入令牌的响应中返回一次。签发接入令牌本身不替换现有设备密钥。
 - 会话使用 `HttpOnly`、`SameSite=Lax` Cookie，写操作要求 CSRF Token，登录有速率限制并在成功后轮换会话 ID；启用 TOTP 的账号必须完成 5 分钟内的验证码挑战。TOTP 密钥使用设置加密密钥以 AES-256-GCM 密文保存，不进入日志或用户列表。
 - 指标写入 PostgreSQL，在线状态可通过 Redis 缓存；PostgreSQL 是最终数据源。
 - 每 10 秒执行离线检测，每天清理过期指标。离线规则会持续评估，Agent 恢复后自动关闭对应告警。

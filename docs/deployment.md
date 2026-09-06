@@ -8,7 +8,7 @@
 - `internal` 与 `offline` 不访问公网软件包源，必须由内部配置管理预装依赖，或直接使用包含所需镜像的已校验离线 bundle。
 - Docker Compose 会自动启动 PostgreSQL 16 和 Redis。数据库、用户和密码由控制端安装器自动生成，数据库端口只在 Compose 内网可见，无需安装数据库客户端或执行 SQL。
 - 生产域名和 TLS 证书；生产环境不得直接暴露明文 HTTP。仅首次用 IP 初始化时可按总终端安装材料显式启用临时 HTTP。
-- Linux 被监控主机默认使用 systemd 安装预编译 Agent；Release 不可用时需要 Go 1.24+ 与 git 进行源码回退。只有需要容器模式时才要求 Docker Engine。
+- Linux 被监控主机默认使用 systemd 安装从总控同域获取并校验的预编译 Agent，不要求 Go 或 Git。只有管理员显式配置受信源码仓库并启用源码回退时，才需要 Go 1.24+ 与 Git；只有显式使用容器模式时才要求 Docker Engine。
 - Windows 被监控主机需要 Windows 服务管理权限；Windows Docker Desktop 不能代表 Windows 宿主机，因此仍使用原生 Agent。
 
 ## Docker Compose 部署
@@ -116,7 +116,9 @@ sudo xingchen update
 
 ### 在线更新
 
-控制台与 `xingchen update` 通过同一在线引导器更新。引导器拉取已配置仓库中目标版本的 Setup 镜像，检查 OCI 版本、实际架构和本地镜像 ID；从该固定 ID 提取更新包，校验六个受管文件的 SHA256 后，运行包内的新版更新器。更新包包含目标 Compose、Linux/Windows 更新器、在线引导器和管理命令，避免旧 Setup 长期使用旧脚本与旧 Compose。整个过程持有同一文件锁，不依赖服务器上的源码仓库，也不会因镜像拉取失败转为源码构建。
+从 `v1.20.19` 起，控制台与 `xingchen update` 通过同一在线引导器更新。已完成该版本安装或迁移的在线部署，优先在“系统设置 → 系统更新”中检查并更新，或运行 `sudo xingchen update`；需要固定目标时使用 `sudo xingchen update --version v1.20.19`。升级后确认 setup、server、web 及已启用的 controller-agent 版本一致、服务健康。
+
+引导器拉取已配置仓库中目标版本的 Setup 镜像，检查 OCI 版本、实际架构和本地镜像 ID；从该固定 ID 提取更新包，校验六个受管文件的 SHA256 后，运行包内的新版更新器。更新包包含目标 Compose、Linux/Windows 更新器、在线引导器和管理命令。整个过程持有同一文件锁，不依赖服务器上的源码仓库，也不会因镜像拉取失败转为源码构建。
 
 已包含在线引导器的部署，可先对已选版本执行在线预检。下面的版本号需替换为实际已发布且包含更新包的版本：
 
@@ -125,9 +127,76 @@ sudo bash ./deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-mo
 sudo xingchen update --install-dir /opt/guanlan-monitor --source gitee --version vX.Y.Z
 ```
 
-`--check` 拉取并验证候选镜像和部署文件，不修改 `.env` 或重启现有服务。显式 `--source gitee` 将离线安装迁移到 Gitee 版本发现与腾讯云镜像；只有候选验证和备份完成后才写入新网络策略，同时清除旧的固定 manifest 配置。普通在线更新保持现有来源。`v1.20.18` 及更早版本的 Setup 不含这个更新包；首次迁移需要先从后续正式发行版取得已校验的管理命令和引导器。缺少包或校验失败会终止，不执行 `main` 分支上的脚本。
+`--check` 拉取并验证候选镜像和部署文件，不修改 `.env` 或重启现有服务；它沿用当前网络策略，不能用于把 `offline` 部署切到在线。显式 `--source gitee` 才会将离线安装迁移到 `public` 模式，使用 Gitee 发现稳定版本、腾讯云 TCR 提供六个镜像；只有候选验证和备份完成后才写入新网络策略，同时清除旧的固定 manifest 配置。该切换不要求访问 GitHub、GHCR 或 Docker Hub，但仍要求访问 Gitee、TCR 及必要的系统包源。普通在线更新保持现有来源。
+
+#### 旧版一次性迁移
+
+`v1.20.18` 及更早版本的 Setup 不含新引导器和更新包，旧控制台即使显示“检查更新”，也不能据此认定它支持新链路。已有 `.env`、Compose 和数据库的实例应执行存量迁移，不要重新运行 `install`。没有 `.git` 的 `v1.20.16` 离线部署也可通过下面的入口迁移到 `v1.20.19`，无须先克隆仓库或手工修改数据库密码、Agent 密钥等配置。
+
+先确认备份可恢复、磁盘预算充足、没有其他更新任务，并准备 Bash、curl、sha256sum、timeout、flock、realpath 和可用的 Docker Compose v2。以下命令适用于 Linux；只需把 `project_root` 改为**已有部署的绝对目录**。两个摘要来自已发布 `v1.20.19` 标签，不能随意替换版本或把下载地址改为 `main`：
+
+```bash
+sudo bash <<'MIGRATE'
+set -euo pipefail
+umask 077
+project_root=/opt/guanlan-monitor
+test -f "${project_root}/.env"
+test -f "${project_root}/docker-compose.yml"
+test -d "${project_root}/deploy"
+test ! -L "${project_root}"
+test ! -L "${project_root}/deploy"
+stage="$(mktemp -d)"
+trap 'rm -rf -- "${stage}"' EXIT
+base_url='https://gitee.com/starchen520/monitor-for-server/raw/v1.20.19/deploy'
+for script in xingchen.sh bootstrap-controller-update.sh; do
+  curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 120 \
+    "${base_url}/${script}" -o "${stage}/${script}"
+done
+(
+  cd "${stage}"
+  sha256sum --check <<'SHA256'
+e9162ce36ed27ff386f19049d3583ab8f8cb94d07adab2128fea15d7267f51c8  xingchen.sh
+b9ab49eb71fb53f1e4581f53d334e5d7e9fd3fb5467cba7a4cd532ec4fb47f7d  bootstrap-controller-update.sh
+SHA256
+)
+bootstrap="${project_root}/deploy/bootstrap-controller-update.sh"
+test ! -L "${bootstrap}"
+if [[ -e "${bootstrap}" ]]; then
+  cmp -- "${stage}/bootstrap-controller-update.sh" "${bootstrap}"
+else
+  install -m 0755 "${stage}/bootstrap-controller-update.sh" "${bootstrap}"
+fi
+bash "${stage}/xingchen.sh" update --install-dir "${project_root}" \
+  --source gitee --version v1.20.19 --yes
+MIGRATE
+```
+
+此处 `--yes` 仅跳过管理器的交互确认，不跳过校验、备份或健康检查。下载或摘要校验失败时不会执行下载内容；已有引导器与固定版本不同则停止，应先确认它的来源。迁移前仅补齐已校验的引导器，原管理脚本由正式更新事务替换；失败后可先排障，再使用同一入口重试。成功后会生成 `xingchen` 快捷命令，后续使用控制台或 `sudo xingchen update`。明确指定版本时不需要 Git 查询，未指定版本的 Gitee 版本发现仍需要 Git，但部署目录不需要 `.git`。
+
+#### 更新失败与恢复边界
 
 在线切换保存原始 `.env`、Compose 和受管脚本；健康检查失败或收到 HUP/INT/TERM 时，恢复原文件与实际运行过的旧镜像，再做一次健康检查。候选和回滚启动均禁止 Compose 隐式拉取或构建。恢复失败保留权限受限的 `.controller-update-snapshot.*`，后续更新拒绝覆盖，需先检查该快照和容器状态；强制断电或 SIGKILL 后遗留的快照也按此处理。数据库备份单独保留，数据库不会自动回退。
+
+命令退出码 `75` 表示另一个更新持有 `.controller-update.lock`；锁文件本身存在不代表任务仍在运行，不要删除锁文件来强行并发更新。可查看 `docker ps --filter name=xingchen-controller-update-run`、部署目录中的 `docker compose ps` 和 `docker compose logs --tail 100 setup`。页面暂时断开时应先确认 Runner 状态，不要立即重复更新。
+
+退出码 `10` 表示候选失败但旧部署恢复并通过健康检查，`11` 表示自动恢复失败，需要人工处理；二者都不表示数据库已恢复。保留升级前 SQL 备份、原配置快照和旧镜像，先评估 Flyway 迁移兼容性，再决定是否恢复对应数据库与应用版本。不要通过删除 `.controller-update-snapshot.*` 或执行 `docker compose down -v` 绕过故障。
+
+#### 升级前的磁盘预算
+
+`XINGCHEN_UPDATE_MIN_FREE_BYTES` 默认的 1 GiB 只是最低预检门槛，不是数据库和镜像的完整空间预算。应在宿主机检查部署目录与 Docker 数据目录所在文件系统，同时预留新旧镜像共存、下载解压、SQL 备份和更新期间数据库写入的空间：
+
+```bash
+cd /opt/guanlan-monitor
+df -h .
+df -h "$(docker info --format '{{.DockerRootDir}}')"
+docker system df
+```
+
+管理器更新先在 PostgreSQL 容器 `/tmp` 生成完整 SQL，再复制到项目 `backups/`；复制期间两份 SQL 会同时存在。若 Docker 与项目共用磁盘，除候选镜像外，至少还要容纳两份预估 SQL 备份并留余量。控制台备份则直接流式写入项目目录。不要仅按压缩备份大小或数据库卷大小推断 SQL 大小；可参考最近一次完整 SQL 备份，并考虑数据增长。Runner 不能访问宿主机 Docker 数据目录时，仍需在宿主机人工检查该磁盘。
+
+空间不足应先扩容或将已验证的历史备份转存到独立存储，再按明确的镜像引用清理可重建制品；保留本次恢复所需的旧镜像与备份，不要清理 PostgreSQL/Redis 数据卷，也不要为了通过检查下调空间门槛。CLI 升级备份不会在更新前自动清理，控制台的备份保留数量也不能代替磁盘预算。
+
+#### 底层更新器
 
 底层更新器是执行指定镜像目标的引擎，不负责发现最新版。维护已有脚本调用或配置自动任务时可使用：
 
@@ -188,7 +257,7 @@ docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-s
 ```json
 {
   "schemaVersion": 1,
-  "version": "v1.20.16",
+  "version": "v1.20.19",
   "images": {
     "setup": { "source": "ghcr.io/example/xingchen-setup", "digest": "sha256:<64 lowercase hex>" },
     "server": { "source": "ghcr.io/example/xingchen-server", "digest": "sha256:<64 lowercase hex>" },
@@ -204,12 +273,12 @@ docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-s
 
 ```powershell
 .\deploy\promote-internal-release.ps1 `
-  -Version v1.20.16 `
+  -Version v1.20.19 `
   -TargetRegistry registry.internal.example/xingchen `
   -ArtifactDir D:\release\agent `
   -ArtifactBaseUrl https://release.internal.example/xingchen `
   -ImageLockFile D:\release\source-images.lock.json `
-  -OutputDir D:\publish\xingchen\v1.20.16 `
+  -OutputDir D:\publish\xingchen\v1.20.19 `
   -WriteEnvExample
 ```
 
@@ -233,12 +302,21 @@ XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 XINGCHEN_SOURCE_REPOSITORIES=
 ```
 
-先检查再安装或更新；`internal` 会在任何拉取前拒绝 GitHub、GHCR、Docker Hub 和未显式开启的 Gitee：
+首次安装使用以下命令；`internal` 会在任何拉取前拒绝 GitHub、GHCR、Docker Hub 和未显式开启的 Gitee：
 
 ```bash
 bash ./deploy/install-controller.sh --network-mode internal --no-source-fallback
-sudo bash ./deploy/update-controller.sh --check --no-source-fallback
-sudo bash ./deploy/update-controller.sh --apply --no-source-fallback
+```
+
+已有内部部署更新前，必须先在 `.env` 配置目标版本的内部镜像 digest、manifest URL 和摘要，并确保部署目录中已有经过校验的受信 bootstrap。Setup 镜像 digest 必须对应目标版本，bootstrap 不会改写 digest 引用。旧内部部署若缺少入口脚本，应从受信内部发布材料补齐并校验，继续使用内部源，不要切换到公共 Gitee。
+
+若部署使用本地 manifest，须同步更新本地清单、对应 Agent 制品及摘要。改用内部 HTTPS 清单时，应清空旧的 `XINGCHEN_RELEASE_MANIFEST_PATH`，并将部署目录默认的 `release/manifest.json` 备份移出活动位置；Setup 容器内该默认路径为 `/workspace/release/manifest.json`。本地清单优先于远程 URL，旧文件摘要不匹配时会直接报错，不会尝试新的内部 URL。更新后应确认 Agent 版本查询和同域制品下载正常。
+
+将下列路径替换为实际已有部署目录，再检查和应用指定版本：
+
+```bash
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.19 --check
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.19 --apply
 ```
 
 完全断网时，在联网发布机下载并校验 `xingchen-monitor-offline-vX.Y.Z-amd64.tar.gz` 或 `-arm64.tar.gz` 及同名 `.sha256`，通过受控介质传入目标机后执行：
@@ -422,21 +500,9 @@ HarmonyOS App 的设备通知使用华为 Push Kit V3 服务账号和独立的 `
 
 ## 备份与升级
 
-备份前创建一致性 PostgreSQL 逻辑备份，并将部署使用的 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，保存在独立秘密管理系统。Redis 仅用于在线状态加速，不是主要备份目标。
+升级前在控制台“备份与恢复”创建一致性 PostgreSQL 逻辑备份，并将部署使用的 `.env`，特别是 `SETTINGS_ENCRYPTION_KEY`，保存在独立秘密管理系统。数据库备份和配置应作为同一恢复点保存，具体行为见[数据库备份与恢复](#数据库备份与恢复)。Redis 仅用于在线状态加速，不是主要备份目标。
 
-```powershell
-docker compose exec -T postgres pg_dump -U "$(grep '^POSTGRES_USER=' .env | cut -d= -f2)" "$(grep '^POSTGRES_DB=' .env | cut -d= -f2)" > monitor-backup.sql
-```
-
-数据库密码只通过 `.env` 注入服务端，不会展开到宿主机命令输出。升级步骤：
-
-```powershell
-docker compose pull setup server web controller-agent
-docker compose up -d
-docker compose ps
-```
-
-Flyway 会在服务端启动时执行数据库迁移。升级前先在测试环境验证备份恢复。
+已迁移到新版在线链路的部署，使用控制台或 `sudo xingchen update`；旧版先完成[一次性迁移](#旧版一次性迁移)，完全离线则使用已校验 bundle 的存量升级入口。直接执行 `docker compose pull/up` 不会替换旧部署脚本与 Compose，也绕过了上述备份、版本校验和事务恢复流程，不能代替正常升级。Flyway 会在服务端启动时执行迁移，生产升级前应先在测试环境验证备份恢复。
 
 ## 故障排查
 
