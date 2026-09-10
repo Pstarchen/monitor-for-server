@@ -190,7 +190,8 @@ echo 'Unexpected sudo call in non-root test mode.' >&2
 exit 97
 SCRIPT
 
-chmod +x "${fake_bin}"/*
+# The selected Bash is a symlink to an existing executable owned by the host.
+find "${fake_bin}" -maxdepth 1 -type f -exec chmod +x {} +
 
 new_case() {
   local name="$1" root="${test_root}/${1}"

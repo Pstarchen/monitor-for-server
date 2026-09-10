@@ -392,11 +392,6 @@ mkdir -p "${rendered_dir}/systemd"
     exit 1
   fi
 )
-if [[ "${EUID}" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
-  echo 'install-agent.sh behavior tests skipped: root or sudo is required.'
-  exit 0
-fi
-
 cat > "${fake_bin}/docker" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >> "${TEST_LOG}"
@@ -519,7 +514,15 @@ cat > "${fake_bin}/id" <<'SCRIPT'
 #!/usr/bin/env bash
 exit 1
 SCRIPT
-chmod +x "${fake_bin}"/*
+# The selected Bash is a symlink to an existing executable owned by the host.
+find "${fake_bin}" -maxdepth 1 -type f -exec chmod +x {} +
+
+# Build the mock runtime as an ordinary user before requiring installation privileges.
+echo 'install-agent.sh unprivileged behavior tests passed.'
+if [[ "${EUID}" -ne 0 ]] && ! command -v sudo >/dev/null 2>&1; then
+  echo 'install-agent.sh privileged behavior tests skipped: root or sudo is required.'
+  exit 0
+fi
 
 run_installer() {
   local docker_available="$1"

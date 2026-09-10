@@ -181,7 +181,8 @@ case "${1:-}" in
   *) exit 97 ;;
 esac
 MOCK
-chmod +x "${temp_dir}/bin/"*
+# The selected Bash is a symlink to an existing executable owned by the host.
+find "${temp_dir}/bin" -maxdepth 1 -type f -exec chmod +x {} +
 
 reset_env() {
   printf '%s\n' 'POSTGRES_PASSWORD="fixture-only-do-not-log"' "XINGCHEN_SETUP_IMAGE=\"${setup_repository}:v1.20.18\"" > "${project_root}/.env"
