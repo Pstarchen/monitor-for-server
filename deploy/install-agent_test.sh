@@ -407,7 +407,7 @@ elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
   [[ "${TEST_CONTAINER_EXISTS:-0}" == "1" ]]
 elif [[ "${1:-}" == "image" && "${2:-}" == "inspect" && "${3:-}" == "--format" ]]; then
   if [[ "${4:-}" == *'org.opencontainers.image.version'* ]]; then
-    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.20}"
+    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.21}"
   else
     printf 'new-agent-image\n'
   fi
@@ -593,8 +593,8 @@ run_installer_stdin() {
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
-grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.21' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.21' "${log_file}" >/dev/null
 grep -F 'docker run -d --name xingchen-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
@@ -683,8 +683,8 @@ TEST_FAIL_GITEE_BUILD=1
 TEST_REPOSITORY_URLS='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git'
 TEST_ALLOW_GITEE=true
 run_installer 1
-grep -F 'docker build --pull --build-arg VERSION=v1.20.20 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20 https://gitee.com/starchen520/monitor-for-server.git#v1.20.20:agent' "${log_file}" >/dev/null
-grep -F 'docker build --pull --build-arg VERSION=v1.20.20 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20 https://github.com/Pstarchen/monitor-for-server.git#v1.20.20:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.21 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.21 https://gitee.com/starchen520/monitor-for-server.git#v1.20.21:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.21 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.21 https://github.com/Pstarchen/monitor-for-server.git#v1.20.21:agent' "${log_file}" >/dev/null
 TEST_FAIL_AGENT_PULLS=0
 TEST_FAIL_GITEE_BUILD=0
 TEST_REPOSITORY_URLS=''
@@ -792,7 +792,7 @@ fi
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1 --binary "${binary_path}"
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.21' "${log_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
@@ -807,7 +807,7 @@ grep -F '"allow_file_operations": true' "${config_file}" >/dev/null
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer_stdin 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.21' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 
 : > "${log_file}"

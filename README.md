@@ -50,13 +50,13 @@ Linux 总控推荐使用 `deploy/xingchen.sh`。它提供类似哪吒监控的�
 能够访问 GitHub 和 GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.20/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.20
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.21
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.20/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.20
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.21
 ```
 
 `CN=true` 会固定使用 Gitee 取得对应版本的编排文件，并直接从腾讯云 TCR 拉取 setup、server、web、agent、PostgreSQL 和 Redis 六个预构建镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。它仍是在线安装：目标机至少需要访问 Gitee、腾讯云 TCR 和 Linux 发行版包源。完全断网时必须使用已校验的离线 bundle。

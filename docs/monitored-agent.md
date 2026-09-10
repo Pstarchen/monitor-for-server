@@ -6,7 +6,7 @@
 
 ## 版本来源与更新顺序
 
-总控采用 Gitee 版本发现和腾讯云 TCR 镜像时，先在“系统设置 > 系统更新”升级总控，再升级独立 Agent。默认在线配置下，Setup 使用镜像内置的同版本 Agent manifest 和四平台制品，通过总控同域 `/api/setup/agent-release` 与 `/api/setup/agent-artifact` 提供下载；例如总控升级到 `v1.20.20` 后，即可向原生 Agent 提供该版本。显式配置受信 manifest 时，由该清单、兼容性检查和对应制品决定可用版本。
+总控采用 Gitee 版本发现和腾讯云 TCR 镜像时，先在“系统设置 > 系统更新”升级总控，再升级独立 Agent。默认在线配置下，Setup 使用镜像内置的同版本 Agent manifest 和四平台制品，通过总控同域 `/api/setup/agent-release` 与 `/api/setup/agent-artifact` 提供下载；例如总控升级到 `v1.20.21` 后，即可向原生 Agent 提供该版本。显式配置受信 manifest 时，由该清单、兼容性检查和对应制品决定可用版本。
 
 | Agent 类型 | 更新方式与来源 |
 | --- | --- |
@@ -16,7 +16,7 @@
 
 独立 Agent 的批量操作位于“Agent 发布”：点击“新建发布”，填写目标版本和设备，点击“创建草稿”，检查后依次点击“启动发布”和“确认启动”。默认内置清单提供当前总控对应版本，不代表任意历史版本都可下载；历史回滚需先确认受信来源仍提供该版本制品。
 
-`v1.20.20` 修复了旧 Bash 在 `set -u` 下展开空数组时出现 `unbound variable` 的安装兼容问题。总控 Setup 若仍是 `v1.20.19`，应先通过总控更新入口升级到 `v1.20.20`，确认 Setup 已运行新版本，再刷新设备页面并重新复制安装命令。安装器接口优先提供 Setup 镜像内置脚本；仅修改宿主机的 `deploy/install-agent.sh` 或刷新页面，不能替换旧 Setup 正在提供的内置安装器。
+`v1.20.20` 修复了旧 Bash 在 `set -u` 下展开空数组时出现 `unbound variable` 的安装兼容问题。总控 Setup 若仍是 `v1.20.19`，应先通过总控更新入口升级到 `v1.20.21`，确认 Setup 已运行新版本，再刷新设备页面并重新复制安装命令。`v1.20.21` 同时修复了旧 Setup 中 BusyBox `realpath` 的在线更新兼容问题，参见 [更新路径参数报错](./faq.md#在线更新提示-realpath-不支持-e)。安装器接口优先提供 Setup 镜像内置脚本；仅修改宿主机的 `deploy/install-agent.sh` 或刷新页面，不能替换旧 Setup 正在提供的内置安装器。
 
 ## Linux
 
@@ -57,14 +57,14 @@ export XINGCHEN_NETWORK_MODE=internal
 export XINGCHEN_ALLOW_GITEE=false
 export XINGCHEN_AGENT_ALLOW_GITHUB_API=false
 export XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
-bash ./deploy/install-agent.sh --network-mode internal --server-url https://monitor.internal.example --device-id '<设备ID>' --version v1.20.20
+bash ./deploy/install-agent.sh --network-mode internal --server-url https://monitor.internal.example --device-id '<设备ID>' --version v1.20.21
 ```
 
 完全断网的新节点不能交换一次性接入令牌。管理员应通过秘密管理器或受控执行器把旧兼容变量 `XINGCHEN_AGENT_KEY` 直接注入安装器进程环境，并使用离线包中的本平台二进制；不要在命令行或脚本中给长期密钥赋值：
 
 ```bash
 export XINGCHEN_NETWORK_MODE=offline
-bash ./deploy/install-agent.sh --offline --server-url https://monitor.internal.example --device-id '<设备ID>' --binary /srv/xingchen/xingchen-agent --version v1.20.20 --no-auto-update
+bash ./deploy/install-agent.sh --offline --server-url https://monitor.internal.example --device-id '<设备ID>' --binary /srv/xingchen/xingchen-agent --version v1.20.21 --no-auto-update
 ```
 
 离线模式不会执行 DNS、远程下载、镜像拉取、源码构建或自动更新。示例中的内部域、路径和凭据占位符必须替换；不要把真实密钥写入 shell 历史、脚本或工单。
@@ -115,7 +115,7 @@ systemctl status xingchen-agent-update.timer
 /opt/xingchen/agent/agent.sh rollback v1.20.4
 ```
 
-指定版本更新可运行 `/opt/xingchen/agent/agent.sh update v1.20.20`。上面的 `rollback v1.20.4` 仅展示语法，需替换为受信来源仍可下载的目标稳定版本；`list-versions` 默认显示总控或已配置来源当前提供的版本，并非完整 Release 历史。手动回滚会重新取得并校验目标制品，不等于直接恢复本地备份；新服务启动失败时的自动恢复是另一条流程。不要把分支名、提交 SHA 或任意 URL 当作版本号。
+指定版本更新可运行 `/opt/xingchen/agent/agent.sh update v1.20.21`。上面的 `rollback v1.20.4` 仅展示语法，需替换为受信来源仍可下载的目标稳定版本；`list-versions` 默认显示总控或已配置来源当前提供的版本，并非完整 Release 历史。手动回滚会重新取得并校验目标制品，不等于直接恢复本地备份；新服务启动失败时的自动恢复是另一条流程。不要把分支名、提交 SHA 或任意 URL 当作版本号。
 
 支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。本机回退模式安装后检查：
 
@@ -156,7 +156,7 @@ Windows Agent 默认注册每日自动更新任务；需要关闭时在安装命
 
 ```powershell
 & "$env:ProgramData\XingchenMonitor\update-agent.ps1" update
-& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update v1.20.20
+& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update v1.20.21
 ```
 
 也可对已校验的 `deploy/install-agent.ps1` 使用 `-Action update`、`-Action rollback -Version v1.20.4`、`-Action list-versions`、`-Action status` 或 `-Action uninstall`；卸载加 `-Purge` 会同时删除配置和缓存。回滚同样要求受信来源仍提供目标版本，更新器的直接回滚语法为 `update-agent.ps1 rollback v1.20.4`。

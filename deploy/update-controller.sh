@@ -398,6 +398,17 @@ if [[ -z "${offline_bundle}" || "${mode}" != check ]]; then
   fi
 fi
 
+resolve_existing_path() {
+  local path="$1" resolved
+  # Old Setup images provide BusyBox realpath, which treats both -e and -- as
+  # filenames. Absolute operands need no option delimiter. Check existence and
+  # file identity explicitly to preserve GNU realpath -e's existing-path rule.
+  [[ "${path}" == /* && -e "${path}" ]] || return 1
+  resolved="$(realpath "${path}")" || return 1
+  [[ "${resolved}" == /* && -e "${resolved}" && "${path}" -ef "${resolved}" ]] || return 1
+  printf '%s\n' "${resolved}"
+}
+
 bundle_version=""
 bundle_arch=""
 declare -A bundle_verified=()
@@ -419,7 +430,7 @@ verify_offline_bundle() {
     [[ -z "${bundle_verified[${relative}]:-}" ]] || { echo "离线校验清单包含重复路径：${relative}" >&2; return 1; }
     path="${offline_bundle}/${relative}"
     [[ -f "${path}" && ! -L "${path}" ]] || { echo "离线文件缺失或不是普通文件：${relative}" >&2; return 1; }
-    resolved="$(realpath -e -- "${path}")"
+    resolved="$(resolve_existing_path "${path}")" || { echo "无法解析离线文件：${relative}" >&2; return 1; }
     [[ "${resolved}" == "${offline_bundle}/"* ]] || { echo "离线校验路径越界：${relative}" >&2; return 1; }
     actual="$(sha256sum "${path}" | awk '{print $1}')"
     [[ "${actual}" == "${expected}" ]] || { echo "离线文件校验失败：${relative}" >&2; return 1; }
@@ -552,13 +563,13 @@ image_value() {
 
 image_keys=(XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE)
 source_images=(
-  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.20)"
-  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.20)"
-  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.20)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.21)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.21)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.21)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   image_keys+=(XINGCHEN_AGENT_IMAGE)
-  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.21)")
 fi
 dependency_image_keys=(XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE)
 dependency_source_images=(
@@ -1002,7 +1013,7 @@ assert_safe_deployment_path() {
     echo "${label} 的项目根不能是符号链接：${current}" >&2
     return 1
   fi
-  resolved="$(realpath -e -- "${current}")" || { echo "无法解析 ${label} 的项目根：${current}" >&2; return 1; }
+  resolved="$(resolve_existing_path "${current}")" || { echo "无法解析 ${label} 的项目根：${current}" >&2; return 1; }
   [[ "${resolved}" == "${project_root}" ]] || { echo "${label} 的项目根解析结果不一致：${current}" >&2; return 1; }
   [[ -n "${relative}" ]] || return 0
 
@@ -1018,7 +1029,7 @@ assert_safe_deployment_path() {
       return 1
     fi
     if [[ -e "${current}" ]]; then
-      resolved="$(realpath -e -- "${current}")" || { echo "无法解析 ${label}：${current}" >&2; return 1; }
+      resolved="$(resolve_existing_path "${current}")" || { echo "无法解析 ${label}：${current}" >&2; return 1; }
       case "${resolved}" in
         "${project_root}"|"${project_root}/"*) ;;
         *) echo "${label} 解析后超出项目根：${current}" >&2; return 1 ;;

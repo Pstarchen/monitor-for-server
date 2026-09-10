@@ -6,18 +6,18 @@ Agent 默认读取当前目录的 `agent.json`，也可通过 `-config` 或 `XIN
 
 Linux 默认安装原生 systemd 服务，支持 `linux/amd64` 和 `linux/arm64`；Windows 使用管理员 PowerShell，支持 x64/ARM64。两端默认向总控同域 `/api/setup/agent-release` 查询版本，从 `/api/setup/agent-artifact` 下载制品，并核对大小、SHA256 和程序实际版本。默认在线配置下，清单和四平台制品随 Setup 镜像内置；配置受信 manifest 后，由对应清单和制品决定可用版本。总控还会检查 `minimumCompatibleControllerVersion`，拒绝不兼容的 Agent。
 
-使用 Gitee 发现版本、腾讯云 TCR 拉取镜像的部署，应先升级总控，再更新独立 Agent。例如总控升级到 `v1.20.20` 后，默认同域来源即可提供该版本 Agent，原生节点无需访问 GitHub、Gitee 或镜像仓库。批量更新路径为“Agent 发布 > 新建发布 > 创建草稿 > 启动发布 > 确认启动”；完成以设备实时上报目标版本为准。
+使用 Gitee 发现版本、腾讯云 TCR 拉取镜像的部署，应先升级总控，再更新独立 Agent。例如总控升级到 `v1.20.21` 后，默认同域来源即可提供该版本 Agent，原生节点无需访问 GitHub、Gitee 或镜像仓库。批量更新路径为“Agent 发布 > 新建发布 > 创建草稿 > 启动发布 > 确认启动”；完成以设备实时上报目标版本为准。
 
 Linux 新装默认使用 `/usr/local/bin/xingchen-agent`、`xingchen-agent.service` 和 `/opt/xingchen/agent/agent.sh`。使用 root 或 `sudo` 执行以下管理命令，普通更新无需重新输入令牌或重装：
 
 ```bash
 /opt/xingchen/agent/agent.sh status
 /opt/xingchen/agent/agent.sh update
-/opt/xingchen/agent/agent.sh update v1.20.20
+/opt/xingchen/agent/agent.sh update v1.20.21
 /opt/xingchen/agent/agent.sh list-versions
 ```
 
-Windows 新装的更新器保存到 `%ProgramData%\XingchenMonitor\update-agent.ps1`，在管理员 PowerShell 中执行 `& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update`；指定版本时在 `update` 后追加 `v1.20.20`。已校验的 `deploy/install-agent.ps1` 也支持 `-Action update`、`-Action rollback -Version v1.20.4`、`-Action list-versions` 和 `-Action status`。
+Windows 新装的更新器保存到 `%ProgramData%\XingchenMonitor\update-agent.ps1`，在管理员 PowerShell 中执行 `& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update`；指定版本时在 `update` 后追加 `v1.20.21`。已校验的 `deploy/install-agent.ps1` 也支持 `-Action update`、`-Action rollback -Version v1.20.4`、`-Action list-versions` 和 `-Action status`。
 
 更新器保留安装时记录的来源和服务路径。Linux 旧安装可能继续使用 `guanlan-agent.service`、`/etc/guanlan-agent` 与 `/var/lib/guanlan-agent`；Windows 旧安装保留 `GuanlanAgent` 和 `GuanlanMonitor` 目录。命令应使用该节点实际管理入口，不要为统一名称卸载重装；仅在缺少更新器或更新请求桥时，从同一设备页面取得已校验的安装命令补齐。
 
