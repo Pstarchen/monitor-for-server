@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 installer="${script_dir}/install-controller.sh"
+test_bash="$(realpath "$(command -v "${XINGCHEN_TEST_BASH:-bash}")")"
 test_root="$(mktemp -d)"
 trap 'rm -rf "${test_root}"' EXIT
 
@@ -28,6 +29,7 @@ SCRIPT
 make_fake_runtime() {
   local root="$1"
   mkdir -p "${root}"
+  ln -s "${test_bash}" "${root}/bash"
   cat > "${root}/docker" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'docker %s\n' "$*" >> "${TEST_LOG}"
@@ -52,7 +54,7 @@ run_installer() {
   local root="$1"
   shift
   env -i PATH="${root}/bin:${PATH}" TEST_LOG="${root}/commands.log" "$@" \
-    bash "${root}/deploy/install-controller.sh" --no-install-dependencies
+    "${test_bash}" "${root}/deploy/install-controller.sh" --no-install-dependencies
 }
 
 assert_installer_policy_rejected() {
@@ -98,6 +100,8 @@ CONTROLLER_AGENT_NAME="custom-controller"
 CONTROLLER_AGENT_GROUP="custom-group"
 ENV
 run_installer "${disabled_agent_root}" env
+grep -Fx 'docker compose config --quiet' "${disabled_agent_root}/commands.log" >/dev/null \
+  || fail 'Disabled host monitoring did not omit the optional Compose arguments.'
 grep -Fx 'CONTROLLER_AGENT_ENABLED=false' "${disabled_agent_root}/.env" >/dev/null \
   || fail 'Installer enabled a disabled Controller Agent.'
 if grep -F -- '--profile host-monitoring' "${disabled_agent_root}/commands.log" >/dev/null; then
@@ -138,7 +142,7 @@ POSTGRES_PASSWORD="existing-password"
 XINGCHEN_NETWORK_MODE="offline"
 ENV
 env -i PATH="${argument_root}/bin:${PATH}" TEST_LOG="${argument_root}/commands.log" \
-  XINGCHEN_NETWORK_MODE=internal bash "${argument_root}/deploy/install-controller.sh" \
+  XINGCHEN_NETWORK_MODE=internal "${test_bash}" "${argument_root}/deploy/install-controller.sh" \
   --network-mode public --no-install-dependencies
 grep -Fx 'XINGCHEN_NETWORK_MODE=public' "${argument_root}/.env" >/dev/null \
   || fail 'Explicit network mode did not override the process environment.'

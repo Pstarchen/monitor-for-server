@@ -53,6 +53,8 @@ server_url="${XINGCHEN_SERVER:-${XINGCHEN_SERVER_URL:-}}"
 device_id="${XINGCHEN_DEVICE_ID:-}"
 enrollment_token="${XINGCHEN_ENROLLMENT_TOKEN:-}"
 agent_key="${XINGCHEN_AGENT_KEY:-}"
+# Bash 4.2 treats empty arrays as unset under nounset. Optional array expansions
+# use ${array[@]+"${array[@]}"} to preserve zero arguments and quoted elements.
 repository_urls=()
 if [[ -n "${XINGCHEN_REPOSITORY_URL:-}" ]]; then
   repository_urls+=("${XINGCHEN_REPOSITORY_URL}")
@@ -66,7 +68,7 @@ source_ref_overridden=false
 source_build_timeout="${XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS:-1800}"
 mirror_pull_timeout="${XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS:-45}"
 agent_pull_timeout="${XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS:-120}"
-agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.19}}"
+agent_image="${XINGCHEN_AGENT_IMAGE:-ghcr.io/pstarchen/monitor-for-server-agent:${XINGCHEN_AGENT_VERSION:-v1.20.20}}"
 container_name="${XINGCHEN_AGENT_CONTAINER:-xingchen-agent}"
 container_overridden=false
 [[ -n "${XINGCHEN_AGENT_CONTAINER:-}" ]] && container_overridden=true
@@ -193,7 +195,7 @@ fi
 script_source="${BASH_SOURCE[0]-}"
 if [[ "${EUID}" -ne 0 ]]; then
   if command -v sudo >/dev/null 2>&1 && [[ -n "${script_source}" && -f "${script_source}" ]]; then
-    exec sudo --preserve-env=XINGCHEN_SERVER,XINGCHEN_SERVER_URL,XINGCHEN_DEVICE_ID,XINGCHEN_ENROLLMENT_TOKEN,XINGCHEN_AGENT_KEY,XINGCHEN_AGENT_IMAGE,XINGCHEN_AGENT_IMAGE_MIRRORS,XINGCHEN_AGENT_MODE,XINGCHEN_AGENT_RELEASE_REPO,XINGCHEN_AGENT_RELEASE_BASE_URLS,XINGCHEN_RELEASE_MANIFEST_URLS,XINGCHEN_AGENT_CONTROLLER_RELEASES,XINGCHEN_AGENT_ALLOW_GITHUB_API,XINGCHEN_NETWORK_MODE,XINGCHEN_ALLOW_GITEE,XINGCHEN_REPOSITORY_URL,XINGCHEN_REPOSITORY_URLS,XINGCHEN_SOURCE_REF,XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS,XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS,XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS bash "${script_source}" "${original_args[@]}"
+    exec sudo --preserve-env=XINGCHEN_SERVER,XINGCHEN_SERVER_URL,XINGCHEN_DEVICE_ID,XINGCHEN_ENROLLMENT_TOKEN,XINGCHEN_AGENT_KEY,XINGCHEN_AGENT_IMAGE,XINGCHEN_AGENT_IMAGE_MIRRORS,XINGCHEN_AGENT_MODE,XINGCHEN_AGENT_RELEASE_REPO,XINGCHEN_AGENT_RELEASE_BASE_URLS,XINGCHEN_RELEASE_MANIFEST_URLS,XINGCHEN_AGENT_CONTROLLER_RELEASES,XINGCHEN_AGENT_ALLOW_GITHUB_API,XINGCHEN_NETWORK_MODE,XINGCHEN_ALLOW_GITEE,XINGCHEN_REPOSITORY_URL,XINGCHEN_REPOSITORY_URLS,XINGCHEN_SOURCE_REF,XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS,XINGCHEN_UPDATE_MIRROR_TIMEOUT_SECONDS,XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS bash "${script_source}" ${original_args[@]+"${original_args[@]}"}
   fi
   echo "请以 root 身份运行，或安装 sudo 后重试。" >&2
   exit 1
@@ -395,17 +397,24 @@ if [[ "${action}" != install ]]; then
   exit $?
 fi
 
+if [[ -z "${server_url}" || -z "${device_id}" ]]; then
+  echo "缺少总控地址或设备 ID，请从控制台重新复制完整安装命令。" >&2
+  exit 2
+fi
 if [[ -z "${agent_key}" && -z "${enrollment_token}" ]]; then
-  if [[ -c /dev/tty ]] && IFS= read -r -s -p '请输入一次性 Agent 接入令牌（输入不会回显）: ' enrollment_token < /dev/tty; then
-    printf '\n' > /dev/tty
+  if { exec 3<> /dev/tty; } 2>/dev/null; then
+    IFS= read -r -s -p '请输入一次性 Agent 接入令牌（输入不会回显）: ' enrollment_token <&3 || true
+    printf '\n' >&3
+    exec 3>&-
   elif [[ -t 0 ]]; then
-    IFS= read -r -s -p '请输入一次性 Agent 接入令牌（输入不会回显）: ' enrollment_token
+    IFS= read -r -s -p '请输入一次性 Agent 接入令牌（输入不会回显）: ' enrollment_token || true
     printf '\n'
   fi
 fi
-if [[ -z "${server_url}" || -z "${device_id}" || ( -z "${enrollment_token}" && -z "${agent_key}" ) ]]; then
-  echo "Server URL, device ID and XINGCHEN_ENROLLMENT_TOKEN or XINGCHEN_AGENT_KEY are required." >&2
-  usage >&2
+# Pasting a Windows line into a terminal can leave its carriage return behind.
+enrollment_token="${enrollment_token%$'\r'}"
+if [[ -z "${enrollment_token}" && -z "${agent_key}" ]]; then
+  echo "未读取到一次性 Agent 接入令牌。请重新运行安装命令，并在提示处粘贴控制台“复制令牌”的内容；自动化安装请通过临时 XINGCHEN_ENROLLMENT_TOKEN 环境变量提供。" >&2
   exit 2
 fi
 if [[ ! "${interval}" =~ ^(1s|3s|10s|30s|60s)$ ]]; then
@@ -451,7 +460,7 @@ if [[ ! "${source_build_timeout}" =~ ^[1-9][0-9]*$ ]]; then
   echo "XINGCHEN_AGENT_SOURCE_BUILD_TIMEOUT_SECONDS 必须是正整数秒数。" >&2
   exit 2
 fi
-for repository_url in "${repository_urls[@]}"; do
+for repository_url in ${repository_urls[@]+"${repository_urls[@]}"}; do
   if [[ -z "${repository_url}" ]]; then
     echo "Agent source repository URL cannot be empty." >&2
     exit 2
@@ -580,20 +589,20 @@ validate_internal_registry() {
 validate_network_configuration() {
   local value
   IFS=',' read -r -a configured_manifest_sources <<< "${release_manifest_urls}"
-  for value in "${configured_manifest_sources[@]}"; do
+  for value in ${configured_manifest_sources[@]+"${configured_manifest_sources[@]}"}; do
     value="${value//[[:space:]]/}"
     if [[ -n "${value}" ]]; then
       validate_remote_source "${value}" "manifest 源" || return 1
     fi
   done
   IFS=',' read -r -a configured_release_sources <<< "${release_base_urls}"
-  for value in "${configured_release_sources[@]}"; do
+  for value in ${configured_release_sources[@]+"${configured_release_sources[@]}"}; do
     value="${value//[[:space:]]/}"
     if [[ -n "${value}" ]]; then
       validate_remote_source "${value}" "制品源" || return 1
     fi
   done
-  for value in "${repository_urls[@]}"; do
+  for value in ${repository_urls[@]+"${repository_urls[@]}"}; do
     if [[ -n "${value}" ]]; then
       validate_remote_source "${value}" "源码源" || return 1
     fi
@@ -605,7 +614,7 @@ validate_network_configuration() {
     fi
     validate_internal_registry "${agent_image}" "Agent 镜像" || return 1
     IFS=',' read -r -a configured_mirrors <<< "${XINGCHEN_AGENT_IMAGE_MIRRORS:-}"
-    for value in "${configured_mirrors[@]}"; do
+    for value in ${configured_mirrors[@]+"${configured_mirrors[@]}"}; do
       value="${value%/}"
       if [[ -n "${value}" ]]; then
         validate_internal_registry "${value}/placeholder/image:v0.0.0" "镜像源" || return 1
@@ -780,7 +789,7 @@ get_release_version() {
   [[ "${network_mode}" != offline ]] || return 1
   local response latest manifest_url
   IFS=',' read -r -a manifest_sources <<< "${release_manifest_urls}"
-  for manifest_url in "${manifest_sources[@]}"; do
+  for manifest_url in ${manifest_sources[@]+"${manifest_sources[@]}"}; do
     manifest_url="${manifest_url//[[:space:]]/}"
     [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue
     response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto '=https' --proto-redir '=https' --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue
@@ -889,7 +898,7 @@ download_release_binary() {
   version="$(get_release_version)" || { echo "无法获取 Agent Release 版本，请稍后重试或指定 --version。" >&2; return 1; }
   mkdir -p "${destination}"
   IFS=',' read -r -a release_bases <<< "${release_base_urls}"
-  for base in "${release_bases[@]}"; do
+  for base in ${release_bases[@]+"${release_bases[@]}"}; do
     base="${base%/}"
     [[ "${base}" == https://* && "${base}" != *"@"* && "${base}" != *"?"* && "${base}" != *"#"* && "${base}" != *[[:space:]]* ]] || continue
     for asset_prefix in xingchen-agent guanlan-agent; do
@@ -1107,7 +1116,7 @@ install_docker_agent() {
     --mount "type=bind,src=/dev,dst=/host/dev,readonly" \
     --mount "type=bind,src=/etc,dst=/host/etc,readonly" \
     --mount "type=bind,src=/run,dst=/host/run,readonly" \
-    "${docker_socket_mount[@]}" \
+    ${docker_socket_mount[@]+"${docker_socket_mount[@]}"} \
     "${agent_image}" -config "${agent_config_path}" >/dev/null
   sleep 2
   if [[ "$(docker inspect --format '{{.State.Running}}' "${container_name}")" != "true" ]]; then
@@ -1138,7 +1147,7 @@ pull_agent_image() {
   if [[ "${agent_image}" == ghcr.io/* ]]; then
     image_suffix="${agent_image#ghcr.io/}"
     IFS=',' read -r -a mirror_prefixes <<< "${XINGCHEN_AGENT_IMAGE_MIRRORS:-}"
-    for mirror_prefix in "${mirror_prefixes[@]}"; do
+    for mirror_prefix in ${mirror_prefixes[@]+"${mirror_prefixes[@]}"}; do
       mirror_prefix="${mirror_prefix%/}"
       [[ -z "${mirror_prefix}" ]] && continue
       candidate="${mirror_prefix}/${image_suffix}"
@@ -1174,7 +1183,7 @@ build_agent_image_from_source() {
   if [[ "${source_ref_overridden}" != true && "${build_version}" != dev ]]; then
     build_ref="${build_version}"
   fi
-  for repository_url in "${repository_urls[@]}"; do
+  for repository_url in ${repository_urls[@]+"${repository_urls[@]}"}; do
     context="${repository_url}#${build_ref}:agent"
     echo "镜像源不可用，尝试从源码构建 Agent：${repository_url} (${build_ref})"
     if run_with_timeout "${source_build_timeout}" docker build --pull --build-arg "VERSION=${build_version}" --tag "${agent_image}" "${context}"; then
@@ -1269,7 +1278,7 @@ install_agent_updater() {
     printf 'allow_gitee=%s\n' "$(shell_quote "${allow_gitee}")"
     printf 'release_max_redirects=%s\n' "$(shell_quote "${release_max_redirects}")"
     printf 'repositories=('
-    for repository_url in "${repository_urls[@]}"; do
+    for repository_url in ${repository_urls[@]+"${repository_urls[@]}"}; do
       printf ' %s' "$(shell_quote "${repository_url}")"
     done
     printf ' )\n'
@@ -1307,7 +1316,7 @@ install_agent_updater() {
       'same_major() { local left="${1#v}" right="${2#v}"; [[ "${left%%.*}" == "${right%%.*}" ]]; }' \
       'platform() { os="$(uname -s | tr "[:upper:]" "[:lower:]")"; arch="$(uname -m)"; [[ "${os}" == linux ]] || return 1; case "${arch}" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) return 1 ;; esac; }' \
       'controller_version() { local response value; [[ "${controller_releases}" == true && "${network_mode}" != offline ]] || return 1; response="$(curl -fsSL --max-redirs 0 --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-release?os=${os}&arch=${arch}" 2>/dev/null)" || return 1; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}"; }' \
-      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; [[ "${network_mode}" != offline ]] || return 1; if controller_version; then return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in "${manifests[@]}"; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${network_mode}" == public && "${allow_github_api}" == true ]]; then response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null)" || return 1; value="$(printf "%s" "${response}" | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}"; return; fi; return 1; }' \
+      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; [[ "${network_mode}" != offline ]] || return 1; if controller_version; then return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in ${manifests[@]+"${manifests[@]}"}; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${network_mode}" == public && "${allow_github_api}" == true ]]; then response="$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null)" || return 1; value="$(printf "%s" "${response}" | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}"; return; fi; return 1; }' \
       'versioned_image() { local reference="$1" version="$2" leaf; [[ "${reference}" != *@* ]] || return 1; leaf="${reference##*/}"; if [[ "${leaf}" == *:* ]]; then printf "%s:%s" "${reference%:*}" "${version}"; else printf "%s:%s" "${reference}" "${version}"; fi; }' \
       'verify_image_version() { local candidate="$1" expected="$2" actual; actual="$(docker image inspect --format "{{index .Config.Labels \"org.opencontainers.image.version\"}}" "${candidate}" 2>/dev/null || true)"; [[ "${actual#v}" == "${expected#v}" ]]; }' \
       'pull_image() {' \
@@ -1317,7 +1326,7 @@ install_agent_updater() {
       '  if [[ "${image}" == ghcr.io/* ]]; then' \
       '    suffix="${image#ghcr.io/}"' \
       '    IFS="," read -r -a prefixes <<< "${mirror_list}"' \
-      '    for prefix in "${prefixes[@]}"; do' \
+      '    for prefix in ${prefixes[@]+"${prefixes[@]}"}; do' \
       '      prefix="${prefix%/}"; [[ -z "${prefix}" ]] && continue' \
       '      candidate="${prefix}/${suffix}"' \
       '      if run_with_timeout "${mirror_timeout}" docker pull "${candidate}" >/dev/null && verify_image_version "${candidate}" "${target_version}" && run_with_timeout "${mirror_timeout}" docker tag "${candidate}" "${image}"; then return 0; fi' \
@@ -1326,7 +1335,7 @@ install_agent_updater() {
       '  if run_with_timeout "${pull_timeout}" docker pull "${image}" && verify_image_version "${image}" "${target_version}"; then return 0; fi' \
       '  [[ "${network_mode}" == public ]] || return 1' \
       '  [[ "${image}" == *@* ]] && return 1' \
-      '  for repository in "${repositories[@]}"; do' \
+      '  for repository in ${repositories[@]+"${repositories[@]}"}; do' \
       '    echo "镜像源不可用，尝试从源码构建 Agent：${repository} (${build_ref})"' \
       '    if run_with_timeout "${source_build_timeout}" docker build --pull --build-arg "VERSION=${target_version}" --tag "${image}" "${repository}#${build_ref}:agent" && verify_image_version "${image}" "${target_version}"; then return 0; fi' \
       '  done' \
@@ -1368,7 +1377,7 @@ install_agent_updater() {
       'if [[ -z "${docker_socket_source}" ]]; then for candidate_socket in /var/run/docker.sock /run/podman/podman.sock; do if [[ -S "${candidate_socket}" ]]; then docker_socket_source="${candidate_socket}"; break; fi; done; fi' \
       'socket_mount=()' \
       'if [[ -n "${docker_socket_source}" && -S "${docker_socket_source}" ]]; then socket_mount=(--mount "type=bind,src=${docker_socket_source},dst=${docker_socket_target},readonly"); fi' \
-       'if ! run_with_timeout 30 docker run -d --name "${new_container}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=${config_path},dst=${config_path},readonly" --mount "type=bind,src=${update_status_dir},dst=${update_status_dir},readonly" --mount "type=bind,src=${update_request_dir},dst=${update_request_dir}" --mount "type=volume,src=${spool_volume},dst=${spool_path}" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/dev,dst=/host/dev,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" "${socket_mount[@]}" "${image}" -config "${config_path}" >/dev/null; then restore_old; exit 1; fi' \
+       'if ! run_with_timeout 30 docker run -d --name "${new_container}" --restart unless-stopped --pid host --network host --security-opt no-new-privileges:true --env HOST_PROC=/host/proc --env HOST_SYS=/host/sys --env HOST_ETC=/host/etc --mount "type=bind,src=${config_path},dst=${config_path},readonly" --mount "type=bind,src=${update_status_dir},dst=${update_status_dir},readonly" --mount "type=bind,src=${update_request_dir},dst=${update_request_dir}" --mount "type=volume,src=${spool_volume},dst=${spool_path}" --mount "type=bind,src=/,dst=/host,readonly" --mount "type=bind,src=/proc,dst=/host/proc,readonly" --mount "type=bind,src=/sys,dst=/host/sys,readonly" --mount "type=bind,src=/dev,dst=/host/dev,readonly" --mount "type=bind,src=/etc,dst=/host/etc,readonly" --mount "type=bind,src=/run,dst=/host/run,readonly" ${socket_mount[@]+"${socket_mount[@]}"} "${image}" -config "${config_path}" >/dev/null; then restore_old; exit 1; fi' \
       'sleep 2' \
       'if [[ "$(docker inspect --format "{{.State.Running}}" "${new_container}" 2>/dev/null || true)" != true ]]; then docker logs --tail 100 "${new_container}" >&2 || true; restore_old; exit 1; fi' \
       'docker rm -f "${old_container}" >/dev/null 2>&1 || true' \
@@ -1403,7 +1412,7 @@ install_agent_updater() {
 clone_agent_source() {
   local destination="$1" repository_url
   [[ "${network_mode}" == public ]] || return 1
-  for repository_url in "${repository_urls[@]}"; do
+  for repository_url in ${repository_urls[@]+"${repository_urls[@]}"}; do
     rm -rf -- "${destination}"
     echo "正在尝试 Agent 源码仓库：${repository_url} (${source_ref})"
     if git clone --branch "${source_ref}" --depth 1 --filter=blob:none --sparse "${repository_url}" "${destination}" >/dev/null \
@@ -1461,10 +1470,10 @@ install_local_agent_updater() {
       'same_major() { local left="${1#v}" right="${2#v}"; [[ "${left%%.*}" == "${right%%.*}" ]]; }' \
       'platform() { os="$(uname -s | tr "[:upper:]" "[:lower:]")"; arch="$(uname -m)"; [[ "${os}" == linux ]] || return 1; case "${arch}" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) return 1 ;; esac; }' \
       'controller_metadata() { local response; [[ "${controller_releases}" == true && "${network_mode}" != offline ]] || return 1; response="$(curl -fsSL --max-redirs 0 --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-release?os=${os}&arch=${arch}" 2>/dev/null)" || return 1; controller_version="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; controller_file="$(printf "%s" "${response}" | sed -n "s/.*\"file\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; controller_sha="$(printf "%s" "${response}" | sed -n "s/.*\"sha256\"[[:space:]]*:[[:space:]]*\"\([a-fA-F0-9]*\)\".*/\1/p" | head -n 1 | tr "[:upper:]" "[:lower:]")"; controller_size="$(printf "%s" "${response}" | sed -n "s/.*\"size\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" | head -n 1)"; controller_version="$(normalize_version "${controller_version}")" || return 1; [[ "${controller_file}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.tar\.gz$ && "${controller_sha}" =~ ^[a-f0-9]{64}$ && "${controller_size}" =~ ^[1-9][0-9]*$ ]] || return 1; ((controller_size <= 536870912)); }' \
-      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; [[ "${network_mode}" != offline ]] || return 1; if controller_metadata; then printf "%s" "${controller_version}"; return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in "${manifests[@]}"; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${network_mode}" == public && "${allow_github_api}" == true ]]; then curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1 | while IFS= read -r value; do normalize_version "${value}"; done; return; fi; return 1; }' \
+      'version_for_update() { local response value manifest_url; if [[ -n "${requested_version}" ]]; then normalize_version "${requested_version}"; return; fi; [[ "${network_mode}" != offline ]] || return 1; if controller_metadata; then printf "%s" "${controller_version}"; return; fi; IFS="," read -r -a manifests <<< "${release_manifest_urls}"; for manifest_url in ${manifests[@]+"${manifests[@]}"}; do [[ "${manifest_url}" == https://* && "${manifest_url}" != *"@"* ]] || continue; response="$(curl -fsSL --max-redirs "${release_max_redirects}" --retry 2 --connect-timeout 10 --max-time 30 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${manifest_url}" 2>/dev/null)" || continue; value="$(printf "%s" "${response}" | sed -n "s/.*\"version\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1)"; normalize_version "${value}" && return; done; if [[ "${network_mode}" == public && "${allow_github_api}" == true ]]; then curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 --proto "=https" --proto-redir "=https" --tlsv1.2 "https://api.github.com/repos/${release_repo}/releases/latest" 2>/dev/null | sed -n "s/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1 | while IFS= read -r value; do normalize_version "${value}"; done; return; fi; return 1; }' \
       'extract_archive() { local archive="$1" expected="${2:-}" listing entry verbose; listing="$(tar -tzf "${archive}")" || return 1; [[ -n "${listing}" && "${listing}" != *$'\''\n'\''* ]] || return 1; entry="${listing#./}"; [[ "${entry}" == xingchen-agent || "${entry}" == guanlan-agent ]] || return 1; [[ -z "${expected}" || "${entry}" == "${expected}" ]] || return 1; verbose="$(tar -tvzf "${archive}")" || return 1; [[ -n "${verbose}" && "${verbose}" != *$'\''\n'\''* && "${verbose:0:1}" == - ]] || return 1; tar -xzf "${archive}" -C "${temp_dir}" || return 1; [[ -f "${temp_dir}/${entry}" && ! -L "${temp_dir}/${entry}" ]] || return 1; install -m 0755 "${temp_dir}/${entry}" "${temp_dir}/xingchen-agent.new"; }' \
       'download_controller() { local version="$1" archive actual_size actual; controller_metadata || return 1; [[ "${controller_version}" == "${version}" ]] || return 1; archive="${temp_dir}/${controller_file}"; curl -fsSL --max-redirs 0 --retry 3 --connect-timeout 10 --max-time 300 --max-filesize 536870912 --proto "${controller_protocol}" --proto-redir "${controller_protocol}" --tlsv1.2 "${controller_url}/api/setup/agent-artifact?os=${os}&arch=${arch}&version=${version}" -o "${archive}" || return 1; actual_size="$(wc -c < "${archive}" | tr -d "[:space:]")"; actual="$(sha256sum "${archive}" | awk '\''{print $1}'\'')"; [[ "${actual_size}" == "${controller_size}" && "${actual}" == "${controller_sha}" ]] || return 1; extract_archive "${archive}"; }' \
-      'download() { local version="${1}" asset_prefix asset="" base archive checksum expected actual; [[ "${network_mode}" != offline ]] || return 1; write_update_status DOWNLOADING "" || true; download_controller "${version}" && return 0; IFS="," read -r -a bases <<< "${release_base_urls}"; for base in "${bases[@]}"; do base="${base%/}"; [[ "${base}" == https://* && "${base}" != *"@"* && "${base}" != *"?"* && "${base}" != *"#"* && "${base}" != *[[:space:]]* ]] || continue; for asset_prefix in xingchen-agent guanlan-agent; do asset="${asset_prefix}_${1#v}_${os}_${arch}.tar.gz"; archive="${temp_dir}/${asset}"; checksum="${temp_dir}/checksums.txt"; curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --connect-timeout 10 --max-time 300 --max-filesize 536870912 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}" || continue; curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}" || continue; expected="$(awk -v n="${asset}" '\''$2 == n || substr($2, 2) == n { print $1; exit }'\'' "${checksum}")"; actual="$(sha256sum "${archive}" | awk '\''{print $1}'\'')"; [[ -n "${expected}" && "${expected}" == "${actual}" ]] || continue; extract_archive "${archive}" "${asset_prefix}" && return 0; done; done; return 1; }' \
+      'download() { local version="${1}" asset_prefix asset="" base archive checksum expected actual; [[ "${network_mode}" != offline ]] || return 1; write_update_status DOWNLOADING "" || true; download_controller "${version}" && return 0; IFS="," read -r -a bases <<< "${release_base_urls}"; for base in ${bases[@]+"${bases[@]}"}; do base="${base%/}"; [[ "${base}" == https://* && "${base}" != *"@"* && "${base}" != *"?"* && "${base}" != *"#"* && "${base}" != *[[:space:]]* ]] || continue; for asset_prefix in xingchen-agent guanlan-agent; do asset="${asset_prefix}_${1#v}_${os}_${arch}.tar.gz"; archive="${temp_dir}/${asset}"; checksum="${temp_dir}/checksums.txt"; curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --connect-timeout 10 --max-time 300 --max-filesize 536870912 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/${asset}" -o "${archive}" || continue; curl -fsSL --max-redirs "${release_max_redirects}" --retry 3 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto "=https" --proto-redir "=https" --tlsv1.2 "${base}/${version}/checksums.txt" -o "${checksum}" || continue; expected="$(awk -v n="${asset}" '\''$2 == n || substr($2, 2) == n { print $1; exit }'\'' "${checksum}")"; actual="$(sha256sum "${archive}" | awk '\''{print $1}'\'')"; [[ -n "${expected}" && "${expected}" == "${actual}" ]] || continue; extract_archive "${archive}" "${asset_prefix}" && return 0; done; done; return 1; }' \
       'rollback_old() { local old="$1"; write_update_status ROLLING_BACK "Agent health check failed; restoring previous binary." || true; rm -f "${binary_path}"; mv "${old}" "${binary_path}" || return 1; systemctl start "${service_name}" >/dev/null 2>&1 && systemctl is-active --quiet "${service_name}"; }' \
       'atomic_install() { local old="${binary_path}.previous.$$" backup_version="unknown" backup_path; write_update_status APPLYING "" || true; mkdir -p "${backup_dir}"; backup_version="$("${binary_path}" --version 2>/dev/null | sed -n "s/.*\(v[0-9][0-9.]*\).*/\1/p" | head -n 1 || true)"; backup_path="${backup_dir}/xingchen-agent.${backup_version#v}.$(date -u +%Y%m%d%H%M%S).backup"; cp -p "${binary_path}" "${backup_path}" 2>/dev/null || true; find "${backup_dir}" -type f -name "xingchen-agent.*.backup" -printf "%T@ %p\\n" 2>/dev/null | sort -rn | awk '\''NR > 5 { sub(/^[^ ]+ /, ""); print }'\'' | xargs -r rm -f; systemctl stop "${service_name}" >/dev/null 2>&1 || true; mv "${binary_path}" "${old}" || return 1; if ! mv "${temp_dir}/xingchen-agent.new" "${binary_path}"; then rollback_old "${old}" || { echo "Agent 替换失败，且旧版本恢复失败。" >&2; return 2; }; return 1; fi; if ! systemctl start "${service_name}" >/dev/null 2>&1 || ! systemctl is-active --quiet "${service_name}"; then rollback_old "${old}" || { echo "Agent 启动失败，且旧版本恢复后仍未存活。" >&2; return 2; }; return 1; fi; rm -f "${old}"; }' \
       'command="${1:-update}"; requested_version="${2:-}"; platform || { echo "当前系统或架构不支持预编译 Agent。" >&2; exit 1; }' \

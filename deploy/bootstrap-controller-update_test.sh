@@ -4,9 +4,11 @@ umask 077
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 bootstrap="${script_dir}/bootstrap-controller-update.sh"
+test_bash="$(realpath "$(command -v "${XINGCHEN_TEST_BASH:-bash}")")"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf -- "${temp_dir}"' EXIT
 mkdir -p "${temp_dir}/bin" "${temp_dir}/package/deploy" "${temp_dir}/project/.controller-update-package.keep" "${temp_dir}/docker-root"
+ln -s "${test_bash}" "${temp_dir}/bin/bash"
 export BOOTSTRAP_TEST_DIR="${temp_dir}"
 export BOOTSTRAP_TEST_IMAGE_ID="sha256:$(printf 'a%.0s' {1..64})"
 export BOOTSTRAP_TEST_CONTAINER_ID="$(printf 'b%.0s' {1..64})"

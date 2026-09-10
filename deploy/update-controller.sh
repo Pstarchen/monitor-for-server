@@ -343,7 +343,7 @@ run_with_timeout() {
   local seconds="$1"
   shift
   if command -v timeout >/dev/null 2>&1; then
-    if timeout "${timeout_args[@]}" "${seconds}s" "$@"; then
+    if timeout ${timeout_args[@]+"${timeout_args[@]}"} "${seconds}s" "$@"; then
       return 0
     else
       status=$?
@@ -515,7 +515,7 @@ fi
 if [[ "${source_fallback}" == true && ${#source_repositories[@]} -eq 0 ]]; then
   source_fallback=false
 fi
-for source_repository in "${source_repositories[@]}"; do
+for source_repository in ${source_repositories[@]+"${source_repositories[@]}"}; do
   if [[ -z "${source_repository}" ]]; then
     echo "总控源码仓库地址不能为空。" >&2
     exit 2
@@ -552,13 +552,13 @@ image_value() {
 
 image_keys=(XINGCHEN_SETUP_IMAGE XINGCHEN_SERVER_IMAGE XINGCHEN_WEB_IMAGE)
 source_images=(
-  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.19)"
-  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.19)"
-  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.19)"
+  "$(image_value XINGCHEN_SETUP_IMAGE ghcr.io/pstarchen/monitor-for-server-setup:v1.20.20)"
+  "$(image_value XINGCHEN_SERVER_IMAGE ghcr.io/pstarchen/monitor-for-server-server:v1.20.20)"
+  "$(image_value XINGCHEN_WEB_IMAGE ghcr.io/pstarchen/monitor-for-server-web:v1.20.20)"
 )
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled,,}" == "true" ]]; then
   image_keys+=(XINGCHEN_AGENT_IMAGE)
-  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19)")
+  source_images+=("$(image_value XINGCHEN_AGENT_IMAGE ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20)")
 fi
 dependency_image_keys=(XINGCHEN_POSTGRES_IMAGE XINGCHEN_REDIS_IMAGE)
 dependency_source_images=(
@@ -655,7 +655,7 @@ validate_internal_candidate_reference() {
   suffix="${image#*/}"
   mirror_list="$(controller_image_mirror_list)"
   IFS=',' read -r -a prefixes <<< "${mirror_list}"
-  for prefix in "${prefixes[@]}"; do
+  for prefix in ${prefixes[@]+"${prefixes[@]}"}; do
     prefix="${prefix%/}"
     [[ -z "${prefix}" ]] && continue
     candidate="${prefix}/${suffix}"
@@ -677,7 +677,7 @@ if [[ "${network_mode}" == internal ]]; then
   done
 fi
 if [[ "${offline}" != true && ( "${network_mode}" == internal || "${source_build}" == true || ( "${build}" != true && "${source_fallback}" == true ) ) ]]; then
-  for source_repository in "${source_repositories[@]}"; do
+  for source_repository in ${source_repositories[@]+"${source_repositories[@]}"}; do
     validate_source_repository_policy "${source_repository}"
   done
 fi
@@ -762,7 +762,7 @@ pull_one() {
     suffix="${image#ghcr.io/}"
     mirror_list="$(controller_image_mirror_list)"
     IFS=',' read -r -a prefixes <<< "${mirror_list}"
-    for prefix in "${prefixes[@]}"; do
+    for prefix in ${prefixes[@]+"${prefixes[@]}"}; do
       prefix="${prefix%/}"
       [[ -z "${prefix}" ]] && continue
       candidate="${prefix}/${suffix}"
@@ -831,7 +831,7 @@ build_images_from_repositories() {
       return 1
     fi
   done
-  for repository in "${source_repositories[@]}"; do
+  for repository in ${source_repositories[@]+"${source_repositories[@]}"}; do
     validate_source_repository_policy "${repository}" || return 1
     temporary_images=()
     success=true

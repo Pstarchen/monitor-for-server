@@ -200,7 +200,7 @@ missing_runtime_dependencies() {
   fi
   command -v curl >/dev/null 2>&1 || missing+=(curl)
   local IFS=', '
-  printf '%s' "${missing[*]}"
+  printf '%s' "${missing[*]-}"
 }
 
 run_as_root() {
@@ -410,7 +410,7 @@ fi
 
 if [[ "${cleanup}" == true ]]; then
   echo "清理星辰监控旧容器和本地镜像（保留 PostgreSQL/Redis 卷）..."
-  docker compose "${profile_args[@]}" down --remove-orphans --rmi local
+  docker compose ${profile_args[@]+"${profile_args[@]}"} down --remove-orphans --rmi local
   project_images="$(docker image ls --format '{{.Repository}} {{.ID}}' | awk '$1 ~ /^(xingchen|guanlan)-monitor(-|$)/ {print $2}' | sort -u)"
   if [[ -n "${project_images}" ]]; then
     while IFS= read -r image_id; do
@@ -421,7 +421,7 @@ if [[ "${cleanup}" == true ]]; then
   # to prune globally after checking other Docker projects on the host.
 fi
 
-docker compose "${profile_args[@]}" config --quiet
+docker compose ${profile_args[@]+"${profile_args[@]}"} config --quiet
 controller_services=(setup server web)
 if [[ "$(uname -s)" == "Linux" && "${controller_agent_enabled}" == true ]]; then
   controller_services+=(controller-agent)
@@ -431,7 +431,7 @@ if [[ "${build}" == true && "${source_build}" == true ]]; then
   exit 2
 elif [[ "${build}" == true ]]; then
   echo "使用本地源码构建总控镜像..."
-  docker compose "${profile_args[@]}" build --pull "${controller_services[@]}"
+  docker compose ${profile_args[@]+"${profile_args[@]}"} build --pull "${controller_services[@]}"
 else
   echo "正在拉取总控预构建镜像（优先使用国内镜像源）..."
   update_args=(--check)
@@ -453,7 +453,7 @@ compose_up_args=(-d --remove-orphans --wait --wait-timeout 300)
 if [[ "${offline}" == true ]]; then
   compose_up_args+=(--pull never)
 fi
-docker compose "${profile_args[@]}" up "${compose_up_args[@]}"
+docker compose ${profile_args[@]+"${profile_args[@]}"} up "${compose_up_args[@]}"
 
 web_port="18080"
 if [[ -f .env ]]; then

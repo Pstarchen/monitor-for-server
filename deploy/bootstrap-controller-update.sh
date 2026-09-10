@@ -191,7 +191,7 @@ case "${daemon_platform}" in
 esac
 timeout_args=()
 if [[ "$(timeout --help 2>&1 || true)" == *--foreground* ]]; then timeout_args+=(--foreground); fi
-timeout "${timeout_args[@]}" -s TERM -k 10 "${pull_timeout}" docker pull "${setup_image}" >/dev/null 2>&1 || fail 'Cannot pull the target Setup image within the configured timeout.'
+timeout ${timeout_args[@]+"${timeout_args[@]}"} -s TERM -k 10 "${pull_timeout}" docker pull "${setup_image}" >/dev/null 2>&1 || fail 'Cannot pull the target Setup image within the configured timeout.'
 image_metadata="$(docker image inspect --format '{{.Id}}|{{index .Config.Labels "org.opencontainers.image.version"}}|{{.Os}}/{{.Architecture}}' "${setup_image}" 2>/dev/null)" || fail 'Cannot inspect the target Setup image.'
 IFS='|' read -r image_id image_version image_platform extra_metadata <<< "${image_metadata}"
 [[ "${image_metadata}" != *$'\n'* && "${image_id}" =~ ^${digest_pattern}$ && -z "${extra_metadata}" ]] || fail 'Setup image metadata is invalid.'
@@ -214,7 +214,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   if [[ "${container_name}" =~ ^xingchen-update-extract-[a-zA-Z0-9]{6}-[0-9]+$ ]]; then
-    timeout "${timeout_args[@]}" -s TERM -k 5 30 docker rm -f "${container_name}" >/dev/null 2>&1 || true
+    timeout ${timeout_args[@]+"${timeout_args[@]}"} -s TERM -k 5 30 docker rm -f "${container_name}" >/dev/null 2>&1 || true
   fi
   [[ -z "${stage}" ]] || rm -rf -- "${stage}" || true
   exit "${status}"

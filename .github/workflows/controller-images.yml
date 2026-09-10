@@ -44,6 +44,9 @@ jobs:
       - name: Test Linux Agent installer
         run: sudo bash deploy/install-agent_test.sh
 
+      - name: Test installation and updates with Bash 4.2
+        run: bash deploy/test-legacy-bash.sh
+
       - name: Check update scripts
         run: |
           for script in deploy/*.sh; do bash -n "$script"; done

@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "${script_dir}/.." && pwd)"
 source_updater="${script_dir}/update-controller.sh"
 source_installer="${script_dir}/install-controller.sh"
+test_bash="$(realpath "$(command -v "${XINGCHEN_TEST_BASH:-bash}")")"
 grep -F 'COPY deploy/update-controller.sh /usr/local/share/xingchen/updaters/update-controller.sh' "${repository_root}/setup/Dockerfile" >/dev/null
 grep -Fx '!deploy/update-controller.sh' "${repository_root}/.dockerignore" >/dev/null
 grep -F 'COPY deploy/bootstrap-controller-update.sh /usr/local/share/xingchen/updaters/bootstrap-controller-update.sh' "${repository_root}/setup/Dockerfile" >/dev/null
@@ -15,7 +16,7 @@ for build_input in docker-compose.yml deploy/update-controller.ps1 deploy/bootst
   grep -Fx "!${build_input}" "${repository_root}/.dockerignore" >/dev/null
 done
 for build_option in --build --source-build; do
-  if bash "${source_installer}" --network-mode internal "${build_option}" >/dev/null 2>&1; then
+  if "${test_bash}" "${source_installer}" --network-mode internal "${build_option}" >/dev/null 2>&1; then
     echo "Controller installer accepted ${build_option} in internal mode." >&2
     exit 1
   fi
@@ -54,6 +55,7 @@ updater="${base_root}/deploy/update-controller.sh"
 fake_bin="${temp_dir}/bin"
 log_file="${temp_dir}/commands.log"
 mkdir -p "${fake_bin}"
+ln -s "${test_bash}" "${fake_bin}/bash"
 
 cat > "${fake_bin}/docker" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -194,7 +196,7 @@ run_update() {
     "XINGCHEN_SOURCE_REPOSITORIES=${TEST_SOURCE_REPOSITORIES:-}" \
     "XINGCHEN_NETWORK_MODE=${TEST_NETWORK_MODE:-}" "XINGCHEN_ALLOW_GITEE=${TEST_ALLOW_GITEE:-}" \
     "CONTROLLER_UPDATE_RUNNER=${TEST_CONTROLLER_UPDATE_RUNNER:-false}" "SETUP_WORKSPACE=${TEST_SETUP_WORKSPACE:-}" \
-    bash "${TEST_UPDATER:-${updater}}" "$@"
+    "${test_bash}" "${TEST_UPDATER:-${updater}}" "$@"
 }
 
 create_upgrade_project() {
@@ -419,8 +421,8 @@ fi
 
 : > "${log_file}"
 run_update --check
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
-grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
+grep -F 'timeout 180s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
 if grep -Eq 'ghcr\.(m\.daocloud\.io|1ms\.run|nju\.edu\.cn)' "${log_file}"; then
   echo 'Default update path still uses an unconfigured public mirror.' >&2
   exit 1
@@ -464,15 +466,15 @@ printf '%s\n' \
   'XINGCHEN_UPDATE_PULL_TIMEOUT_SECONDS="11"' > "${timeout_root}/.env"
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "CONTROLLER_AGENT_ENABLED=false" bash "${timeout_root}/deploy/update-controller.sh" --check
-grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
-grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
+grep -F 'timeout 7s docker pull registry.internal.example/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
+grep -F 'timeout 11s docker pull ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
 
 : > "${log_file}"
 TEST_SOURCE_REPOSITORIES='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git' \
   TEST_ALLOW_GITEE=true TEST_FAIL_ALL_PULLS=true TEST_FAIL_GITEE_BUILD=true run_update --check
 grep -E 'docker build --pull --file setup/Dockerfile --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://gitee.com/starchen520/monitor-for-server.git#main$' "${log_file}" >/dev/null
 grep -E 'docker build --pull --file setup/Dockerfile --build-arg VERSION=dev --tag xingchen-controller-source-[^ ]+-0:candidate https://github.com/Pstarchen/monitor-for-server.git#main$' "${log_file}" >/dev/null
-grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
+grep -E 'docker tag xingchen-controller-source-[^ ]+-1:candidate ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
 
 : > "${log_file}"
 if TEST_FAIL_ALL_PULLS=true run_update --check --no-mirror; then
@@ -594,7 +596,7 @@ fi
 
 : > "${log_file}"
 run_update --apply --no-mirror
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-web:v1.20.20' "${log_file}" >/dev/null
 grep -q 'docker compose .* up -d --force-recreate --wait --wait-timeout 300 --pull never --no-build --remove-orphans' "${log_file}"
 backup_line="$(grep -n 'pg_dump' "${log_file}" | head -n 1 | cut -d: -f1)"
 pull_line="$(grep -n '^docker pull ' "${log_file}" | head -n 1 | cut -d: -f1)"
@@ -713,7 +715,7 @@ if TEST_FAIL_COMPOSE_MODE=once TEST_COMPOSE_STATE="${temp_dir}/compose-state" ru
   echo 'Update reported success even though the candidate health check failed.' >&2
   exit 1
 fi
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
 if [[ "$(grep -c '^docker compose .* up -d --force-recreate --wait' "${log_file}")" -ne 2 ]]; then
   echo 'Rollback did not perform a second Compose health check.' >&2
   exit 1
@@ -1018,7 +1020,7 @@ if TEST_RUNNING_VERSION=v1.20.13 TEST_IMAGE_VERSION=v1.20.14 TEST_MISSING_LOCAL_
   exit 1
 fi
 cmp -s "${temp_dir}/missing-image.env.before" "${missing_image_root}/.env"
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
 if grep -q '^docker compose .* up -d ' "${log_file}"; then
   echo 'Missing-image failure attempted to switch services.' >&2
   exit 1
@@ -1055,7 +1057,7 @@ fi
 cmp -s "${temp_dir}/load-failure.env.before" "${load_failure_root}/.env"
 cmp -s "${temp_dir}/load-failure.compose.before" "${load_failure_root}/docker-compose.yml"
 cmp -s "${temp_dir}/load-failure.updater.before" "${load_failure_root}/deploy/update-controller.sh"
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
 if grep -q '^docker compose .* up -d ' "${log_file}"; then
   echo 'Load failure attempted to switch services.' >&2
   exit 1
@@ -1089,7 +1091,7 @@ if [[ "$(grep -c '^docker compose .* up -d --force-recreate --wait' "${log_file}
   echo 'Bundle rollback did not perform a second health check.' >&2
   exit 1
 fi
-grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker tag sha256:old-image ghcr.io/pstarchen/monitor-for-server-server:v1.20.20' "${log_file}" >/dev/null
 [[ -s "$(find "${bundle_rollback_root}/backups" -maxdepth 1 -type f -name 'xingchen-monitor-*.sql' -print -quit)" ]]
 
 downgrade_root="${temp_dir}/downgrade-project"

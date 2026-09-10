@@ -12,6 +12,8 @@ description: 按安装、连接、Agent、告警、通知、备份和更新现�
 | 安装器找不到 Docker | Docker 服务状态与 Compose v2 |
 | 网页打不开或显示 502 | 容器状态、服务端健康检查与端口占用 |
 | 登录后退出或写操作 403 | HTTPS、Cookie、`PUBLIC_BASE_URL` 与 `ALLOWED_ORIGINS` |
+| Agent 下载出现证书或 NSS 错误 | 带 SNI 的域名证书、系统时间、CA 信任库与 curl/NSS 版本 |
+| Agent 安装提示 `unbound variable`、空令牌或 CR 错误 | Setup 安装器版本、终端输入与完整复制的命令 |
 | 设备一直待接入 | Agent 服务、设备 ID、总控地址与密钥 |
 | 页面数据停止更新 | Agent 最近上报、WebSocket 与反向代理 Upgrade |
 | 告警没有通知 | 规则范围、维护静默、渠道测试与投递记录 |
@@ -30,6 +32,45 @@ docker info
 `docker info` 必须能连接守护进程。项目要求 Compose v2，命令是 `docker compose`，不是旧版 `docker-compose`。普通用户没有权限时，按服务器安全策略使用 `sudo` 或配置 Docker 访问权限。
 
 Windows 环境还需确认 Docker Desktop 已启动，并使用 Linux containers。
+
+## Agent 下载出现证书或 NSS 错误 {#agent-tls}
+
+`curl (60)` 表示证书验证失败，先核对系统时间、CA 信任库、证书有效期、域名以及服务端提供的完整中间证书链。`curl (35)` 表示 TLS 握手失败，也需核对站点 TLS 配置与客户端版本。新版安装入口会显示失败阶段和 curl 退出码：引导脚本、完整安装器或安装器摘要；任何下载或摘要校验失败都会停止执行。
+
+在发生问题的 Agent 主机执行以下只读检查，将示例域名替换为自己的总控域名：
+
+```bash
+date -u
+curl -V
+curl -fsS --proto '=https' --tlsv1.2 https://monitor.example.com/healthz
+openssl s_client -connect monitor.example.com:443 \
+  -servername monitor.example.com -showcerts </dev/null 2>/dev/null |
+  openssl x509 -noout -subject -issuer -dates -text
+```
+
+`-servername` 会发送 SNI，确保检查对应域名的虚拟主机；不带它可能取得默认站点的自签证书，不能据此判定总控域名的证书错误。最后一条命令只查看返回的叶子证书，关注 SAN、有效期、Key Usage 和 Extended Key Usage；它不替代 curl 对域名及信任链的校验。
+
+`SEC_ERROR_INADEQUATE_KEY_USAGE` 指向证书用途校验，不能直接当成“缺少根证书”。某些旧 NSS 对 RSA 服务端证书要求 `Key Encipherment`；仅允许 `Digital Signature` 的叶子证书可能在现代客户端成功、旧 NSS 失败。需要结合当时实际证书和 `curl -V` 判断，不能仅凭 LiteSSL 等签发者名称认定原因。客户端组件过旧时，从发行版受信软件源更新 curl、NSS 和 CA 包；证书用途或证书链有误时，由总控管理员修正证书配置。保留 HTTPS 和证书校验。
+
+如果 curl 已成功下载脚本，后续才出现 Bash 变量或令牌错误，继续按对应安装阶段排查，无需仅因历史 TLS 日志重复更换证书。
+
+## Agent 安装提示空数组 unbound variable {#agent-bash}
+
+旧 Bash 在 `set -u` 下展开空数组，可能把 `original_args[@]` 或未配置的采集参数数组当成未定义变量；这与证书验证是独立问题。可用 `bash --version` 查看目标机版本。
+
+`v1.20.20` 已修复该兼容问题。运行 `v1.20.19` Setup 的总控应先通过受支持的总控更新流程升级到 `v1.20.20`，确认 Setup 运行新镜像后，刷新设备页面并重新复制安装命令。安装器接口优先读取 Setup 镜像内置脚本，只更新宿主机仓库文件不会替换正在下发的旧安装器。沿用原设备记录即可，不需要为此删除设备或数据库；参见 [Agent 版本来源与更新顺序](./monitored-agent.md#版本来源与更新顺序)。
+
+## 安装器提示未读取到接入令牌 {#agent-token}
+
+“复制安装命令”不包含接入令牌。先执行命令，等终端提示后再点击控制台“复制令牌”，粘贴一次并按回车；输入不会回显。直接按回车、只复制命令或没有可读取的交互终端，都可能让安装器得到空输入。不要把命令与令牌作为多行内容一起粘贴，也不要输出令牌、写入 URL 或提交到工单。
+
+空输入会在请求凭据交换前停止；若提示“令牌交换失败”，再核对设备是否对应、令牌是否已过 15 分钟或已被消费。必要时为同一设备重新签发令牌；签发本身不会使当前 Agent 密钥失效，成功消费才会轮换密钥。无交互终端的自动化应由受控执行器临时注入 `XINGCHEN_ENROLLMENT_TOKEN`，不把真实值写入脚本或日志。
+
+## 网页终端粘贴后出现 CR 或命令名异常 {#agent-crlf}
+
+`$'\r': command not found`、`bash\r` 或参数末尾多出 `^M`，通常意味着粘贴内容包含 Windows 风格 CR 换行。重新复制控制台生成的纯文本命令，并使用终端的粘贴功能；不要连同 Markdown 围栏、提示符或换行后的令牌一起复制。
+
+新版 Linux 命令先下载到随机临时文件，成功且非空后才执行，退出时清理文件。命令末尾的 `#` 用于吸收附在命令末尾的 CR，请完整保留；它不能修复命令中间的 CR。保存多行脚本时使用 LF 换行。新版 Linux 安装器也会去除令牌末尾单个 CR，但不会凭空补齐空令牌或修复错误的设备令牌。完整入口示例见 [Linux Agent 安装](./monitored-agent.md#linux)。
 
 ## 总控容器已启动，但网页打不开
 
@@ -126,11 +167,11 @@ Get-WinEvent -LogName Application -MaxEvents 50
 
 “确认告警”只表示有人接手，不代表故障恢复。恢复状态由后续指标或探测结果决定。
 
-## 旧版没有 bootstrap，如何升级到 v1.20.19
+## 旧版没有 bootstrap，如何升级到 v1.20.20
 
-`v1.20.18` 及更早版本的 Setup 不含新版在线引导器和更新包，不能仅凭旧控制台有“检查更新”按钮就认定新链路可用。已有部署应按[旧版一次性迁移](./deployment.md#旧版一次性迁移)取得固定 `v1.20.19` 且通过可信 SHA256 校验的入口，再更新既有目录；不要重新安装、执行 `main` 分支脚本或手工改写敏感 `.env`。
+`v1.20.18` 及更早版本的 Setup 不含新版在线引导器和更新包，不能仅凭旧控制台有“检查更新”按钮就认定新链路可用。已有部署应按[旧版一次性迁移](./deployment.md#旧版一次性迁移)取得固定 `v1.20.20` 且通过可信 SHA256 校验的入口，再更新既有目录；不要重新安装、执行 `main` 分支脚本或手工改写敏感 `.env`。
 
-没有 `.git` 的旧离线部署也能迁移。显式使用 `--source gitee --version v1.20.19` 会在校验与备份通过后切到 Gitee 版本发现和腾讯云六镜像，并保留数据库与设备配置。迁移成功后优先使用控制台“系统设置 → 系统更新”或 `sudo xingchen update`。
+没有 `.git` 的旧离线部署也能迁移。显式使用 `--source gitee --version v1.20.20` 会在校验与备份通过后切到 Gitee 版本发现和腾讯云六镜像，并保留数据库与设备配置。迁移成功后优先使用控制台“系统设置 → 系统更新”或 `sudo xingchen update`。
 
 ## 使用 Gitee 为什么还要访问腾讯云
 

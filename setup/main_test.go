@@ -1,16 +1,21 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func validSetupRequest() setupRequest {
@@ -193,6 +198,185 @@ func TestAgentBootstrapUsesConfiguredControllerAndVerifiesLinuxInstaller(t *test
 	}
 	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("bootstrap response must be non-cacheable and nosniff")
+	}
+}
+
+func agentBootstrapTestBash(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		// Windows' system bash.exe starts WSL; use the native Git Bash runtime.
+		candidates := []string{`D:\Git\bin\bash.exe`, filepath.Join(os.Getenv("ProgramFiles"), "Git", "bin", "bash.exe")}
+		if git, err := exec.LookPath("git"); err == nil {
+			candidates = append(candidates, filepath.Join(filepath.Dir(filepath.Dir(git)), "bin", "bash.exe"))
+		}
+		for _, candidate := range candidates {
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate
+			}
+		}
+		t.Skip("Agent bootstrap execution tests require Git Bash on Windows")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("Agent bootstrap execution tests require Bash")
+	}
+	return bash
+}
+
+func TestAgentBootstrapExecutesVerifiedLinuxInstaller(t *testing.T) {
+	bash := agentBootstrapTestBash(t)
+	useAgentBootstrapFixture(t, "https://monitor.example.com")
+	query := url.Values{
+		"platform":            {"linux"},
+		"deviceId":            {"123e4567-e89b-42d3-a456-426614174000"},
+		"interval":            {"30s"},
+		"disk":                {"/", "/srv/data (primary)", "/srv/a,b+archive"},
+		"collectAllProcesses": {"true"},
+		"processLimit":        {"128"},
+	}
+	response := httptest.NewRecorder()
+	(&setupService{}).agentBootstrap(response, httptest.NewRequest(http.MethodGet, "/api/setup/agent-bootstrap?"+query.Encode(), nil))
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("bootstrap must return a successful non-cacheable script")
+	}
+	if strings.Contains(response.Body.String(), "test-only-enrollment-token") || strings.Contains(response.Body.String(), "XINGCHEN_ENROLLMENT_TOKEN") {
+		t.Fatal("bootstrap must not embed enrollment credentials")
+	}
+	installer := `#!/usr/bin/env bash
+set -euo pipefail
+printf ran > "${XINGCHEN_TEST_ROOT}/executed"
+[[ "${XINGCHEN_ENROLLMENT_TOKEN:-}" == test-only-enrollment-token ]] || exit 97
+printf '%s\0' "$@" > "${XINGCHEN_TEST_ROOT}/arguments"
+[[ "${XINGCHEN_TEST_DOWNLOAD_MODE}" != installer_failure ]] || exit 42
+`
+	digest := sha256.Sum256([]byte(installer))
+	checksum := strings.ToUpper(hex.EncodeToString(digest[:])) + "\r\n"
+	driver := `set -euo pipefail
+export XINGCHEN_TEST_ROOT="$PWD"
+export TMPDIR="$PWD/tmp"
+curl() {
+  local output='' url='' protocol='' redirect_protocol='' redirects='' tls=false
+  while (($# > 0)); do
+    case "$1" in
+      -o) output="$2"; shift 2 ;;
+      --proto) protocol="$2"; shift 2 ;;
+      --proto-redir) redirect_protocol="$2"; shift 2 ;;
+      --max-redirs) redirects="$2"; shift 2 ;;
+      --tlsv1.2) tls=true; shift ;;
+      --retry|--retry-delay|--connect-timeout|--max-time|--max-filesize) shift 2 ;;
+      -fsSL) shift ;;
+      https://monitor.example.com/api/setup/agent-installer?platform=linux*) url="$1"; shift ;;
+      *) echo 'Unexpected mock curl argument.' >&2; return 98 ;;
+    esac
+  done
+  [[ "$protocol" == =https && "$redirect_protocol" == =https && "$tls" == true && "$redirects" == 0 ]] || return 98
+  printf '%s\n' "$url" >> "$XINGCHEN_TEST_ROOT/downloads"
+  case "$url" in
+    'https://monitor.example.com/api/setup/agent-installer?platform=linux')
+      [[ -n "$output" ]] || return 98
+      if [[ "$XINGCHEN_TEST_DOWNLOAD_MODE" == installer_partial ]]; then
+        head -n 3 "$XINGCHEN_TEST_ROOT/fixture.sh" > "$output"
+        return 18
+      fi
+      cp "$XINGCHEN_TEST_ROOT/fixture.sh" "$output"
+      case "$XINGCHEN_TEST_DOWNLOAD_MODE" in
+        installer_tls) return 60 ;;
+        installer_handshake) return 35 ;;
+      esac
+      ;;
+    'https://monitor.example.com/api/setup/agent-installer?platform=linux&format=sha256')
+      [[ -z "$output" ]] || return 98
+      case "$XINGCHEN_TEST_DOWNLOAD_MODE" in
+        checksum_partial) cat "$XINGCHEN_TEST_ROOT/checksum"; return 60 ;;
+        checksum_mismatch) printf '%064d' 0 ;;
+        checksum_invalid) printf 'not-a-checksum' ;;
+        *) cat "$XINGCHEN_TEST_ROOT/checksum" ;;
+      esac
+      ;;
+    *) return 98 ;;
+  esac
+}
+export -f curl
+exec bash --noprofile --norc ./bootstrap.sh
+`
+	tests := []struct {
+		name          string
+		exitCode      int
+		downloadCount int
+		executed      bool
+		messages      []string
+	}{
+		{"installer_partial", 18, 1, false, []string{"安装器下载失败", "curl 退出码 18"}},
+		{"installer_tls", 60, 1, false, []string{"安装器下载失败", "curl 退出码 60", "系统时间", "CA", "证书链", "curl/NSS", "KeyUsage"}},
+		{"installer_handshake", 35, 1, false, []string{"安装器下载失败", "curl 退出码 35", "TLS 握手失败", "SEC_ERROR_INADEQUATE_KEY_USAGE"}},
+		{"checksum_partial", 60, 2, false, []string{"安装器摘要下载失败", "curl 退出码 60", "系统时间", "CA", "KeyUsage"}},
+		{"checksum_mismatch", 1, 2, false, []string{"SHA256 校验失败"}},
+		{"checksum_invalid", 1, 2, false, []string{"摘要格式无效"}},
+		{"success", 0, 2, true, nil},
+		{"installer_failure", 42, 2, true, nil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.Mkdir(filepath.Join(root, "tmp"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			for name, content := range map[string]string{"bootstrap.sh": response.Body.String(), "fixture.sh": installer, "checksum": checksum} {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c", driver)
+			command.Dir = root
+			command.Env = append(os.Environ(), "BASH_ENV=", "ENV=", "XINGCHEN_TEST_DOWNLOAD_MODE="+test.name, "XINGCHEN_ENROLLMENT_TOKEN=test-only-enrollment-token")
+			output, err := command.CombinedOutput()
+			exitCode := 0
+			if err != nil {
+				var exitError *exec.ExitError
+				if !errors.As(err, &exitError) || ctx.Err() != nil {
+					t.Fatalf("bootstrap did not complete: %v", err)
+				}
+				exitCode = exitError.ExitCode()
+			}
+			if exitCode != test.exitCode {
+				t.Fatalf("bootstrap exit code = %d, want %d; output: %s", exitCode, test.exitCode, output)
+			}
+			for _, message := range test.messages {
+				if !strings.Contains(string(output), message) {
+					t.Errorf("bootstrap diagnostic missing %q: %s", message, output)
+				}
+			}
+			if strings.Contains(string(output), "test-only-enrollment-token") {
+				t.Error("bootstrap exposed an enrollment credential")
+			}
+			_, markerErr := os.Stat(filepath.Join(root, "executed"))
+			if (markerErr == nil) != test.executed || (markerErr != nil && !os.IsNotExist(markerErr)) {
+				t.Fatalf("installer execution marker = %v, expected execution = %t", markerErr, test.executed)
+			}
+			if test.executed {
+				arguments, err := os.ReadFile(filepath.Join(root, "arguments"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := []string{"--server-url", "https://monitor.example.com", "--device-id", query.Get("deviceId"), "--interval", "30s", "--disk", "/", "--disk", "/srv/data (primary)", "--disk", "/srv/a,b+archive", "--all-processes", "--process-limit", "128"}
+				if string(arguments) != strings.Join(want, "\x00")+"\x00" {
+					t.Fatalf("installer argument boundaries changed: %q", arguments)
+				}
+			}
+			downloads, err := os.ReadFile(filepath.Join(root, "downloads"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if count := strings.Count(string(downloads), "\n"); count != test.downloadCount {
+				t.Errorf("bootstrap performed %d downloads, want %d", count, test.downloadCount)
+			}
+			remaining, err := os.ReadDir(filepath.Join(root, "tmp"))
+			if err != nil || len(remaining) != 0 {
+				t.Fatalf("bootstrap left temporary installer files: %v, %v", remaining, err)
+			}
+		})
 	}
 }
 

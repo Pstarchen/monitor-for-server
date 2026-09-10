@@ -51,6 +51,9 @@ jobs:
       - name: Test Linux installer
         run: sudo bash deploy/install-agent_test.sh
 
+      - name: Test installation and updates with Bash 4.2
+        run: bash deploy/test-legacy-bash.sh
+
       - name: Test GitHub Release mutability guard
         run: bash deploy/check-github-release-mutable_test.sh
 

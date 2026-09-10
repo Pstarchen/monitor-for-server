@@ -76,7 +76,17 @@ export function buildAgentInstallCommand(options: AgentInstallCommandOptions): s
   const url = bootstrapUrl(options)
   if (options.platform === 'linux') {
     const protocol = url.protocol === 'https:' ? '=https' : '=http'
-    return `curl -fsSL --max-redirs 0 --proto ${shellQuote(protocol)} --proto-redir ${shellQuote(protocol)} ${shellQuote(url.toString())} | bash`
+    const script = [
+      'set -eu',
+      'umask 077',
+      'bootstrap="$(mktemp "${TMPDIR:-/tmp}/xingchen-bootstrap.XXXXXX.sh")"',
+      `trap 'rm -f -- "$bootstrap"' EXIT`,
+      `curl -fsSL --max-redirs 0 --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 60 --max-filesize 1048576 --proto ${shellQuote(protocol)} --proto-redir ${shellQuote(protocol)}${protocol === '=https' ? ' --tlsv1.2' : ''} "$1" -o "$bootstrap" || { status=$?; printf '%s\\n' "Agent 引导脚本下载失败（curl 退出码 $status）。请检查网络、系统时间和证书配置。" >&2; exit "$status"; }`,
+      '[ -s "$bootstrap" ] || { printf "%s\\n" "Agent 引导脚本为空，安装已停止。" >&2; exit 1; }',
+      'bash "$bootstrap"',
+    ].join('; ')
+    // A final comment absorbs CRLF pasted by browser terminals without changing the command.
+    return `bash -c ${shellQuote(script)} -- ${shellQuote(url.toString())} #`
   }
   return `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -TimeoutSec 60 -MaximumRedirection 0 -Uri ${powerShellQuote(url.toString())} | Invoke-Expression"`
 }

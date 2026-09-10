@@ -2,7 +2,7 @@
 
 这份指南面向第一次部署服务器监控系统的用户。你不需要提前安装 PostgreSQL、Redis，也不需要手工建表或执行 SQL。按照本文顺序完成后，你将拥有一套可以登录、接入服务器、查看指标、发送告警并自动备份和更新的监控系统。
 
-如果你已经完成安装，只想查某项功能，可以直接跳到[控制台功能怎么用](#控制台功能怎么用)或[日常运维速查](#日常运维速查)。页面内也可以点击右上角问号进入“使用指南”，按功能名称搜索操作步骤。
+如果你已经完成安装，只想查某项功能，可以直接跳到[控制台功能怎么用](#_8-控制台功能怎么用)或[日常运维速查](#_10-日常运维速查)。页面内也可以点击右上角问号进入“使用指南”，按功能名称搜索操作步骤。
 
 ## 1. 先了解三个概念
 
@@ -122,7 +122,7 @@ Windows 总控不会自动采集 Windows 宿主机。完成总控安装后，还
 ### 4.1 Linux：从 Gitee 安装
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.19
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.20/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.20
 ```
 
 该入口从 Gitee 取得固定版本编排文件，并从腾讯云 TCR 拉取六个公开预构建镜像；目标机不访问 GitHub/GHCR，也不编译应用。
@@ -130,7 +130,7 @@ curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for
 ### 4.2 Linux：能够访问 GitHub 时
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.19
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.20/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.20
 ```
 
 安装器会自动完成这些工作：
@@ -280,19 +280,36 @@ docker compose up -d --force-recreate server web
 - “轻量采集”：低配置或连接很多的服务器可启用，它会跳过进程和连接统计。
 - “完整进程”：只有确实需要完整进程清单时启用，并设置合理上限。
 
-参数选好后分别点击“复制令牌”和“复制安装命令”。命令包含正确的设备 ID 和总控地址，但不包含接入令牌或长期 Agent 密钥；执行安装器前会校验总控返回的 SHA256。安装器取得权限后在终端中隐藏读取令牌，准备并校验制品，最后交换令牌并写入受限配置文件。应优先使用该流程，不要手工拼接。
+参数选好后先点击“复制安装命令”，在目标终端执行；等安装器提示时，再点击“复制令牌”并粘贴到隐藏输入处。命令包含正确的设备 ID 和总控地址，但不包含接入令牌或长期 Agent 密钥；执行安装器前会校验总控返回的 SHA256。安装器取得权限后在终端中隐藏读取令牌，准备并校验制品，最后交换令牌并写入受限配置文件。应优先使用该流程，不要手工拼接。
 
 ### 7.3 Linux 安装 Agent
 
 1. SSH 登录刚才创建的目标服务器。
 2. 粘贴控制台生成的整条命令并执行。
 3. 安装器会请求 sudo 权限；按提示输入目标服务器自己的 sudo 密码。
-4. 等待出现 Agent 已启动或状态检查提示。
+4. 出现接入令牌提示后，复制同一设备的令牌并粘贴，按一次回车；输入不回显是正常现象。
+5. 等待出现 Agent 已启动或状态检查提示。
 
-控制台生成的命令形式大致如下，示例设备 ID 不能直接照抄：
+优先完整复制控制台生成的一行命令，保留末尾用于吸收行尾 CR 的 `#`。以下多行示例需替换域名和 `<设备ID>`，使用 LF 换行；引导脚本下载成功且非空后才会执行，退出时清理临时文件。不要将命令和令牌作为多行内容一起粘贴：
 
 ```bash
-curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s' | bash
+(
+  set -eu
+  umask 077
+  bootstrap="$(mktemp "${TMPDIR:-/tmp}/xingchen-bootstrap.XXXXXX.sh")"
+  trap 'rm -f -- "$bootstrap"' EXIT
+  curl -fsSL --max-redirs 0 --retry 2 --retry-delay 2 \
+    --connect-timeout 10 --max-time 60 --max-filesize 1048576 \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=<设备ID>&interval=3s' \
+    -o "$bootstrap" || {
+      status=$?
+      printf 'Agent 引导脚本下载失败（curl 退出码 %s）。\n' "$status" >&2
+      exit "$status"
+    }
+  [ -s "$bootstrap" ] || { echo 'Agent 引导脚本为空，安装已停止。' >&2; exit 1; }
+  bash "$bootstrap"
+) #
 ```
 
 安装器默认用预编译程序注册本机 systemd 服务；只有命令中显式添加 `--docker` 才用容器模式。检查状态和日志：
@@ -591,8 +608,8 @@ sudo xingchen update
 需要固定版本时，先用目标版本 bootstrap 预检，再应用。以下示例假定安装目录为 `/opt/guanlan-monitor`，目标版本已发布且包含更新包：
 
 ```bash
-sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.19 --check
-sudo xingchen update --version v1.20.19
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.20 --check
+sudo xingchen update --version v1.20.20
 ```
 
 bootstrap 从目标 Setup 镜像提取更新包，验证版本、架构、镜像 ID 和包内摘要。`--check` 准备并校验候选，不切换运行服务；正式更新由目标版本更新器备份数据库后执行。

@@ -2,11 +2,11 @@
 
 受监控服务器只安装一个 Agent。每台机器在星辰监控总控的“设备管理”中创建一条设备记录，拿到设备 ID 和只显示一次的接入令牌后，再在目标主机安装。令牌 15 分钟后过期且只能消费一次；安装器用它向总控交换长期 Agent 密钥，管理员不需要复制或保存长期密钥。为已有设备签发接入令牌不会使现有密钥失效，只有安装器成功消费令牌时才会轮换长期密钥。
 
-第一次接入设备可先阅读[新手使用指南的“接入第一台服务器”](user-guide.md#7-接入第一台服务器)。Agent 采用类似哪吒的一条命令接入体验：控制台按设备生成 Controller 同域短命令，管理员无需手工拼接多级下载地址；本页仍保留完整 Agent 参数、内部源、离线安装和高级采集配置。
+第一次接入设备可先阅读[新手使用指南的“接入第一台服务器”](user-guide.md#_7-接入第一台服务器)。Agent 采用类似哪吒的一条命令接入体验：控制台按设备生成 Controller 同域短命令，管理员无需手工拼接多级下载地址；本页仍保留完整 Agent 参数、内部源、离线安装和高级采集配置。
 
 ## 版本来源与更新顺序
 
-总控采用 Gitee 版本发现和腾讯云 TCR 镜像时，先在“系统设置 > 系统更新”升级总控，再升级独立 Agent。默认在线配置下，Setup 使用镜像内置的同版本 Agent manifest 和四平台制品，通过总控同域 `/api/setup/agent-release` 与 `/api/setup/agent-artifact` 提供下载；例如总控升级到 `v1.20.19` 后，即可向原生 Agent 提供该版本。显式配置受信 manifest 时，由该清单、兼容性检查和对应制品决定可用版本。
+总控采用 Gitee 版本发现和腾讯云 TCR 镜像时，先在“系统设置 > 系统更新”升级总控，再升级独立 Agent。默认在线配置下，Setup 使用镜像内置的同版本 Agent manifest 和四平台制品，通过总控同域 `/api/setup/agent-release` 与 `/api/setup/agent-artifact` 提供下载；例如总控升级到 `v1.20.20` 后，即可向原生 Agent 提供该版本。显式配置受信 manifest 时，由该清单、兼容性检查和对应制品决定可用版本。
 
 | Agent 类型 | 更新方式与来源 |
 | --- | --- |
@@ -16,15 +16,37 @@
 
 独立 Agent 的批量操作位于“Agent 发布”：点击“新建发布”，填写目标版本和设备，点击“创建草稿”，检查后依次点击“启动发布”和“确认启动”。默认内置清单提供当前总控对应版本，不代表任意历史版本都可下载；历史回滚需先确认受信来源仍提供该版本制品。
 
+`v1.20.20` 修复了旧 Bash 在 `set -u` 下展开空数组时出现 `unbound variable` 的安装兼容问题。总控 Setup 若仍是 `v1.20.19`，应先通过总控更新入口升级到 `v1.20.20`，确认 Setup 已运行新版本，再刷新设备页面并重新复制安装命令。安装器接口优先提供 Setup 镜像内置脚本；仅修改宿主机的 `deploy/install-agent.sh` 或刷新页面，不能替换旧 Setup 正在提供的内置安装器。
+
 ## Linux
 
 在线安装器默认识别操作系统和 CPU 架构，从总控同源的 release/artifact 接口下载预编译 Agent，校验 manifest 声明的大小和 SHA256 后安装 systemd 服务。只有 `public` 模式显式配置制品基址、GitHub API 或源码仓库时才使用相应公共回退。Docker 仍可用，但必须显式添加 `--docker`；这样不会因为目标机恰好装有 Docker 而采集到错误的虚拟机环境。
 
-控制台只使用总控同域入口，目标服务器无需访问 GitHub、Gitee 或公共 CDN。复制按钮输出的是纯文本 bootstrap 命令，不包含接入令牌、长期密钥、Markdown 链接、历史版本号或多级下载回退；bootstrap 将完整安装器与 SHA256 分别下载到随机临时文件，精确匹配后才执行。完整安装器通过终端隐藏输入读取一次性接入令牌，在目标 Agent 制品准备好后交换凭据，完成交换后清除令牌变量。请使用目标设备对应的控制台命令；以下仅展示入口格式。
+控制台只使用总控同域入口，目标服务器无需访问 GitHub、Gitee 或公共 CDN。复制按钮输出的是纯文本 bootstrap 命令，不包含接入令牌、长期密钥、Markdown 链接、历史版本号或多级下载回退。命令先把引导脚本下载到随机临时文件，下载成功且文件非空后才运行；引导脚本再下载完整安装器和 SHA256，精确匹配后执行安装器，退出时清理临时文件。完整安装器通过终端隐藏输入读取一次性接入令牌，在目标 Agent 制品准备好后交换凭据，完成交换后清除令牌变量。
+
+推荐直接复制目标设备对应的控制台命令。以下多行示例仅展示入口格式，域名和 `<设备ID>` 均需替换；不包含令牌。请在 Linux 终端使用 LF 换行，浏览器终端优先粘贴控制台生成的一行命令。
 
 ```bash
-curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s' | bash
+(
+  set -eu
+  umask 077
+  bootstrap="$(mktemp "${TMPDIR:-/tmp}/xingchen-bootstrap.XXXXXX.sh")"
+  trap 'rm -f -- "$bootstrap"' EXIT
+  curl -fsSL --max-redirs 0 --retry 2 --retry-delay 2 \
+    --connect-timeout 10 --max-time 60 --max-filesize 1048576 \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=<设备ID>&interval=3s' \
+    -o "$bootstrap" || {
+      status=$?
+      printf 'Agent 引导脚本下载失败（curl 退出码 %s）。\n' "$status" >&2
+      exit "$status"
+    }
+  [ -s "$bootstrap" ] || { echo 'Agent 引导脚本为空，安装已停止。' >&2; exit 1; }
+  bash "$bootstrap"
+) #
 ```
+
+先执行安装命令，等出现令牌提示后，再用控制台“复制令牌”粘贴并按一次回车；隐藏输入不显示字符是正常现象。不要把命令与令牌拼成多行一起粘贴。新版控制台命令末尾的 `#` 用于吸收网页终端粘贴时可能附带的行尾 CR，应完整保留；它不能修复任意位置的 CR。出现问题时分别参阅 [TLS/NSS 排查](./faq.md#agent-tls)、[旧 Bash 兼容](./faq.md#agent-bash)、[空令牌](./faq.md#agent-token)与 [CR 粘贴](./faq.md#agent-crlf)。
 
 不要将安装器 URL 改成代码托管平台的 `main` 分支。需要外部回退时，在总控侧配置受信上游或内部镜像，由总控完成版本固定、缓存和制品校验。
 
@@ -35,14 +57,14 @@ export XINGCHEN_NETWORK_MODE=internal
 export XINGCHEN_ALLOW_GITEE=false
 export XINGCHEN_AGENT_ALLOW_GITHUB_API=false
 export XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
-bash ./deploy/install-agent.sh --network-mode internal --server-url https://monitor.internal.example --device-id '<设备ID>' --version v1.20.19
+bash ./deploy/install-agent.sh --network-mode internal --server-url https://monitor.internal.example --device-id '<设备ID>' --version v1.20.20
 ```
 
 完全断网的新节点不能交换一次性接入令牌。管理员应通过秘密管理器或受控执行器把旧兼容变量 `XINGCHEN_AGENT_KEY` 直接注入安装器进程环境，并使用离线包中的本平台二进制；不要在命令行或脚本中给长期密钥赋值：
 
 ```bash
 export XINGCHEN_NETWORK_MODE=offline
-bash ./deploy/install-agent.sh --offline --server-url https://monitor.internal.example --device-id '<设备ID>' --binary /srv/xingchen/xingchen-agent --version v1.20.19 --no-auto-update
+bash ./deploy/install-agent.sh --offline --server-url https://monitor.internal.example --device-id '<设备ID>' --binary /srv/xingchen/xingchen-agent --version v1.20.20 --no-auto-update
 ```
 
 离线模式不会执行 DNS、远程下载、镜像拉取、源码构建或自动更新。示例中的内部域、路径和凭据占位符必须替换；不要把真实密钥写入 shell 历史、脚本或工单。
@@ -93,7 +115,7 @@ systemctl status xingchen-agent-update.timer
 /opt/xingchen/agent/agent.sh rollback v1.20.4
 ```
 
-指定版本更新可运行 `/opt/xingchen/agent/agent.sh update v1.20.19`。上面的 `rollback v1.20.4` 仅展示语法，需替换为受信来源仍可下载的目标稳定版本；`list-versions` 默认显示总控或已配置来源当前提供的版本，并非完整 Release 历史。手动回滚会重新取得并校验目标制品，不等于直接恢复本地备份；新服务启动失败时的自动恢复是另一条流程。不要把分支名、提交 SHA 或任意 URL 当作版本号。
+指定版本更新可运行 `/opt/xingchen/agent/agent.sh update v1.20.20`。上面的 `rollback v1.20.4` 仅展示语法，需替换为受信来源仍可下载的目标稳定版本；`list-versions` 默认显示总控或已配置来源当前提供的版本，并非完整 Release 历史。手动回滚会重新取得并校验目标制品，不等于直接恢复本地备份；新服务启动失败时的自动恢复是另一条流程。不要把分支名、提交 SHA 或任意 URL 当作版本号。
 
 支持的周期为 `1s`、`3s`、`10s`、`30s`、`60s`。低配置主机可添加 `--skip-processes --skip-connections`；需要完整进程清单时添加 `--all-processes --process-limit 128`（最多 256 个），也可用 `--skip-ports`、`--skip-containers` 或对应的 `--port-limit`、`--container-limit` 控制明细量。本机回退模式安装后检查：
 
@@ -134,7 +156,7 @@ Windows Agent 默认注册每日自动更新任务；需要关闭时在安装命
 
 ```powershell
 & "$env:ProgramData\XingchenMonitor\update-agent.ps1" update
-& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update v1.20.19
+& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update v1.20.20
 ```
 
 也可对已校验的 `deploy/install-agent.ps1` 使用 `-Action update`、`-Action rollback -Version v1.20.4`、`-Action list-versions`、`-Action status` 或 `-Action uninstall`；卸载加 `-Purge` 会同时删除配置和缓存。回滚同样要求受信来源仍提供目标版本，更新器的直接回滚语法为 `update-agent.ps1 rollback v1.20.4`。

@@ -533,7 +533,7 @@ run_compose() {
   local enabled profile_args=()
   enabled="$(read_installation_setting CONTROLLER_AGENT_ENABLED || true)"
   [[ "${enabled,,}" == false ]] || profile_args=(--profile host-monitoring)
-  (cd "${install_dir}" && docker compose "${profile_args[@]}" "$@")
+  (cd "${install_dir}" && docker compose ${profile_args[@]+"${profile_args[@]}"} "$@")
 }
 
 case "${command_name}" in

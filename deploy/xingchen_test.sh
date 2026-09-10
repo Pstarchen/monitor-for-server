@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 manager="${script_dir}/xingchen.sh"
+test_bash="$(realpath "$(command -v "${XINGCHEN_TEST_BASH:-bash}")")"
 test_root="$(mktemp -d)"
 trap 'rm -rf "${test_root}"' EXIT
 
@@ -15,6 +16,7 @@ fail() {
 
 fake_bin="${test_root}/fake-bin"
 mkdir -p "${fake_bin}"
+ln -s "${test_bash}" "${fake_bin}/bash"
 
 cat > "${fake_bin}/git" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -211,7 +213,7 @@ run_manager() {
     XINGCHEN_MANAGER_ALLOW_NON_ROOT=true \
     XINGCHEN_MANAGER_LINK="${root}/manager-bin/xingchen" \
     CN="${cn}" \
-    bash "${TEST_MANAGER_ENTRY:-${manager}}" "$@"
+    "${test_bash}" "${TEST_MANAGER_ENTRY:-${manager}}" "$@"
 }
 
 assert_failed_without_external_calls() {
@@ -622,5 +624,7 @@ run_manager "${compose_root}" false restart --install-dir "${compose_root}/contr
 if grep -F -- '--profile host-monitoring' "${compose_root}/commands.log" >/dev/null; then
   fail 'restart enabled host monitoring that was disabled in the deployment.'
 fi
+grep -Fx 'docker compose up -d --force-recreate --wait --wait-timeout 300 --remove-orphans' "${compose_root}/commands.log" >/dev/null \
+  || fail 'Disabled host monitoring left an empty Compose argument.'
 
 echo 'xingchen.sh behavior tests passed.'

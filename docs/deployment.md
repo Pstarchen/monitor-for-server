@@ -18,13 +18,13 @@ Linux 生产环境推荐使用 `deploy/xingchen.sh`。它保留一条命令准�
 能够访问 GitHub 和 GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.19
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.20/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.20
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.19/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.19
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.20/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.20
 ```
 
 `CN=true` 固定使用 Gitee 的对应版本编排文件，并直接从 `ccr.ccs.tencentyun.com/xc_monitor` 拉取 setup、server、web、agent、PostgreSQL 和 Redis 六个多架构镜像，不访问 GitHub、GitHub API、GHCR 或 Docker Hub，也不在目标机编译应用。该模式仍然联网：依赖补齐需要 Linux 发行版包源，运行镜像需要腾讯云 TCR。所有这些外部源都不可达时必须改用内部源或离线 bundle。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。
@@ -116,7 +116,7 @@ sudo xingchen update
 
 ### 在线更新
 
-从 `v1.20.19` 起，控制台与 `xingchen update` 通过同一在线引导器更新。已完成该版本安装或迁移的在线部署，优先在“系统设置 → 系统更新”中检查并更新，或运行 `sudo xingchen update`；需要固定目标时使用 `sudo xingchen update --version v1.20.19`。升级后确认 setup、server、web 及已启用的 controller-agent 版本一致、服务健康。
+从 `v1.20.19` 起，控制台与 `xingchen update` 通过同一在线引导器更新。已完成该版本安装或迁移的在线部署，优先在“系统设置 → 系统更新”中检查并更新，或运行 `sudo xingchen update`；需要固定目标时使用 `sudo xingchen update --version v1.20.20`。升级后确认 setup、server、web 及已启用的 controller-agent 版本一致、服务健康。
 
 引导器拉取已配置仓库中目标版本的 Setup 镜像，检查 OCI 版本、实际架构和本地镜像 ID；从该固定 ID 提取更新包，校验六个受管文件的 SHA256 后，运行包内的新版更新器。更新包包含目标 Compose、Linux/Windows 更新器、在线引导器和管理命令。整个过程持有同一文件锁，不依赖服务器上的源码仓库，也不会因镜像拉取失败转为源码构建。
 
@@ -131,9 +131,9 @@ sudo xingchen update --install-dir /opt/guanlan-monitor --source gitee --version
 
 #### 旧版一次性迁移
 
-`v1.20.18` 及更早版本的 Setup 不含新引导器和更新包，旧控制台即使显示“检查更新”，也不能据此认定它支持新链路。已有 `.env`、Compose 和数据库的实例应执行存量迁移，不要重新运行 `install`。没有 `.git` 的 `v1.20.16` 离线部署也可通过下面的入口迁移到 `v1.20.19`，无须先克隆仓库或手工修改数据库密码、Agent 密钥等配置。
+`v1.20.18` 及更早版本的 Setup 不含新引导器和更新包，旧控制台即使显示“检查更新”，也不能据此认定它支持新链路。已有 `.env`、Compose 和数据库的实例应执行存量迁移，不要重新运行 `install`。没有 `.git` 的 `v1.20.16` 离线部署也可通过下面的入口迁移到 `v1.20.20`，无须先克隆仓库或手工修改数据库密码、Agent 密钥等配置。
 
-先确认备份可恢复、磁盘预算充足、没有其他更新任务，并准备 Bash、curl、sha256sum、timeout、flock、realpath 和可用的 Docker Compose v2。以下命令适用于 Linux；只需把 `project_root` 改为**已有部署的绝对目录**。两个摘要来自已发布 `v1.20.19` 标签，不能随意替换版本或把下载地址改为 `main`：
+先确认备份可恢复、磁盘预算充足、没有其他更新任务，并准备 Bash、curl、sha256sum、timeout、flock、realpath 和可用的 Docker Compose v2。以下命令适用于 Linux；只需把 `project_root` 改为**已有部署的绝对目录**。两个摘要对应 `v1.20.20` 发布入口的 LF 文件字节；应在该稳定版本及配套制品发布完成后执行，不能随意替换版本或把下载地址改为 `main`：
 
 ```bash
 sudo bash <<'MIGRATE'
@@ -147,7 +147,7 @@ test ! -L "${project_root}"
 test ! -L "${project_root}/deploy"
 stage="$(mktemp -d)"
 trap 'rm -rf -- "${stage}"' EXIT
-base_url='https://gitee.com/starchen520/monitor-for-server/raw/v1.20.19/deploy'
+base_url='https://gitee.com/starchen520/monitor-for-server/raw/v1.20.20/deploy'
 for script in xingchen.sh bootstrap-controller-update.sh; do
   curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 --max-time 120 \
     "${base_url}/${script}" -o "${stage}/${script}"
@@ -155,8 +155,8 @@ done
 (
   cd "${stage}"
   sha256sum --check <<'SHA256'
-e9162ce36ed27ff386f19049d3583ab8f8cb94d07adab2128fea15d7267f51c8  xingchen.sh
-b9ab49eb71fb53f1e4581f53d334e5d7e9fd3fb5467cba7a4cd532ec4fb47f7d  bootstrap-controller-update.sh
+3f2712723e09d96ea00ac725dd7aea138d3f30f95802a2c350a4e8e4f0d79da6  xingchen.sh
+44826803085d69c62fe2379f08cc916484d134ab8b8b4218060b4beff4166d30  bootstrap-controller-update.sh
 SHA256
 )
 bootstrap="${project_root}/deploy/bootstrap-controller-update.sh"
@@ -167,7 +167,7 @@ else
   install -m 0755 "${stage}/bootstrap-controller-update.sh" "${bootstrap}"
 fi
 bash "${stage}/xingchen.sh" update --install-dir "${project_root}" \
-  --source gitee --version v1.20.19 --yes
+  --source gitee --version v1.20.20 --yes
 MIGRATE
 ```
 
@@ -235,15 +235,15 @@ sudo bash ./deploy/update-controller.sh --auto
 若镜像和 Agent 工作流已经成功，而离线打包或上传失败，可在修复发布工具后续跑现有草稿：
 
 ```bash
-gh workflow run controller-images.yml --ref main -f release_version=v1.20.19
+gh workflow run controller-images.yml --ref main -f release_version=v1.20.20
 ```
 
 `release_version` 必须是已存在的稳定版本草稿；已公开或不存在的 Release 会被拒绝。续跑使用指定版本标签的源码、安装器和已成功的 Agent 工作流，复用腾讯云已有基础镜像，不重新构建或同步镜像；发布工具来自本次选定的 workflow ref。续跑与同版本标签发布共用并发锁，仍需通过镜像、Agent 制品和离线包校验才会公开。留空该参数维持原有镜像构建流程。
 
-发布机可用以下只读命令核验已经公开的版本；无需启动本机 Docker 引擎：
+发布完成后，可用以下只读命令核验 `v1.20.20`；无需启动本机 Docker 引擎：
 
 ```bash
-docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-setup:v1.20.19
+docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-server-setup:v1.20.20
 ```
 
 仓库中的未发布改动不会自动进入上述版本或生产服务器。新版本应完成 CI、腾讯云制品和离线包校验后，再将相同稳定标签同步到 Gitee，以免国内安装先发现尚未就绪的版本。
@@ -257,7 +257,7 @@ docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-s
 ```json
 {
   "schemaVersion": 1,
-  "version": "v1.20.19",
+  "version": "v1.20.20",
   "images": {
     "setup": { "source": "ghcr.io/example/xingchen-setup", "digest": "sha256:<64 lowercase hex>" },
     "server": { "source": "ghcr.io/example/xingchen-server", "digest": "sha256:<64 lowercase hex>" },
@@ -273,12 +273,12 @@ docker buildx imagetools inspect ccr.ccs.tencentyun.com/xc_monitor/monitor-for-s
 
 ```powershell
 .\deploy\promote-internal-release.ps1 `
-  -Version v1.20.19 `
+  -Version v1.20.20 `
   -TargetRegistry registry.internal.example/xingchen `
   -ArtifactDir D:\release\agent `
   -ArtifactBaseUrl https://release.internal.example/xingchen `
   -ImageLockFile D:\release\source-images.lock.json `
-  -OutputDir D:\publish\xingchen\v1.20.19 `
+  -OutputDir D:\publish\xingchen\v1.20.20 `
   -WriteEnvExample
 ```
 
@@ -296,7 +296,7 @@ XINGCHEN_WEB_IMAGE=registry.internal.example/xingchen/web@sha256:<digest>
 XINGCHEN_AGENT_IMAGE=registry.internal.example/xingchen/agent@sha256:<digest>
 XINGCHEN_POSTGRES_IMAGE=registry.internal.example/xingchen/postgres@sha256:<digest>
 XINGCHEN_REDIS_IMAGE=registry.internal.example/xingchen/redis@sha256:<digest>
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.19/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.20/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<manifest.json 的 SHA256>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 XINGCHEN_SOURCE_REPOSITORIES=
@@ -315,8 +315,8 @@ bash ./deploy/install-controller.sh --network-mode internal --no-source-fallback
 将下列路径替换为实际已有部署目录，再检查和应用指定版本：
 
 ```bash
-sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.19 --check
-sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.19 --apply
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.20 --check
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.20 --apply
 ```
 
 完全断网时，在联网发布机下载并校验 `xingchen-monitor-offline-vX.Y.Z-amd64.tar.gz` 或 `-arm64.tar.gz` 及同名 `.sha256`，通过受控介质传入目标机后执行：
@@ -330,7 +330,7 @@ sudo ./install-offline.sh
 
 包内安装器会再次校验全部文件、导入六个镜像、固定目标版本，并以 `--offline --no-source-fallback` 启动；缺少任何镜像或 Agent 制品都会在启动前失败。
 
-已有 `v1.20.15` 部署升级到 `v1.20.16` 时不要运行 `install-offline.*`。先验证外层 `.sha256` 并解压，再从包内执行存量升级入口，其中 `--project-root` / `-ProjectRoot` 必须是已有部署的绝对目录：
+已有 `v1.20.15` 部署升级到 `v1.20.20` 时不要运行 `install-offline.*`。先验证外层 `.sha256` 并解压，再从包内执行存量升级入口，其中 `--project-root` / `-ProjectRoot` 必须是已有部署的绝对目录：
 
 ```bash
 sudo ./upgrade-offline.sh --project-root /opt/guanlan-monitor --check
@@ -401,8 +401,26 @@ Agent 接入采用控制台生成一条短命令的体验，但下载入口始�
 
 控制台只通过总控同域入口下发安装器及其 SHA256；安装器随 Setup 镜像固化并优先于宿主机工作目录中的副本，更新镜像后不会继续下发旧脚本。目标服务器无需直接访问代码托管平台，也不会执行 Gitee 或 GitHub `main` 分支上的未固定脚本。
 
+优先完整复制设备页面生成的一行命令，在令牌提示出现后再粘贴接入令牌。以下多行示例需替换域名和 `<设备ID>`，使用 LF 换行；它将引导脚本下载到随机临时文件，下载成功且文件非空后才执行，并在退出时清理。网页终端的 CR、空令牌或旧 Bash 报错处理见 [Agent 安装排障](./faq.md#agent-bash)。
+
 ```bash
-curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https' 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=123e4567-e89b-42d3-a456-426614174000&interval=3s&disk=%2F&disk=%2Fdata' | bash
+(
+  set -eu
+  umask 077
+  bootstrap="$(mktemp "${TMPDIR:-/tmp}/xingchen-bootstrap.XXXXXX.sh")"
+  trap 'rm -f -- "$bootstrap"' EXIT
+  curl -fsSL --max-redirs 0 --retry 2 --retry-delay 2 \
+    --connect-timeout 10 --max-time 60 --max-filesize 1048576 \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=<设备ID>&interval=3s&disk=%2F&disk=%2Fdata' \
+    -o "$bootstrap" || {
+      status=$?
+      printf 'Agent 引导脚本下载失败（curl 退出码 %s）。\n' "$status" >&2
+      exit "$status"
+    }
+  [ -s "$bootstrap" ] || { echo 'Agent 引导脚本为空，安装已停止。' >&2; exit 1; }
+  bash "$bootstrap"
+) #
 ```
 
 不要手工替换安装器 URL。若总控需要从外部同步版本或源码，应在总控侧配置受信内部制品源或 `XINGCHEN_SOURCE_REPOSITORIES`；GitHub 仍只能作为管理员显式启用的末级回退。已有的 `--image`、`--binary`、`--source-url`、内部 release 基址与离线安装方式继续作为高级入口，不受控制台短命令影响。

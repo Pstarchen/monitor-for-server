@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Select a real legacy interpreter, for example XINGCHEN_TEST_BASH=/opt/bash-4.2/bin/bash.
+if [[ -n "${XINGCHEN_TEST_BASH:-}" ]]; then
+  test_bash="${XINGCHEN_TEST_BASH}"
+  unset XINGCHEN_TEST_BASH
+  exec "${test_bash}" "${BASH_SOURCE[0]}" "$@"
+fi
+test_bash="${BASH}"
+
 report_test_failure() {
   local status="$1" line="$2"
   if [[ "$-" == *e* ]]; then
@@ -84,6 +92,68 @@ grep -F 'internal 网络模式下预编译 Agent Release 不可用，拒绝源�
     echo 'Internal Docker install accepted the default public Agent image.' >&2
     exit 1
   fi
+  agent_image=registry.internal.example/xingchen/agent:v1.20.19
+  validate_network_configuration
+)
+(
+  source <(awk '/^get_release_version\(\)/ { capture = 1 } /^release_asset_name\(\)/ { exit } capture { print }' "${installer}")
+  network_mode=public; release_version=''; release_manifest_urls=''
+  allow_github_api=true; release_repo=example/monitor
+  curl() { printf '{"tag_name":"v1.20.19"}\n'; }
+  normalize_release_version() { printf '%s' "$1"; }
+  [[ "$(get_release_version)" == v1.20.19 ]]
+)
+(
+  # No configured repositories must mean zero loop iterations, not one empty URL.
+  repository_checks="$(awk '/^for repository_url in / { capture = 1 } capture && /^if \[\[ ! "\$\{container_name\}"/ { exit } capture { print }' "${installer}")"
+  [[ -n "${repository_checks}" ]]
+  repository_urls=()
+  source <(printf '%s\n' "${repository_checks}")
+  repository_urls=('https://git.internal.example/monitor.git')
+  source <(printf '%s\n' "${repository_checks}")
+  if (repository_urls=(''); source <(printf '%s\n' "${repository_checks}")) >/dev/null 2>&1; then
+    echo 'An explicitly empty repository URL was accepted.' >&2
+    exit 1
+  fi
+)
+(
+  services=(); processes=(); disks=(); log_paths=(); integrity_paths=()
+  process_limit=256; port_limit=512; container_limit=100
+  monitoring_lists="$(awk '/^json_escape\(\)/ { capture = 1 } /^config_tmp=/ { exit } capture { print }' "${installer}")"
+  source <(printf '%s\n' "${monitoring_lists}")
+  [[ -z "${service_json}${process_json}${disk_json}${log_json}${integrity_json}" ]]
+  services=('web api' 'worker*'); processes=('java app'); disks=('/data files')
+  log_paths=('/var/log/app files.log'); integrity_paths=('/etc/app config')
+  source <(printf '%s\n' "${monitoring_lists}")
+  [[ "${service_json}" == '"web api","worker*"' && "${process_json}" == '"java app"' ]]
+  [[ "${disk_json}" == '"/data files"' && "${log_json}" == '"/var/log/app files.log"' && "${integrity_json}" == '"/etc/app config"' ]]
+)
+(
+  credential_checks="$(awk '/^if \[\[ -z "\$\{server_url\}" \|\| -z "\$\{device_id\}"/ { capture = 1 } capture && /^if \[\[ ! "\$\{interval\}"/ { exit } capture { print }' "${installer}")"
+  [[ -n "${credential_checks}" ]]
+  check_credentials() (
+    server_url="$1"; device_id="$2"; enrollment_token="$3"; agent_key=''
+    # Simulate a missing controlling TTY without reading from the test runner.
+    exec() { return 1; }
+    source <(printf '%s\n' "${credential_checks}")
+    [[ "${enrollment_token}" == test-enrollment-token ]]
+  )
+  check_credentials https://monitor.example.com test-device $'test-enrollment-token\r'
+  for empty_token in '' $'\r'; do
+    if output="$(check_credentials https://monitor.example.com test-device "${empty_token}" </dev/null 2>&1)"; then
+      echo 'An empty enrollment token was accepted.' >&2
+      exit 1
+    else
+      [[ "$?" -eq 2 ]]
+    fi
+    [[ "${output}" == *'未读取到一次性 Agent 接入令牌'* && "${output}" == *'XINGCHEN_ENROLLMENT_TOKEN'* ]]
+    [[ "${output}" != *'Usage:'* && "${output}" != *'缺少总控地址或设备 ID'* ]]
+  done
+  if output="$(check_credentials '' test-device test-enrollment-token 2>&1)"; then
+    echo 'An empty controller URL was accepted.' >&2
+    exit 1
+  fi
+  [[ "${output}" == *'缺少总控地址或设备 ID'* && "${output}" != *test-enrollment-token* ]]
 )
 if [[ "$(grep -Fc 'same_major()' "${installer}")" -ne 2 ]]; then
   echo 'Generated Bash updaters do not enforce the same-major automatic update policy.' >&2
@@ -106,8 +176,21 @@ grep -F 'timeout "${seconds}s"' "${installer}" >/dev/null
 for documentation in monitored-agent.md deployment.md user-guide.md; do
   documentation_path="${script_dir}/../docs/${documentation}"
   grep -F 'https://monitor.example.com/api/setup/agent-bootstrap?platform=linux&deviceId=' "${documentation_path}" >/dev/null
-  grep -F -- "curl -fsSL --max-redirs 0 --proto '=https' --proto-redir '=https'" "${documentation_path}" >/dev/null
-  grep -F '| bash' "${documentation_path}" >/dev/null
+  documentation_bootstrap="$(awk '
+    { sub(/\r$/, "") }
+    /^```bash$/ { inside = 1; block = ""; bootstrap = 0; next }
+    /^```$/ { if (inside && bootstrap) { printf "%s", block; found = 1; exit } inside = 0 }
+    inside { block = block $0 "\n"; if (index($0, "/api/setup/agent-bootstrap?platform=linux")) bootstrap = 1 }
+    END { if (!found) exit 1 }
+  ' "${documentation_path}")"
+  # Check the download/execute boundary without coupling to curl option ordering.
+  for safety_pattern in 'mktemp.*XXXXXX' 'trap .*rm -f.*EXIT' '--max-redirs[[:space:]]+0' "--proto[[:space:]]+'=https'" "--proto-redir[[:space:]]+'=https'" '--tlsv1\.2' '(-o|--output)[[:space:]]+' '\|\|[[:space:]]*\{' 'exit[[:space:]]+' '\[[[:space:]]+-s[[:space:]]+' 'bash[[:space:]]+"\$'; do
+    printf '%s\n' "${documentation_bootstrap}" | grep -Eq -- "${safety_pattern}"
+  done
+  if printf '%s\n' "${documentation_bootstrap}" | grep -Eq '\|[[:space:]]*(sudo[[:space:]]+)?bash|XINGCHEN_ENROLLMENT_TOKEN='; then
+    echo "${documentation} executes a download stream or embeds an enrollment token." >&2
+    exit 1
+  fi
   if grep -F '/api/setup/agent-installer?platform=linux' "${documentation_path}" >/dev/null; then
     echo "${documentation} still documents the superseded long Agent installer command." >&2
     exit 1
@@ -161,6 +244,7 @@ fake_bin="${temp_dir}/bin"
 log_file="${temp_dir}/commands.log"
 config_file="${temp_dir}/agent.json"
 mkdir -p "${fake_bin}"
+ln -s "${test_bash}" "${fake_bin}/bash"
 
 rendered_dir="${temp_dir}/rendered"
 mkdir -p "${rendered_dir}/systemd"
@@ -198,12 +282,12 @@ mkdir -p "${rendered_dir}/systemd"
   network_mode=internal
   allow_gitee=false
   release_max_redirects=0
-  repository_urls=('https://git.example.com/monitor.git')
+  repository_urls=()
   docker_socket=''
   docker_socket_target=/run/xingchen-agent-docker.sock
   auto_update=false
   install_agent_updater >/dev/null
-  bash -n "${manager_updater_path}"
+  "${test_bash}" -n "${manager_updater_path}"
   grep -F 'version_for_update()' "${manager_updater_path}" >/dev/null
   grep -F 'Agent 自动更新不会跨主版本' "${manager_updater_path}" >/dev/null
   grep -F 'verify_image_version "${image}" "${target_version}"' "${manager_updater_path}" >/dev/null
@@ -222,7 +306,7 @@ mkdir -p "${rendered_dir}/systemd"
   systemctl() { return 0; }
   mkdir -p "${agent_update_request_dir}"
   install_agent_update_bridge
-  bash -n "${agent_update_request_handler_path}"
+  "${test_bash}" -n "${agent_update_request_handler_path}"
   grep -F 'sleep 10' "${agent_update_request_handler_path}" >/dev/null
   grep -F '"${updater_path}" "${action}" "${version}"' "${agent_update_request_handler_path}" >/dev/null
   grep -F "PathExists=${agent_update_request_path}" "${systemd_dir}/${agent_update_request_path_name}" >/dev/null
@@ -234,11 +318,36 @@ mkdir -p "${rendered_dir}/systemd"
   agent_backup_dir="${rendered_dir}/backups"
   release_base_urls='https://releases.example.com'
   install_local_agent_updater
-  bash -n "${manager_updater_path}"
+  "${test_bash}" -n "${manager_updater_path}"
   grep -F 'Agent 自动更新不会跨主版本' "${manager_updater_path}" >/dev/null
   grep -F 'write_update_status APPLYING' "${manager_updater_path}" >/dev/null
   grep -F "release_max_redirects='0'" "${manager_updater_path}" >/dev/null
   grep -F -- '--max-redirs "${release_max_redirects}"' "${manager_updater_path}" >/dev/null
+  for generated_updater in "${rendered_dir}/docker-update-agent.sh" "${rendered_dir}/native-update-agent.sh"; do
+    (
+      source <(awk '/^version_for_update\(\)/ { print }' "${generated_updater}")
+      requested_version=''; release_manifest_urls=''; network_mode=public
+      controller_version() { return 1; }
+      controller_metadata() { return 1; }
+      # Reaching the explicit API fallback proves an empty manifest list is safe.
+      allow_github_api=true
+      curl() { printf '{"version":"v1.20.19","tag_name":"v1.20.19"}\n'; }
+      normalize_version() { printf '%s' "$1"; }
+      [[ "$(version_for_update)" == v1.20.19 ]]
+    )
+  done
+  (
+    source <(awk '/^download\(\)/ { print }' "${manager_updater_path}")
+    network_mode=public; release_base_urls=''
+    write_update_status() { :; }
+    download_controller() { return 1; }
+    if download v1.20.19; then
+      echo 'An unavailable release was reported as downloaded.' >&2
+      exit 1
+    fi
+    # A nounset failure terminates this subshell before this assertion.
+    [[ "${network_mode}" == public ]]
+  )
   source <(awk '/^normalize_release_version\(\)/ { capture = 1 } /^get_release_version\(\)/ { exit } capture { print }' "${installer}")
   run_with_timeout() { shift; "$@"; }
   version_fixture="${rendered_dir}/version-fixture"
@@ -303,7 +412,7 @@ elif [[ "${1:-}" == "container" && "${2:-}" == "inspect" ]]; then
   [[ "${TEST_CONTAINER_EXISTS:-0}" == "1" ]]
 elif [[ "${1:-}" == "image" && "${2:-}" == "inspect" && "${3:-}" == "--format" ]]; then
   if [[ "${4:-}" == *'org.opencontainers.image.version'* ]]; then
-    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.19}"
+    printf '%s\n' "${TEST_AGENT_IMAGE_VERSION:-v1.20.20}"
   else
     printf 'new-agent-image\n'
   fi
@@ -443,10 +552,10 @@ run_installer() {
     "${credential_environment[@]}"
   )
   if [[ "${EUID}" -eq 0 ]]; then
-    env "${environment[@]}" bash "${installer}" \
+    env "${environment[@]}" "${test_bash}" "${installer}" \
       --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@"
   else
-    sudo env "${environment[@]}" bash "${installer}" \
+    sudo env "${environment[@]}" "${test_bash}" "${installer}" \
       --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@"
   fi
 }
@@ -470,10 +579,10 @@ run_installer_stdin() {
     "XINGCHEN_AGENT_KEY=test-agent-key"
   )
   if [[ "${EUID}" -eq 0 ]]; then
-    env "${environment[@]}" bash -s -- \
+    env "${environment[@]}" "${test_bash}" -s -- \
     --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@" < "${installer}"
   else
-    sudo env "${environment[@]}" bash -s -- \
+    sudo env "${environment[@]}" "${test_bash}" -s -- \
     --server-url "${server_url}" --device-id test-device --no-auto-update --docker "$@" < "${installer}"
   fi
 }
@@ -481,8 +590,8 @@ run_installer_stdin() {
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19' "${log_file}" >/dev/null
-grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
+grep -F 'timeout 45s docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
 grep -F 'docker run -d --name xingchen-agent --restart unless-stopped --pid host --network host' "${log_file}" >/dev/null
 grep -F -- '--mount type=bind,src=/,dst=/host,readonly' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
@@ -494,7 +603,7 @@ grep -F -- "--mount type=bind,src=${temp_dir}/manager/requests,dst=${temp_dir}/m
 grep -F '"allow_command_execution": false' "${config_file}" >/dev/null
 grep -F '"allow_file_operations": false' "${config_file}" >/dev/null
 run_as_root test -x "${temp_dir}/manager/update-agent.sh"
-run_as_root bash -n "${temp_dir}/manager/update-agent.sh"
+run_as_root "${test_bash}" -n "${temp_dir}/manager/update-agent.sh"
 run_as_root grep -F 'command -v flock >/dev/null 2>&1 ||' "${temp_dir}/manager/update-agent.sh" >/dev/null
 run_as_root grep -F "mirror_timeout='45'" "${temp_dir}/manager/update-agent.sh" >/dev/null
 run_as_root grep -F "pull_timeout='120'" "${temp_dir}/manager/update-agent.sh" >/dev/null
@@ -505,7 +614,7 @@ if run_as_root grep -F 'before="$(docker image inspect' "${temp_dir}/manager/upd
 fi
 run_as_root grep -F 'CONTAINER_NAME=xingchen-agent' "${temp_dir}/manager/install.env" >/dev/null
 run_as_root test -x "${temp_dir}/manager/handle-update-request.sh"
-run_as_root bash -n "${temp_dir}/manager/handle-update-request.sh"
+run_as_root "${test_bash}" -n "${temp_dir}/manager/handle-update-request.sh"
 run_as_root grep -F "PathExists=${temp_dir}/manager/requests/update-request" "${temp_dir}/systemd/xingchen-agent-update-request.path" >/dev/null
 
 run_as_root cp "${temp_dir}/manager/update-agent.sh" "${temp_dir}/update-agent.saved"
@@ -513,13 +622,13 @@ run_as_root sh -c 'printf '\''#!/usr/bin/env bash\nprintf "bridge %%s\\n" "$*" >
 run_as_root chmod 0755 "${temp_dir}/manager/update-agent.sh"
 run_as_root sh -c 'printf '\''action=update\nversion=v1.20.14\nrollout_id=7\nmember_id=11\n'\'' > "$1"' sh "${temp_dir}/manager/requests/update-request"
 run_as_root chmod 0600 "${temp_dir}/manager/requests/update-request"
-run_as_root env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" bash "${temp_dir}/manager/handle-update-request.sh"
+run_as_root env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "${test_bash}" "${temp_dir}/manager/handle-update-request.sh"
 grep -F 'bridge update v1.20.14' "${log_file}" >/dev/null
 
 : > "${log_file}"
 run_as_root sh -c 'printf '\''action=update\nversion=v1.20.14;id\nrollout_id=7\nmember_id=11\n'\'' > "$1"' sh "${temp_dir}/manager/requests/update-request"
 run_as_root chmod 0600 "${temp_dir}/manager/requests/update-request"
-if run_as_root env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" bash "${temp_dir}/manager/handle-update-request.sh"; then
+if run_as_root env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "${test_bash}" "${temp_dir}/manager/handle-update-request.sh"; then
   echo 'Agent update request handler accepted an injected version.' >&2
   exit 1
 fi
@@ -555,9 +664,9 @@ manager_environment=(
   "XINGCHEN_LEGACY_AGENT_UPDATER_PATH=${temp_dir}/legacy-update-agent"
 )
 if [[ "${EUID}" -eq 0 ]]; then
-  env "${manager_environment[@]}" bash "${installer}" update
+  env "${manager_environment[@]}" "${test_bash}" "${installer}" update
 else
-  sudo env "${manager_environment[@]}" bash "${installer}" update
+  sudo env "${manager_environment[@]}" "${test_bash}" "${installer}" update
 fi
 grep -F 'docker image inspect --format {{.Id}} ghcr.io/pstarchen/monitor-for-server-agent:v1.20.14' "${log_file}" >/dev/null
 grep -F 'docker inspect --format {{.Image}} xingchen-agent' "${log_file}" >/dev/null
@@ -571,8 +680,8 @@ TEST_FAIL_GITEE_BUILD=1
 TEST_REPOSITORY_URLS='https://gitee.com/starchen520/monitor-for-server.git,https://github.com/Pstarchen/monitor-for-server.git'
 TEST_ALLOW_GITEE=true
 run_installer 1
-grep -F 'docker build --pull --build-arg VERSION=v1.20.19 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19 https://gitee.com/starchen520/monitor-for-server.git#v1.20.19:agent' "${log_file}" >/dev/null
-grep -F 'docker build --pull --build-arg VERSION=v1.20.19 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19 https://github.com/Pstarchen/monitor-for-server.git#v1.20.19:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.20 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20 https://gitee.com/starchen520/monitor-for-server.git#v1.20.20:agent' "${log_file}" >/dev/null
+grep -F 'docker build --pull --build-arg VERSION=v1.20.20 --tag ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20 https://github.com/Pstarchen/monitor-for-server.git#v1.20.20:agent' "${log_file}" >/dev/null
 TEST_FAIL_AGENT_PULLS=0
 TEST_FAIL_GITEE_BUILD=0
 TEST_REPOSITORY_URLS=''
@@ -680,7 +789,7 @@ fi
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer 1 --binary "${binary_path}"
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
 if grep -q '^go ' "${log_file}"; then
   echo 'Docker-first path unexpectedly invoked Go when --binary was present.' >&2
   exit 1
@@ -695,7 +804,7 @@ grep -F '"allow_file_operations": true' "${config_file}" >/dev/null
 : > "${log_file}"
 server_url=https://monitor.example.com
 run_installer_stdin 1
-grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.19' "${log_file}" >/dev/null
+grep -F 'docker pull ghcr.io/pstarchen/monitor-for-server-agent:v1.20.20' "${log_file}" >/dev/null
 grep -F '"host_root": "/host"' "${config_file}" >/dev/null
 
 : > "${log_file}"
@@ -720,10 +829,10 @@ auto_update_environment=(
   "XINGCHEN_AGENT_KEY=test-agent-key"
 )
 if [[ "${EUID}" -eq 0 ]]; then
-  env "${auto_update_environment[@]}" bash "${installer}" \
+  env "${auto_update_environment[@]}" "${test_bash}" "${installer}" \
     --server-url "${server_url}" --device-id test-device --docker
 else
-  sudo env "${auto_update_environment[@]}" bash "${installer}" \
+  sudo env "${auto_update_environment[@]}" "${test_bash}" "${installer}" \
     --server-url "${server_url}" --device-id test-device
 fi
 grep -F 'systemctl enable --now xingchen-agent-update.timer' "${log_file}" >/dev/null
@@ -744,7 +853,7 @@ run_as_root env \
   "TEST_RELEASE_SHA256=${TEST_RELEASE_SHA256}" \
   "TEST_RELEASE_SIZE=${TEST_RELEASE_SIZE}" \
   "TEST_RUNNING_AGENT_VERSION=v1.20.14" \
-  bash "${temp_dir}/manager/update-agent.sh" --automatic
+  "${test_bash}" "${temp_dir}/manager/update-agent.sh" --automatic
 if grep -Eq '^docker (pull|build|run) ' "${log_file}"; then
   echo 'Agent automatic update crossed a major version.' >&2
   exit 1
@@ -754,7 +863,7 @@ rm -f "${temp_dir}/manager/update-failures" "${temp_dir}/manager/update-paused-u
 : > "${log_file}"
 set +e
 for attempt in 1 2 3 4 5; do
-  env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh" --automatic
+  env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" "${test_bash}" "${temp_dir}/manager/update-agent.sh" --automatic
   if [[ $? -eq 0 ]]; then
     echo "Automatic Agent update failure ${attempt} unexpectedly succeeded." >&2
     exit 1
@@ -764,7 +873,7 @@ set -e
 grep -Fx '5' "${temp_dir}/manager/update-failures" >/dev/null
 test -s "${temp_dir}/manager/update-paused-until"
 pull_count_before="$(grep -c '^docker pull ' "${log_file}")"
-env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh" --automatic
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" "${test_bash}" "${temp_dir}/manager/update-agent.sh" --automatic
 pull_count_after="$(grep -c '^docker pull ' "${log_file}")"
 if [[ "${pull_count_after}" -ne "${pull_count_before}" ]]; then
   echo 'Paused automatic Agent update still contacted an image source.' >&2
@@ -774,7 +883,7 @@ fi
 failure_count_before="$(cat "${temp_dir}/manager/update-failures")"
 pause_before="$(cat "${temp_dir}/manager/update-paused-until")"
 set +e
-env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" bash "${temp_dir}/manager/update-agent.sh"
+env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_FAIL_AGENT_PULLS=1" "TEST_FAIL_AGENT_BUILDS=1" "TEST_CONTROLLER_RELEASE=1" "${test_bash}" "${temp_dir}/manager/update-agent.sh"
 manual_status=$?
 set -e
 if [[ "${manual_status}" -eq 0 ]]; then
@@ -889,7 +998,7 @@ run_as_root grep -F "network_mode='offline'" "${temp_dir}/manager/update-agent.s
 
 : > "${log_file}"
 env "PATH=${fake_bin}:/usr/bin:/bin" "TEST_LOG=${log_file}" "TEST_AGENT_IMAGE_VERSION=v1.20.18" \
-  bash "${temp_dir}/manager/update-agent.sh" update v1.20.18
+  "${test_bash}" "${temp_dir}/manager/update-agent.sh" update v1.20.18
 if grep -Eq '^(curl|docker pull|docker build|git) ' "${log_file}"; then
   echo 'offline Agent updater performed an outbound-capable operation.' >&2
   exit 1
