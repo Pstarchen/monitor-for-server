@@ -397,7 +397,7 @@ Compose 中的 Web 容器负责静态资源、REST 与 WebSocket 内部代理。
 
 ## Linux Agent
 
-Agent 接入采用控制台生成一条短命令的体验，但下载入口始终是 Controller 同域。该短命令只承担 bootstrap：分别下载完整安装器与 SHA256，精确匹配后才执行。命令不包含接入令牌或 Agent 密钥；完整安装器完成提权、准备好目标制品后在交互终端静默询问一次性令牌，再通过 `/api/agent/v1/enroll` 的 JSON body 交换长期密钥。非交互自动化可临时使用 `XINGCHEN_ENROLLMENT_TOKEN`，旧自动化的 `XINGCHEN_AGENT_KEY` 入口继续兼容；两者都会在安装器退出时清除。
+Agent 接入采用控制台生成一条短命令的体验，但下载入口始终是 Controller 同域。该短命令只承担 bootstrap：分别下载完整安装器与 SHA256，精确匹配后才执行。命令不包含接入令牌或 Agent 密钥；完整安装器完成提权后在交互终端静默询问一次性令牌，准备好目标制品后再通过 `/api/agent/v1/enroll` 的 JSON body 交换长期密钥。非交互自动化可临时使用 `XINGCHEN_ENROLLMENT_TOKEN`，旧自动化的 `XINGCHEN_AGENT_KEY` 入口继续兼容；两者都会在安装器退出时清除。
 
 控制台只通过总控同域入口下发安装器及其 SHA256；安装器随 Setup 镜像固化并优先于宿主机工作目录中的副本，更新镜像后不会继续下发旧脚本。目标服务器无需直接访问代码托管平台，也不会执行 Gitee 或 GitHub `main` 分支上的未固定脚本。
 
