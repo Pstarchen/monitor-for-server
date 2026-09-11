@@ -1,202 +1,136 @@
-name: Build and publish controller images
+name: Build remaining v1.20.22 images from tested source
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*.*.*']
   workflow_dispatch:
-    inputs:
-      release_version:
-        description: 'Resume packaging an existing draft release (vX.Y.Z); leave empty to build images'
-        required: false
-        type: string
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.release_version != '' && format('refs/tags/{0}', inputs.release_version) || github.ref }}
+  group: xingchen-v1.20.22-build-remaining-images
   cancel-in-progress: false
 
 env:
-  REGISTRY: ghcr.io
-  TCR_REGISTRY: ${{ vars.TCR_REGISTRY }}
-  TCR_NAMESPACE: ${{ vars.TCR_NAMESPACE }}
-  TCR_USERNAME: ${{ vars.TCR_USERNAME }}
+  SOURCE_REVISION: ccad45f04ab75656327ad69ccd2651e1d1ed84c1
+  RELEASE_VERSION: v1.20.22
 
 jobs:
-  test:
-    if: ${{ inputs.release_version == '' }}
+  build:
+    if: github.repository == 'Pstarchen/monitor-for-server' && startsWith(github.ref, 'refs/heads/codex/')
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: setup/go.mod
-          cache-dependency-path: setup/go.sum
-
-      - name: Test setup service
-        working-directory: setup
-        run: go test ./...
-
-      - name: Test Linux Agent installer
-        run: sudo bash deploy/install-agent_test.sh
-
-      - name: Test installation and updates with Bash 4.2
-        run: bash deploy/test-legacy-bash.sh
-
-      - name: Test Controller updates in the previous Setup runtime
-        run: bash deploy/test-controller-runtime.sh
-
-      - name: Check update scripts
-        run: |
-          for script in deploy/*.sh; do bash -n "$script"; done
-          bash deploy/xingchen_test.sh
-          bash deploy/install-controller_test.sh
-          bash deploy/check-github-release-mutable_test.sh
-          bash deploy/mirror-release-image_test.sh
-          bash deploy/pull-release-platform_test.sh
-          bash deploy/bootstrap-controller-update_test.sh
-          bash deploy/update-controller_test.sh
-          bash deploy/package-offline-bundle_test.sh
-
-      - name: Check PowerShell scripts and generated updater
-        shell: pwsh
-        run: |
-          $failed = $false
-          Get-ChildItem deploy -Filter '*.ps1' | ForEach-Object {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
-            if ($errors.Count) {
-              $failed = $true
-              $errors | ForEach-Object { Write-Error "$($_.Extent.File): $($_.Message)" }
-            }
-          }
-          $tokens = $null
-          $errors = $null
-          $installer = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'deploy/install-agent.ps1'), [ref]$tokens, [ref]$errors)
-          $assignment = $installer.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$script'
-          }, $true) | Select-Object -First 1
-          if ($null -eq $assignment) { throw 'Generated Agent updater template was not found.' }
-          $generatedTokens = $null
-          $generatedErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseInput($assignment.Right.Expression.Value, [ref]$generatedTokens, [ref]$generatedErrors) | Out-Null
-          if ($generatedErrors.Count) {
-            $failed = $true
-            $generatedErrors | ForEach-Object { Write-Error "Generated Agent updater: $($_.Message)" }
-          }
-          if ($failed) { exit 1 }
-
-      - name: Test internal release promotion
-        shell: pwsh
-        run: ./deploy/promote-internal-release_test.ps1
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-
-      - name: Test server
-        working-directory: server
-        run: mvn -B test
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Enable pnpm
-        working-directory: web
-        run: corepack enable && corepack prepare pnpm@11.19.0 --activate
-
-      - name: Test web
-        working-directory: web
-        run: pnpm install --frozen-lockfile && pnpm test && pnpm build
-
-  test-windows-updater:
-    if: ${{ inputs.release_version == '' }}
-    runs-on: windows-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: setup/go.mod
-          cache-dependency-path: setup/go.sum
-
-      - name: Test Controller updater with Windows PowerShell 5.1
-        shell: powershell
-        run: .\deploy\install-controller_test.ps1; .\deploy\update-controller_test.ps1
-
-      - name: Test Controller updater with PowerShell 7
-        shell: pwsh
-        run: .\deploy\install-controller_test.ps1; .\deploy\update-controller_test.ps1
-
-      - name: Test offline bundle wrappers on Windows
-        shell: bash
-        run: bash deploy/package-offline-bundle_test.sh
-
-  publish:
-    if: ${{ inputs.release_version == '' }}
-    needs: [test, test-windows-updater]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    timeout-minutes: 90
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         include:
-          - name: server
-            context: ./server
-            dockerfile: ./server/Dockerfile
-          - name: web
+          - component: web
             context: ./web
             dockerfile: ./web/Dockerfile
-          - name: setup
+          - component: setup
             context: .
             dockerfile: ./setup/Dockerfile
+    env:
+      COMPONENT: ${{ matrix.component }}
+      IMAGE: ghcr.io/pstarchen/monitor-for-server-${{ matrix.component }}:v1.20.22
     steps:
-      - name: Checkout
+      - name: Checkout exactly the tested release source
         uses: actions/checkout@v4
-
-      - name: Validate release tag
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: '[[ "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]'
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          ref: ccad45f04ab75656327ad69ccd2651e1d1ed84c1
+          persist-credentials: false
 
-      - name: Validate Tencent Cloud target
+      - name: Verify source and require the original publisher to be stopped
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          [[ "${TCR_REGISTRY}" == "ccr.ccs.tencentyun.com" ]]
-          [[ "${TCR_NAMESPACE}" == "xc_monitor" ]]
-          [[ -n "${TCR_USERNAME}" ]]
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]]
+          [[ "$(git status --porcelain)" == '' ]]
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow controller-images.yml \
+            --branch "$RELEASE_VERSION" --commit "$SOURCE_REVISION" --event push --limit 100 \
+            --json databaseId,status > "$RUNNER_TEMP/original-controller-runs.json"
+          jq -e 'length > 0 and all(.[]; .status == "completed")' "$RUNNER_TEMP/original-controller-runs.json" >/dev/null || {
+            echo 'The original Controller workflow is active or could not be identified. Verify and stop it before enabling this temporary publisher.' >&2
+            exit 1
+          }
+          bash deploy/check-github-release-mutable.sh "$GITHUB_REPOSITORY" "$RELEASE_VERSION"
 
-      - name: Log in to Tencent Cloud TCR
+      - name: Refuse existing GHCR or Tencent Cloud version tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          accept = ', '.join([
+              'application/vnd.oci.image.index.v1+json',
+              'application/vnd.docker.distribution.manifest.list.v2+json',
+              'application/vnd.oci.image.manifest.v1+json',
+              'application/vnd.docker.distribution.manifest.v2+json',
+          ])
+          component = os.environ['COMPONENT']
+          assert component in ('web', 'setup')
+          version = os.environ['RELEASE_VERSION']
+          assert version == 'v1.20.22'
+
+          def require_missing(registry, repository):
+              manifest_url = 'https://' + registry + '/v2/' + repository + '/manifests/' + version
+              headers = {'Accept': accept}
+              for attempt in range(2):
+                  try:
+                      with urllib.request.urlopen(urllib.request.Request(manifest_url, headers=headers), timeout=45):
+                          raise RuntimeError('Refusing to overwrite existing tag: ' + registry + '/' + repository + ':' + version)
+                  except urllib.error.HTTPError as error:
+                      if error.code == 404:
+                          body = json.loads(error.read())
+                          codes = {item.get('code') for item in body.get('errors', [])}
+                          assert codes and codes.issubset({'MANIFEST_UNKNOWN', 'NAME_UNKNOWN'}), 'Ambiguous registry error; refusing to publish'
+                          print('CONFIRMED_ABSENT ' + registry + '/' + repository + ':' + version)
+                          return
+                      if error.code != 401 or attempt != 0:
+                          raise RuntimeError('Registry absence check failed with HTTP ' + str(error.code)) from None
+                      challenge = error.headers.get('WWW-Authenticate', '')
+                      assert challenge.lower().startswith('bearer '), 'Unsupported registry authentication challenge'
+                      fields = dict(re.findall(r'(\w+)="([^"]+)"', challenge))
+                      realm = fields['realm']
+                      parsed = urllib.parse.urlsplit(realm)
+                      assert parsed.scheme == 'https' and parsed.hostname == registry, 'Unexpected registry token endpoint'
+                      query = urllib.parse.urlencode({'service': fields.get('service', registry), 'scope': 'repository:' + repository + ':pull'})
+                      token_request = urllib.request.Request(realm + ('&' if '?' in realm else '?') + query)
+                      if registry == 'ghcr.io':
+                          credentials = (os.environ['GITHUB_ACTOR'] + ':' + os.environ['GH_TOKEN']).encode()
+                          token_request.add_header('Authorization', 'Basic ' + base64.b64encode(credentials).decode())
+                      # Tencent Cloud uses an anonymous pull token only. No TCR
+                      # account secret or local Docker authentication is read.
+                      with urllib.request.urlopen(token_request, timeout=45) as response:
+                          grant = json.load(response)
+                      token = grant.get('token') or grant.get('access_token')
+                      assert token, 'Registry did not grant a pull token'
+                      headers['Authorization'] = 'Bearer ' + token
+              raise RuntimeError('Could not establish that the release tag is absent')
+
+          require_missing('ghcr.io', 'pstarchen/monitor-for-server-' + component)
+          require_missing('ccr.ccs.tencentyun.com', 'xc_monitor/monitor-for-server-' + component)
+          PY
+
+      - name: Log in to GHCR only
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.TCR_REGISTRY }}
-          username: ${{ env.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -204,27 +138,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Normalize image name
-        id: image
-        shell: bash
-        run: echo "name=${GITHUB_REPOSITORY,,}-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
-          tags: |
-            type=ref,event=tag
-            type=sha,enable=${{ github.ref_type == 'branch' }}
-
-      - name: Protect published GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
-
-      - name: Build and push
+      - name: Build and push only the missing GHCR image
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -232,266 +146,48 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/pstarchen/monitor-for-server-${{ matrix.component }}:v1.20.22
+          labels: |
+            org.opencontainers.image.version=v1.20.22
+            org.opencontainers.image.revision=ccad45f04ab75656327ad69ccd2651e1d1ed84c1
+            org.opencontainers.image.source=https://github.com/Pstarchen/monitor-for-server
           build-args: |
-            VERSION=${{ github.ref_name }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+            VERSION=v1.20.22
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
 
-      - name: Install registry copy tool
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
-
-      - name: Mirror image to Tencent Cloud TCR
-        timeout-minutes: 310
+      - name: Verify both platforms and Setup's embedded Agent release
         env:
-          SOURCE_IMAGE: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}
-          TARGET_IMAGE: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/monitor-for-server-${{ matrix.name }}:${{ steps.meta.outputs.version }}
-          SOURCE_DIGEST: ${{ steps.build.outputs.digest }}
-        shell: bash
-        run: bash deploy/mirror-release-image.sh "${SOURCE_IMAGE}" "${TARGET_IMAGE}" "${SOURCE_DIGEST}"
-
-  release:
-    if: ${{ !cancelled() && ((startsWith(github.ref, 'refs/tags/v') && needs.publish.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')) }}
-    needs: publish
-    runs-on: ubuntu-latest
-    env:
-      RELEASE_VERSION: ${{ inputs.release_version || github.ref_name }}
-      RESUME_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version != '' }}
-    defaults:
-      run:
-        working-directory: release-source
-    permissions:
-      actions: read
-      contents: write
-      packages: write
-    steps:
-      - name: Checkout release tooling
-        uses: actions/checkout@v4
-
-      - name: Validate release and protect published artifacts
-        working-directory: .
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "${RELEASE_VERSION}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          state="$(bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${RELEASE_VERSION}")"
-          if [[ "${RESUME_RELEASE}" == true && "${state}" != draft ]]; then
-            echo 'Only an existing draft release can be resumed.' >&2
-            exit 1
-          fi
-          [[ "${TCR_REGISTRY}" == "ccr.ccs.tencentyun.com" ]]
-          [[ "${TCR_NAMESPACE}" == "xc_monitor" ]]
-
-      - name: Test platform pull helper
-        working-directory: .
-        run: bash deploy/pull-release-platform_test.sh
-
-      - name: Checkout tagged release source
-        uses: actions/checkout@v4
-        with:
-          ref: refs/tags/${{ env.RELEASE_VERSION }}
-          path: release-source
-
-      - name: Wait for matching Agent workflow
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          agent_run_id=''
-          release_commit="$(git rev-parse HEAD)"
-          for attempt in {1..60}; do
-            agent_run_id="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow agent-image.yml \
-              --branch "${RELEASE_VERSION}" --commit "${release_commit}" --event push --limit 5 \
-              --json databaseId --jq '.[0].databaseId // empty')"
-            [[ -z "${agent_run_id}" ]] || break
-            if [[ "${attempt}" -eq 60 ]]; then
-              echo 'Matching Agent workflow was not created in time.' >&2
-              exit 1
+          [[ "$BUILT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          image_repository="${IMAGE%:*}"
+          immutable_image="${image_repository}@${BUILT_DIGEST}"
+          docker buildx imagetools inspect "$immutable_image" --raw > "$RUNNER_TEMP/${COMPONENT}-index.json"
+          jq -e '.schemaVersion == 2 and ([.manifests[]?.platform | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64")) | .architecture] | sort == ["amd64", "arm64"])' \
+            "$RUNNER_TEMP/${COMPONENT}-index.json" >/dev/null
+          for architecture in amd64 arm64; do
+            docker pull --platform "linux/${architecture}" "$immutable_image"
+            [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$immutable_image")" == "$RELEASE_VERSION" ]]
+            [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$immutable_image")" == "$SOURCE_REVISION" ]]
+            if [[ "$COMPONENT" == setup ]]; then
+              docker run --rm --platform "linux/${architecture}" --entrypoint sh "$immutable_image" -ec '
+                cd /usr/local/share/xingchen/release
+                sha256sum -c manifest.json.sha256
+                grep -Eq '"'"'"version"[[:space:]]*:[[:space:]]*"v1.20.22"'"'"' manifest.json
+                cd assets
+                sha256sum -c checksums.txt
+                test "$(find . -maxdepth 1 -type f -name "xingchen-agent_*" | wc -l)" -eq 4
+                for asset in xingchen-agent_1.20.22_linux_amd64.tar.gz xingchen-agent_1.20.22_linux_arm64.tar.gz xingchen-agent_1.20.22_windows_amd64.zip xingchen-agent_1.20.22_windows_arm64.zip; do test -s "$asset"; done
+                cd /usr/local/share/xingchen/controller-update
+                test "$(cat version)" = v1.20.22
+                sha256sum -c SHA256SUMS
+                test -s /usr/local/share/xingchen/installers/install-agent.sh
+                test -s /usr/local/share/xingchen/installers/install-agent.ps1
+              '
             fi
-            sleep 10
           done
-          gh run watch "${agent_run_id}" --repo "${GITHUB_REPOSITORY}" --exit-status --interval 20
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Log in to Tencent Cloud TCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.TCR_REGISTRY }}
-          username: ${{ env.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Verify release images
-        shell: bash
-        run: |
-          set -euo pipefail
-          repository="${GITHUB_REPOSITORY,,}"
-          for component in setup server web agent; do
-            image="${REGISTRY}/${repository}-${component}:${RELEASE_VERSION}"
-            for attempt in {1..30}; do
-              if docker buildx imagetools inspect "${image}" >/dev/null 2>&1; then
-                break
-              fi
-              if [[ "${attempt}" -eq 30 ]]; then
-                echo "Release image is not available: ${image}" >&2
-                exit 1
-              fi
-              sleep 30
-            done
-          done
-
-      - name: Verify Tencent Cloud release images
-        shell: bash
-        run: |
-          set -euo pipefail
-          for component in setup server web agent; do
-            image="${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-${component}:${RELEASE_VERSION}"
-            for attempt in {1..30}; do
-              if docker buildx imagetools inspect "${image}" >/dev/null 2>&1; then
-                break
-              fi
-              if [[ "${attempt}" -eq 30 ]]; then
-                echo "Tencent Cloud release image is not available: ${image}" >&2
-                exit 1
-              fi
-              sleep 30
-            done
-          done
-
-      - name: Install registry copy tool
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends skopeo
-
-      - name: Resolve base images in Tencent Cloud TCR
-        id: base-images
-        timeout-minutes: 140
-        env:
-          XINGCHEN_MIRROR_TIMEOUT_SECONDS: '1800'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${RESUME_RELEASE}" == true ]]; then
-            for component in postgres redis; do
-              image="${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-${component}:${RELEASE_VERSION}"
-              manifest="${RUNNER_TEMP}/${component}-manifest.json"
-              skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${image}" > "${manifest}"
-              jq -e '.schemaVersion == 2 and ([.manifests[]?.platform | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64")) | .architecture] | sort == ["amd64", "arm64"])' "${manifest}" >/dev/null
-              digest="$(skopeo manifest-digest "${manifest}")"
-              [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
-              printf -v "${component}_digest" '%s' "${digest}"
-            done
-          else
-            postgres_digest="$(bash deploy/mirror-release-image.sh \
-              docker.io/library/postgres:16-alpine \
-              "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres:${RELEASE_VERSION}")"
-            redis_digest="$(bash deploy/mirror-release-image.sh \
-              docker.io/library/redis:7.4-alpine \
-              "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis:${RELEASE_VERSION}")"
-          fi
-          echo "postgres-digest=${postgres_digest}" >> "${GITHUB_OUTPUT}"
-          echo "redis-digest=${redis_digest}" >> "${GITHUB_OUTPUT}"
-
-      - name: Verify Tencent Cloud images allow anonymous pulls
-        shell: bash
-        env:
-          DOCKER_CONFIG: ${{ runner.temp }}/tcr-anonymous-docker
-        run: |
-          set -euo pipefail
-          mkdir -p "${DOCKER_CONFIG}"
-          for reference in \
-            monitor-for-server-setup:${RELEASE_VERSION} \
-            monitor-for-server-server:${RELEASE_VERSION} \
-            monitor-for-server-web:${RELEASE_VERSION} \
-            monitor-for-server-agent:${RELEASE_VERSION} \
-            monitor-for-server-postgres:${RELEASE_VERSION} \
-            monitor-for-server-redis:${RELEASE_VERSION}; do
-            image="${TCR_REGISTRY}/${TCR_NAMESPACE}/${reference}"
-            docker buildx imagetools inspect "${image}" >/dev/null \
-              || { echo "Tencent Cloud image is not publicly pullable: ${image}" >&2; exit 1; }
-          done
-
-      - name: Download and verify Agent release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist/agent
-          gh release download "${RELEASE_VERSION}" --repo "${GITHUB_REPOSITORY}" --dir dist/agent \
-            --pattern 'xingchen-agent_*' --pattern checksums.txt --pattern manifest.json --pattern manifest.json.sha256
-          test "$(find dist/agent -maxdepth 1 -type f -name 'xingchen-agent_*' | wc -l)" -eq 4
-          (cd dist/agent && sha256sum -c checksums.txt && sha256sum -c manifest.json.sha256)
-
-      - name: Build offline bundles
-        shell: bash
-        env:
-          POSTGRES_DIGEST: ${{ steps.base-images.outputs.postgres-digest }}
-          REDIS_DIGEST: ${{ steps.base-images.outputs.redis-digest }}
-        run: |
-          set -euo pipefail
-          repository="${GITHUB_REPOSITORY,,}"
-          mkdir -p dist/offline
-          release_images=()
-          for component in setup server web agent; do
-            release_images+=("${REGISTRY}/${repository}-${component}:${RELEASE_VERSION}")
-          done
-          base_images=("postgres:16-alpine" "redis:7.4-alpine")
-          base_sources=(
-            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-postgres@${POSTGRES_DIGEST}"
-            "${TCR_REGISTRY}/${TCR_NAMESPACE}/monitor-for-server-redis@${REDIS_DIGEST}"
-          )
-          images=("${release_images[@]}" "${base_images[@]}")
-          installer_linux_sha="$(sha256sum deploy/install-agent.sh | awk '{print $1}')"
-          installer_windows_sha="$(sha256sum deploy/install-agent.ps1 | awk '{print $1}')"
-          for arch in amd64 arm64; do
-            for image in "${release_images[@]}"; do
-              docker pull --platform "linux/${arch}" "${image}"
-              actual_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "${image}")"
-              if [[ "${actual_version#v}" != "${RELEASE_VERSION#v}" ]]; then
-                echo "Release image version mismatch for ${image}: got ${actual_version:-<empty>}, want ${RELEASE_VERSION}" >&2
-                exit 1
-              fi
-              if [[ "${image}" == *-setup:* ]]; then
-                docker run --rm --platform "linux/${arch}" --entrypoint sh "${image}" -ec \
-                  "test \"\$(sha256sum /usr/local/share/xingchen/installers/install-agent.sh | awk '{print \$1}')\" = '${installer_linux_sha}' && test \"\$(sha256sum /usr/local/share/xingchen/installers/install-agent.ps1 | awk '{print \$1}')\" = '${installer_windows_sha}' && test -f /usr/local/share/xingchen/release/manifest.json && test \"\$(find /usr/local/share/xingchen/release/assets -maxdepth 1 -type f -name 'xingchen-agent_*' | wc -l)\" -eq 4"
-                if [[ -f deploy/bootstrap-controller-update.sh ]]; then
-                  docker run --rm --platform "linux/${arch}" --entrypoint sh "${image}" -ec \
-                    "cd /usr/local/share/xingchen/controller-update && test \"\$(cat version)\" = '${RELEASE_VERSION}' && test \"\$(wc -l < SHA256SUMS)\" -eq 6 && sha256sum -c SHA256SUMS"
-                fi
-              fi
-            done
-            for index in "${!base_images[@]}"; do
-              bash "${GITHUB_WORKSPACE}/deploy/pull-release-platform.sh" "${base_sources[index]}" "${arch}" "${base_images[index]}"
-            done
-            archive="dist/controller-images-${RELEASE_VERSION}-${arch}.tar"
-            docker save --output "${archive}" "${images[@]}"
-            bash deploy/package-offline-bundle.sh "${RELEASE_VERSION}" dist/agent "${archive}" dist/offline "${arch}"
-          done
-
-      - name: Upload offline bundles to draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${RELEASE_VERSION}" >/dev/null
-          gh release upload "${RELEASE_VERSION}" dist/offline/*.tar.gz dist/offline/*.sha256 --repo "${GITHUB_REPOSITORY}" --clobber
-
-      - name: Publish complete release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          bash deploy/check-github-release-mutable.sh "${GITHUB_REPOSITORY}" "${RELEASE_VERSION}" >/dev/null
-          gh release edit "${RELEASE_VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false
+          printf 'BUILT_GHCR_IMAGE=%s\n' "$immutable_image"
+          printf 'TCR_COPY_REQUIRED_OUTSIDE_THIS_WORKFLOW\n'
