@@ -1,15 +1,14 @@
-name: Build remaining v1.20.22 images from tested source
+name: Verify existing v1.20.22 web and setup images
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
-  packages: write
+  packages: read
 
 concurrency:
-  group: xingchen-v1.20.22-build-remaining-images
+  group: xingchen-v1.20.22-verify-existing-images
   cancel-in-progress: false
 
 env:
@@ -17,115 +16,37 @@ env:
   RELEASE_VERSION: v1.20.22
 
 jobs:
-  build:
+  verify:
     if: github.repository == 'Pstarchen/monitor-for-server' && startsWith(github.ref, 'refs/heads/codex/')
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
         include:
           - component: web
-            context: ./web
-            dockerfile: ./web/Dockerfile
+            index: sha256:09f7c0db5d35d6a1b1135c75ae553851759368a7cf10435299486c080d973fab
           - component: setup
-            context: .
-            dockerfile: ./setup/Dockerfile
+            index: sha256:082c6928e728804fdfd41044bf097f5d565a48c8ea730d6e9e7f4f024231e0e0
     env:
       COMPONENT: ${{ matrix.component }}
-      IMAGE: ghcr.io/pstarchen/monitor-for-server-${{ matrix.component }}:v1.20.22
+      EXPECTED_INDEX: ${{ matrix.index }}
+      IMAGE_REPOSITORY: ghcr.io/pstarchen/monitor-for-server-${{ matrix.component }}
     steps:
-      - name: Checkout exactly the tested release source
+      - name: Checkout exactly the tested source
         uses: actions/checkout@v4
         with:
           ref: ccad45f04ab75656327ad69ccd2651e1d1ed84c1
           persist-credentials: false
 
-      - name: Verify source and require the original publisher to be stopped
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify source revision
         shell: bash
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]]
-          [[ "$(git status --porcelain)" == '' ]]
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow controller-images.yml \
-            --branch "$RELEASE_VERSION" --commit "$SOURCE_REVISION" --event push --limit 100 \
-            --json databaseId,status > "$RUNNER_TEMP/original-controller-runs.json"
-          jq -e 'length > 0 and all(.[]; .status == "completed")' "$RUNNER_TEMP/original-controller-runs.json" >/dev/null || {
-            echo 'The original Controller workflow is active or could not be identified. Verify and stop it before enabling this temporary publisher.' >&2
-            exit 1
-          }
-          bash deploy/check-github-release-mutable.sh "$GITHUB_REPOSITORY" "$RELEASE_VERSION"
 
-      - name: Refuse existing GHCR or Tencent Cloud version tags
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import base64
-          import json
-          import os
-          import re
-          import urllib.error
-          import urllib.parse
-          import urllib.request
-
-          accept = ', '.join([
-              'application/vnd.oci.image.index.v1+json',
-              'application/vnd.docker.distribution.manifest.list.v2+json',
-              'application/vnd.oci.image.manifest.v1+json',
-              'application/vnd.docker.distribution.manifest.v2+json',
-          ])
-          component = os.environ['COMPONENT']
-          assert component in ('web', 'setup')
-          version = os.environ['RELEASE_VERSION']
-          assert version == 'v1.20.22'
-
-          def require_missing(registry, repository):
-              manifest_url = 'https://' + registry + '/v2/' + repository + '/manifests/' + version
-              headers = {'Accept': accept}
-              for attempt in range(2):
-                  try:
-                      with urllib.request.urlopen(urllib.request.Request(manifest_url, headers=headers), timeout=45):
-                          raise RuntimeError('Refusing to overwrite existing tag: ' + registry + '/' + repository + ':' + version)
-                  except urllib.error.HTTPError as error:
-                      if error.code == 404:
-                          body = json.loads(error.read())
-                          codes = {item.get('code') for item in body.get('errors', [])}
-                          assert codes and codes.issubset({'MANIFEST_UNKNOWN', 'NAME_UNKNOWN'}), 'Ambiguous registry error; refusing to publish'
-                          print('CONFIRMED_ABSENT ' + registry + '/' + repository + ':' + version)
-                          return
-                      if error.code != 401 or attempt != 0:
-                          raise RuntimeError('Registry absence check failed with HTTP ' + str(error.code)) from None
-                      challenge = error.headers.get('WWW-Authenticate', '')
-                      assert challenge.lower().startswith('bearer '), 'Unsupported registry authentication challenge'
-                      fields = dict(re.findall(r'(\w+)="([^"]+)"', challenge))
-                      realm = fields['realm']
-                      parsed = urllib.parse.urlsplit(realm)
-                      assert parsed.scheme == 'https' and parsed.hostname == registry, 'Unexpected registry token endpoint'
-                      query = urllib.parse.urlencode({'service': fields.get('service', registry), 'scope': 'repository:' + repository + ':pull'})
-                      token_request = urllib.request.Request(realm + ('&' if '?' in realm else '?') + query)
-                      if registry == 'ghcr.io':
-                          credentials = (os.environ['GITHUB_ACTOR'] + ':' + os.environ['GH_TOKEN']).encode()
-                          token_request.add_header('Authorization', 'Basic ' + base64.b64encode(credentials).decode())
-                      # Tencent Cloud uses an anonymous pull token only. No TCR
-                      # account secret or local Docker authentication is read.
-                      with urllib.request.urlopen(token_request, timeout=45) as response:
-                          grant = json.load(response)
-                      token = grant.get('token') or grant.get('access_token')
-                      assert token, 'Registry did not grant a pull token'
-                      headers['Authorization'] = 'Bearer ' + token
-              raise RuntimeError('Could not establish that the release tag is absent')
-
-          require_missing('ghcr.io', 'pstarchen/monitor-for-server-' + component)
-          require_missing('ccr.ccs.tencentyun.com', 'xc_monitor/monitor-for-server-' + component)
-          PY
-
-      - name: Log in to GHCR only
+      - name: Authenticate for GHCR reads only
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -135,59 +56,46 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      - name: Set up Docker Buildx
+      - name: Set up manifest inspection
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push only the missing GHCR image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/pstarchen/monitor-for-server-${{ matrix.component }}:v1.20.22
-          labels: |
-            org.opencontainers.image.version=v1.20.22
-            org.opencontainers.image.revision=ccad45f04ab75656327ad69ccd2651e1d1ed84c1
-            org.opencontainers.image.source=https://github.com/Pstarchen/monitor-for-server
-          build-args: |
-            VERSION=v1.20.22
-          cache-from: type=gha,scope=${{ matrix.component }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
-
-      - name: Verify both platforms and Setup's embedded Agent release
-        env:
-          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+      - name: Verify the pinned index and each platform's child manifest
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$BUILT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
-          image_repository="${IMAGE%:*}"
-          immutable_image="${image_repository}@${BUILT_DIGEST}"
-          docker buildx imagetools inspect "$immutable_image" --raw > "$RUNNER_TEMP/${COMPONENT}-index.json"
-          jq -e '.schemaVersion == 2 and ([.manifests[]?.platform | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64")) | .architecture] | sort == ["amd64", "arm64"])' \
-            "$RUNNER_TEMP/${COMPONENT}-index.json" >/dev/null
+          [[ "$EXPECTED_INDEX" =~ ^sha256:[a-f0-9]{64}$ ]]
+          immutable_index="${IMAGE_REPOSITORY}@${EXPECTED_INDEX}"
+          index_path="$RUNNER_TEMP/${COMPONENT}-index.json"
+          docker buildx imagetools inspect "$immutable_index" --raw > "$index_path"
+          docker buildx imagetools inspect "${IMAGE_REPOSITORY}:${RELEASE_VERSION}" --raw > "$RUNNER_TEMP/${COMPONENT}-tag.json"
+          cmp -- "$index_path" "$RUNNER_TEMP/${COMPONENT}-tag.json"
+          jq -e '.schemaVersion == 2 and ([.manifests[]?.platform | select(.os == "linux" and (.architecture == "amd64" or .architecture == "arm64")) | .architecture] | sort == ["amd64", "arm64"])' "$index_path" >/dev/null
           for architecture in amd64 arm64; do
+            child_digest="$(jq -er --arg architecture "$architecture" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $architecture) | .digest' "$index_path")"
+            [[ "$child_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            immutable_image="${IMAGE_REPOSITORY}@${child_digest}"
             docker pull --platform "linux/${architecture}" "$immutable_image"
+            [[ "$(docker image inspect --format '{{.Os}}' "$immutable_image")" == linux ]]
+            [[ "$(docker image inspect --format '{{.Architecture}}' "$immutable_image")" == "$architecture" ]]
             [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$immutable_image")" == "$RELEASE_VERSION" ]]
             [[ "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$immutable_image")" == "$SOURCE_REVISION" ]]
             if [[ "$COMPONENT" == setup ]]; then
-              docker run --rm --platform "linux/${architecture}" --entrypoint sh "$immutable_image" -ec '
-                cd /usr/local/share/xingchen/release
-                sha256sum -c manifest.json.sha256
-                grep -Eq '"'"'"version"[[:space:]]*:[[:space:]]*"v1.20.22"'"'"' manifest.json
-                cd assets
-                sha256sum -c checksums.txt
-                test "$(find . -maxdepth 1 -type f -name "xingchen-agent_*" | wc -l)" -eq 4
-                for asset in xingchen-agent_1.20.22_linux_amd64.tar.gz xingchen-agent_1.20.22_linux_arm64.tar.gz xingchen-agent_1.20.22_windows_amd64.zip xingchen-agent_1.20.22_windows_arm64.zip; do test -s "$asset"; done
-                cd /usr/local/share/xingchen/controller-update
-                test "$(cat version)" = v1.20.22
-                sha256sum -c SHA256SUMS
-                test -s /usr/local/share/xingchen/installers/install-agent.sh
-                test -s /usr/local/share/xingchen/installers/install-agent.ps1
-              '
+              docker run --rm --platform "linux/${architecture}" --network none --read-only \
+                --entrypoint sh "$immutable_image" -ec '
+                  cd /usr/local/share/xingchen/release
+                  sha256sum -c manifest.json.sha256
+                  grep -Eq '"'"'"version"[[:space:]]*:[[:space:]]*"v1.20.22"'"'"' manifest.json
+                  cd assets
+                  sha256sum -c checksums.txt
+                  test "$(find . -maxdepth 1 -type f -name "xingchen-agent_*" | wc -l)" -eq 4
+                  for asset in xingchen-agent_1.20.22_linux_amd64.tar.gz xingchen-agent_1.20.22_linux_arm64.tar.gz xingchen-agent_1.20.22_windows_amd64.zip xingchen-agent_1.20.22_windows_arm64.zip; do test -s "$asset"; done
+                  cd /usr/local/share/xingchen/controller-update
+                  test "$(cat version)" = v1.20.22
+                  sha256sum -c SHA256SUMS
+                  test -s /usr/local/share/xingchen/installers/install-agent.sh
+                  test -s /usr/local/share/xingchen/installers/install-agent.ps1
+                '
             fi
+            printf 'VERIFIED_PLATFORM_IMAGE=linux/%s %s\n' "$architecture" "$immutable_image"
           done
-          printf 'BUILT_GHCR_IMAGE=%s\n' "$immutable_image"
-          printf 'TCR_COPY_REQUIRED_OUTSIDE_THIS_WORKFLOW\n'
+          printf 'VERIFIED_EXISTING_GHCR_IMAGE=%s\n' "$immutable_index"
