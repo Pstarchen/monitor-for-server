@@ -63,6 +63,7 @@ func main() {
 		SkipContainerCollection:  cfg.SkipContainerCollection,
 		ContainerCollectionLimit: cfg.ContainerCollectionLimit,
 		DiskMountpoints:          cfg.DiskMountpoints,
+		NetworkInterfaces:        cfg.NetworkInterfaces,
 		HostRoot:                 cfg.HostRoot,
 		DockerSocket:             cfg.DockerSocket,
 		LogPaths:                 cfg.LogPaths,
@@ -80,10 +81,11 @@ func main() {
 		logger.Info("remote task execution disabled")
 	}
 	interval := cfg.Interval
+	cycleStarted := time.Now()
 	if updated := collectAndSendWithAgentInfo(ctx, logger, metrics, queue, client, version, cfg.UpdateStatusPath); updated > 0 {
 		interval = updated
 	}
-	timer := time.NewTimer(interval)
+	timer := time.NewTimer(nextSampleDelay(cycleStarted, time.Now(), interval))
 	defer timer.Stop()
 
 	for {
@@ -92,11 +94,12 @@ func main() {
 			logger.Info("agent stopped")
 			return
 		case <-timer.C:
+			cycleStarted = time.Now()
 			if updated := collectAndSendWithAgentInfo(ctx, logger, metrics, queue, client, version, cfg.UpdateStatusPath); updated > 0 && updated != interval {
 				logger.Info("report interval updated", "interval", updated.String())
 				interval = updated
 			}
-			timer.Reset(interval)
+			timer.Reset(nextSampleDelay(cycleStarted, time.Now(), interval))
 		}
 	}
 }

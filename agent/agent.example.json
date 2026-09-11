@@ -19,6 +19,7 @@
   "port_collection_limit": 512,
   "skip_container_collection": false,
   "container_collection_limit": 100,
+  "network_interfaces": [],
   "disk_mountpoints": ["/", "/data"],
   "host_root": "",
   "docker_socket": "",

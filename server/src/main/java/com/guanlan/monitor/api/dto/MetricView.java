@@ -49,7 +49,8 @@ public record MetricView(
         List<AgentReportRequest.LogFile> logs,
         List<AgentReportRequest.LogFile> systemLogs,
         List<AgentReportRequest.IntegrityItem> integrity,
-        List<AgentReportRequest.CustomMetricResult> customMetrics
+        List<AgentReportRequest.CustomMetricResult> customMetrics,
+        AgentReportRequest.NetworkStats network
 ) {
     public static MetricView from(MetricSnapshot metric, ObjectMapper mapper) {
         return new MetricView(
@@ -75,7 +76,8 @@ public record MetricView(
                 readList(mapper, metric.getLogsJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getSystemLogsJson(), new TypeReference<>() {}),
                 readList(mapper, metric.getIntegrityJson(), new TypeReference<>() {}),
-                readList(mapper, metric.getCustomMetricsJson(), new TypeReference<>() {})
+                readList(mapper, metric.getCustomMetricsJson(), new TypeReference<>() {}),
+                readObject(mapper, metric.getNetworkJson(), AgentReportRequest.NetworkStats.class)
         );
     }
 

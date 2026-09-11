@@ -10,30 +10,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/host"
-	"github.com/shirou/gopsutil/v4/load"
-	"github.com/shirou/gopsutil/v4/mem"
 	netstat "github.com/shirou/gopsutil/v4/net"
-	"github.com/shirou/gopsutil/v4/process"
 	"github.com/shirou/gopsutil/v4/sensors"
 
 	"xingchen-monitor/agent/internal/model"
 )
 
-type ioSample struct {
-	at        time.Time
-	netSent   uint64
-	netRecv   uint64
-	diskRead  uint64
-	diskWrite uint64
-}
-
 type Collector struct {
-	options  Options
-	mu       sync.Mutex
-	previous ioSample
+	options         Options
+	mu              sync.Mutex
+	cpuPrevious     cpuSample
+	processPrevious map[int32]processSample
+	diskPrevious    map[string]diskIOSample
+	networkPrevious map[string]networkSample
+	dockerPrevious  map[string]dockerSample
 }
 
 type Options struct {
@@ -48,6 +39,7 @@ type Options struct {
 	SkipContainerCollection  bool
 	ContainerCollectionLimit int
 	DiskMountpoints          []string
+	NetworkInterfaces        []string
 	HostRoot                 string
 	DockerSocket             string
 	LogPaths                 []string
@@ -76,18 +68,21 @@ func New(options Options) *Collector {
 		options.ContainerCollectionLimit = maxContainerCount
 	}
 	options.DiskMountpoints = append([]string(nil), options.DiskMountpoints...)
+	options.NetworkInterfaces = append([]string(nil), options.NetworkInterfaces...)
 	options.LogPaths = append([]string(nil), options.LogPaths...)
 	options.IntegrityPaths = append([]string(nil), options.IntegrityPaths...)
 	return &Collector{options: options}
 }
 
 func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	now := time.Now().UTC()
 	hostInfo, err := collectHost(ctx, c.options.HostRoot)
 	if err != nil {
 		return model.Report{}, err
 	}
-	cpuInfo, err := collectCPU(ctx)
+	cpuInfo, err := c.collectCPU(ctx)
 	if err != nil {
 		return model.Report{}, err
 	}
@@ -95,31 +90,12 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	disks, diskRead, diskWrite := collectDisks(ctx, c.options.DiskMountpoints, c.options.HostRoot)
+	disks := c.collectDisks(ctx, c.options.DiskMountpoints, c.options.HostRoot)
 	collectDiskHealth(ctx, disks, c.options.HostRoot)
-	network, netSent, netRecv := collectNetwork(ctx, c.options.SkipConnectionCount)
+	network := c.collectNetwork(ctx, c.options.SkipConnectionCount)
 	interfaces := collectNetworkInterfaces(ctx)
 	ports := collectListeningPorts(ctx, c.options.SkipConnectionCount || c.options.SkipPortCollection, c.options.PortCollectionLimit)
-	containers := collectContainers(ctx, c.options.DockerSocket, c.options.HostRoot, c.options.SkipContainerCollection, c.options.ContainerCollectionLimit)
-
-	c.mu.Lock()
-	previous := c.previous
-	c.previous = ioSample{at: now, netSent: netSent, netRecv: netRecv, diskRead: diskRead, diskWrite: diskWrite}
-	c.mu.Unlock()
-
-	if !previous.at.IsZero() {
-		seconds := now.Sub(previous.at).Seconds()
-		if seconds > 0 {
-			network.BytesSentPerSec = rate(netSent, previous.netSent, seconds)
-			network.BytesRecvPerSec = rate(netRecv, previous.netRecv, seconds)
-			readRate := rate(diskRead, previous.diskRead, seconds)
-			writeRate := rate(diskWrite, previous.diskWrite, seconds)
-			for index := range disks {
-				disks[index].ReadBytesPerSec = readRate
-				disks[index].WriteBytesPerSec = writeRate
-			}
-		}
-	}
+	containers := c.collectContainers(ctx, c.options.DockerSocket, c.options.HostRoot, c.options.SkipContainerCollection, c.options.ContainerCollectionLimit)
 
 	processes := make([]model.ProcessStats, 0)
 	if !c.options.SkipProcesses {
@@ -127,7 +103,7 @@ func (c *Collector) Collect(ctx context.Context) (model.Report, error) {
 		if !c.options.CollectAllProcesses && limit > 12 {
 			limit = 12
 		}
-		processes = collectProcesses(ctx, limit, c.options.MonitoredProcesses)
+		processes = c.collectProcesses(ctx, limit, c.options.MonitoredProcesses)
 	}
 	return model.Report{
 		CollectedAt:       now,
@@ -244,6 +220,7 @@ func collectHost(ctx context.Context, hostRoot string) (model.HostInfo, error) {
 		Architecture: runtime.GOARCH, UptimeSeconds: info.Uptime, BootTime: info.BootTime,
 		Fans: collectFans(hostRoot), Batteries: collectBatteries(hostRoot),
 	}
+	result.Hostname = reportedHostname(hostRoot, result.Hostname)
 	// GPU discovery is intentionally best effort. nvidia-smi is optional and
 	// should never prevent CPU/memory metrics from being reported.
 	result.GPUs = collectGPUs(ctx)
@@ -253,79 +230,6 @@ func collectHost(ctx context.Context, hostRoot string) (model.HostInfo, error) {
 		}
 	}
 	return result, nil
-}
-
-func collectCPU(ctx context.Context) (model.CPUStats, error) {
-	usage, err := cpu.PercentWithContext(ctx, 250*time.Millisecond, false)
-	if err != nil {
-		return model.CPUStats{}, err
-	}
-	perCore, _ := cpu.PercentWithContext(ctx, 0, true)
-	logical, _ := cpu.CountsWithContext(ctx, true)
-	physical, _ := cpu.CountsWithContext(ctx, false)
-	models, _ := cpu.InfoWithContext(ctx)
-	avg, _ := load.AvgWithContext(ctx)
-	result := model.CPUStats{LogicalCores: logical, PhysicalCores: physical, PerCorePercent: perCore}
-	if len(usage) > 0 {
-		result.UsagePercent = usage[0]
-	}
-	if len(models) > 0 {
-		result.Model = strings.TrimSpace(models[0].ModelName)
-	}
-	if avg != nil {
-		result.Load1, result.Load5, result.Load15 = avg.Load1, avg.Load5, avg.Load15
-	}
-	return result, nil
-}
-
-func collectMemory(ctx context.Context) (model.MemoryStats, error) {
-	virtual, err := mem.VirtualMemoryWithContext(ctx)
-	if err != nil {
-		return model.MemoryStats{}, err
-	}
-	swap, _ := mem.SwapMemoryWithContext(ctx)
-	result := model.MemoryStats{
-		TotalBytes: virtual.Total, UsedBytes: virtual.Used, AvailableBytes: virtual.Available,
-		UsagePercent: virtual.UsedPercent, CachedBytes: virtual.Cached,
-	}
-	if swap != nil {
-		result.SwapTotalBytes, result.SwapUsedBytes, result.SwapPercent = swap.Total, swap.Used, swap.UsedPercent
-	}
-	return result, nil
-}
-
-func collectDisks(ctx context.Context, allowlist []string, hostRoot string) ([]model.DiskStats, uint64, uint64) {
-	partitions, _ := disk.PartitionsWithContext(ctx, false)
-	result := make([]model.DiskStats, 0, len(partitions))
-	seen := make(map[string]struct{})
-	for _, partition := range partitions {
-		if !allowedMountpoint(partition.Mountpoint, allowlist) {
-			continue
-		}
-		if _, exists := seen[partition.Mountpoint]; exists {
-			continue
-		}
-		usagePath := hostPath(hostRoot, partition.Mountpoint)
-		if usagePath == "" {
-			continue
-		}
-		usage, err := disk.UsageWithContext(ctx, usagePath)
-		if err != nil || usage.Total == 0 {
-			continue
-		}
-		seen[partition.Mountpoint] = struct{}{}
-		result = append(result, model.DiskStats{
-			Device: partition.Device, Mountpoint: partition.Mountpoint, FileSystem: partition.Fstype,
-			TotalBytes: usage.Total, UsedBytes: usage.Used, FreeBytes: usage.Free, UsagePercent: usage.UsedPercent,
-		})
-	}
-	counters, _ := disk.IOCountersWithContext(ctx)
-	var readBytes, writeBytes uint64
-	for _, counter := range counters {
-		readBytes += counter.ReadBytes
-		writeBytes += counter.WriteBytes
-	}
-	return result, readBytes, writeBytes
 }
 
 // hostPath resolves a host mountpoint inside a read-only host-root bind mount.
@@ -347,91 +251,24 @@ func hostPath(hostRoot, mountpoint string) string {
 	return resolved
 }
 
-func collectNetwork(ctx context.Context, skipConnectionCount bool) (model.NetworkStats, uint64, uint64) {
-	counters, _ := netstat.IOCountersWithContext(ctx, false)
-	result := model.NetworkStats{}
-	if !skipConnectionCount {
-		connections, _ := netstat.ConnectionsWithContext(ctx, "tcp")
-		result.TCPConnections = len(connections)
-	}
-	result.BytesSent, result.BytesRecv = aggregateNetworkCounters(counters)
-	return result, result.BytesSent, result.BytesRecv
-}
-
-func aggregateNetworkCounters(counters []netstat.IOCountersStat) (uint64, uint64) {
-	var sent, received uint64
-	for _, counter := range counters {
-		sent += counter.BytesSent
-		received += counter.BytesRecv
-	}
-	return sent, received
-}
-
 func allowedMountpoint(mountpoint string, allowlist []string) bool {
 	if len(allowlist) == 0 {
 		return true
 	}
 	cleaned := filepath.Clean(mountpoint)
+	if runtime.GOOS == "windows" {
+		cleaned = diskCounterKey(cleaned)
+	}
 	for _, allowed := range allowlist {
 		candidate := filepath.Clean(allowed)
+		if runtime.GOOS == "windows" {
+			candidate = diskCounterKey(candidate)
+		}
 		if cleaned == candidate || (runtime.GOOS == "windows" && strings.EqualFold(cleaned, candidate)) {
 			return true
 		}
 	}
 	return false
-}
-
-func collectProcesses(ctx context.Context, limit int, monitored []string) []model.ProcessStats {
-	items, _ := process.ProcessesWithContext(ctx)
-	result := make([]model.ProcessStats, 0, len(items))
-	for _, item := range items {
-		name, err := item.NameWithContext(ctx)
-		if err != nil {
-			continue
-		}
-		cpuPercent, _ := item.CPUPercentWithContext(ctx)
-		memoryPercent, _ := item.MemoryPercentWithContext(ctx)
-		username, _ := item.UsernameWithContext(ctx)
-		commandLine, _ := item.CmdlineWithContext(ctx)
-		statuses, _ := item.StatusWithContext(ctx)
-		status := "unknown"
-		if len(statuses) > 0 {
-			status = statuses[0]
-		}
-		result = append(result, model.ProcessStats{PID: item.Pid, Name: name, CommandLine: trimCommandLine(commandLine), Username: username, CPUPercent: cpuPercent, MemoryPercent: memoryPercent, Status: status})
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].CPUPercent == result[j].CPUPercent {
-			return result[i].MemoryPercent > result[j].MemoryPercent
-		}
-		return result[i].CPUPercent > result[j].CPUPercent
-	})
-	if len(result) > limit {
-		selected := append([]model.ProcessStats(nil), result[:limit]...)
-		maxSelected := limit + maxMonitoredProcesses
-		if maxSelected > maxProcessCount {
-			maxSelected = maxProcessCount
-		}
-		seen := make(map[int32]struct{}, len(selected))
-		for _, item := range selected {
-			seen[item.PID] = struct{}{}
-		}
-		for _, item := range result[limit:] {
-			if !matchesMonitoredProcess(item.Name, monitored) {
-				continue
-			}
-			if _, exists := seen[item.PID]; exists {
-				continue
-			}
-			selected = append(selected, item)
-			seen[item.PID] = struct{}{}
-			if len(selected) >= maxSelected {
-				break
-			}
-		}
-		result = selected
-	}
-	return result
 }
 
 func trimCommandLine(value string) string {

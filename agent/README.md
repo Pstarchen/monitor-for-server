@@ -6,18 +6,18 @@ Agent 默认读取当前目录的 `agent.json`，也可通过 `-config` 或 `XIN
 
 Linux 默认安装原生 systemd 服务，支持 `linux/amd64` 和 `linux/arm64`；Windows 使用管理员 PowerShell，支持 x64/ARM64。两端默认向总控同域 `/api/setup/agent-release` 查询版本，从 `/api/setup/agent-artifact` 下载制品，并核对大小、SHA256 和程序实际版本。默认在线配置下，清单和四平台制品随 Setup 镜像内置；配置受信 manifest 后，由对应清单和制品决定可用版本。总控还会检查 `minimumCompatibleControllerVersion`，拒绝不兼容的 Agent。
 
-使用 Gitee 发现版本、腾讯云 TCR 拉取镜像的部署，应先升级总控，再更新独立 Agent。例如总控升级到 `v1.20.21` 后，默认同域来源即可提供该版本 Agent，原生节点无需访问 GitHub、Gitee 或镜像仓库。批量更新路径为“Agent 发布 > 新建发布 > 创建草稿 > 启动发布 > 确认启动”；完成以设备实时上报目标版本为准。
+使用 Gitee 发现版本、腾讯云 TCR 拉取镜像的部署，应先升级总控，再更新独立 Agent。例如总控升级到 `v1.20.22` 后，默认同域来源即可提供该版本 Agent，原生节点无需访问 GitHub、Gitee 或镜像仓库。批量更新路径为“Agent 发布 > 新建发布 > 创建草稿 > 启动发布 > 确认启动”；完成以设备实时上报目标版本为准。
 
 Linux 新装默认使用 `/usr/local/bin/xingchen-agent`、`xingchen-agent.service` 和 `/opt/xingchen/agent/agent.sh`。使用 root 或 `sudo` 执行以下管理命令，普通更新无需重新输入令牌或重装：
 
 ```bash
 /opt/xingchen/agent/agent.sh status
 /opt/xingchen/agent/agent.sh update
-/opt/xingchen/agent/agent.sh update v1.20.21
+/opt/xingchen/agent/agent.sh update v1.20.22
 /opt/xingchen/agent/agent.sh list-versions
 ```
 
-Windows 新装的更新器保存到 `%ProgramData%\XingchenMonitor\update-agent.ps1`，在管理员 PowerShell 中执行 `& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update`；指定版本时在 `update` 后追加 `v1.20.21`。已校验的 `deploy/install-agent.ps1` 也支持 `-Action update`、`-Action rollback -Version v1.20.4`、`-Action list-versions` 和 `-Action status`。
+Windows 新装的更新器保存到 `%ProgramData%\XingchenMonitor\update-agent.ps1`，在管理员 PowerShell 中执行 `& "$env:ProgramData\XingchenMonitor\update-agent.ps1" update`；指定版本时在 `update` 后追加 `v1.20.22`。已校验的 `deploy/install-agent.ps1` 也支持 `-Action update`、`-Action rollback -Version v1.20.4`、`-Action list-versions` 和 `-Action status`。
 
 更新器保留安装时记录的来源和服务路径。Linux 旧安装可能继续使用 `guanlan-agent.service`、`/etc/guanlan-agent` 与 `/var/lib/guanlan-agent`；Windows 旧安装保留 `GuanlanAgent` 和 `GuanlanMonitor` 目录。命令应使用该节点实际管理入口，不要为统一名称卸载重装；仅在缺少更新器或更新请求桥时，从同一设备页面取得已校验的安装命令补齐。
 
@@ -40,9 +40,10 @@ Agent 每轮先将报告原子写入磁盘缓冲，再按时间顺序上报。�
 
 - `skip_process_collection`：跳过进程扫描，适用于受限容器或低配置主机。
 - `skip_connection_count`：跳过 TCP 连接枚举，降低连接密集型主机的采集开销。
-- `disk_mountpoints`：仅采集列出的挂载点；空数组表示采集全部可用分区。
+- `disk_mountpoints`：仅采集列出的挂载点；默认按文件系统去重，排除只读镜像挂载。显式列表可保留指定挂载视图。
+- `network_interfaces`：网卡名称白名单，例如 `["eth0"]`；默认排除回环、容器桥接与重复虚拟链路。需要监控 VPN 时显式选择其接口，避免同时累计隧道与底层网卡。完整口径见[指标口径与数据核对](../docs/guide/metric-accuracy.md)。
 - `host_root`：仅供 Linux 总终端的受管 Agent 使用。设置为只读宿主机挂载目录（安装器使用 `/host`）后，磁盘容量从宿主机读取；普通 Agent 保持空值。
-- `docker_socket`：可选 Docker/Podman 兼容 Unix socket 路径；留空时自动探测 `/var/run/docker.sock`、`/run/podman/podman.sock` 及受管 Agent 的 `/host` 对应路径。指定路径失效时仍会回退到自动探测，避免运行时 socket 重建后永久停止采集。Agent 只调用兼容 API 的容器列表和统计 GET 接口，无法访问运行时或权限不足时返回空列表。挂载运行时 socket 等同于授予高权限，请仅在受信任主机上启用。
+- `docker_socket`：可选 Docker/Podman 兼容 Unix socket 路径；留空时自动探测 `/var/run/docker.sock`、`/run/podman/podman.sock` 及受管 Agent 的 `/host` 对应路径。指定路径失效时仍会回退到自动探测，避免运行时 socket 重建后永久停止采集。Agent 只调用兼容 API 的容器列表、详情和统计 GET 接口，无法访问运行时或权限不足时返回空列表。挂载运行时 socket 等同于授予高权限，请仅在受信任主机上启用。
 - `monitored_services`：检查指定 systemd 服务或 Windows 服务状态。
 - `monitored_processes`：额外保留指定进程，即使它们不在 CPU 排名前 12；适合持续观察低占用但关键的 Nginx、Java、数据库进程。最多额外保留 32 个配置项。
 - `collect_all_processes`：显式开启后按 CPU/内存排序采集最多 256 个进程；`process_collection_limit` 可将上限设为 1-256。默认仍只采集前 12 个并保留 `monitored_processes` 指定项，避免进程密集型主机产生过大的报告。

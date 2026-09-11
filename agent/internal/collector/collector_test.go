@@ -9,17 +9,6 @@ import (
 	netstat "github.com/shirou/gopsutil/v4/net"
 )
 
-func TestNetworkCountersAggregateAllInterfaces(t *testing.T) {
-	counters := []netstat.IOCountersStat{
-		{BytesSent: 100, BytesRecv: 200},
-		{BytesSent: 30, BytesRecv: 40},
-	}
-	gotSent, gotRecv := aggregateNetworkCounters(counters)
-	if gotSent != 130 || gotRecv != 240 {
-		t.Fatalf("aggregated network counters = %d/%d, want 130/240", gotSent, gotRecv)
-	}
-}
-
 func TestListeningPortsFiltersAndSorts(t *testing.T) {
 	ports := listeningPorts([]netstat.ConnectionStat{
 		{Type: 1, Status: "ESTABLISHED", Laddr: netstat.Addr{IP: "127.0.0.1", Port: 9000}, Pid: 8},

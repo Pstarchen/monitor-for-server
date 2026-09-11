@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"xingchen-monitor/agent/internal/model"
@@ -27,16 +28,17 @@ type dockerContainerSummary struct {
 }
 
 type dockerContainerStats struct {
-	CPUStats     dockerCPUStats            `json:"cpu_stats"`
-	PreCPUStats  dockerCPUStats            `json:"precpu_stats"`
-	MemoryStats  dockerMemoryStats         `json:"memory_stats"`
-	Networks     map[string]dockerNetStats `json:"networks"`
-	RestartCount int                       `json:"restart_count"`
+	CPUStats    dockerCPUStats            `json:"cpu_stats"`
+	PreCPUStats dockerCPUStats            `json:"precpu_stats"`
+	MemoryStats dockerMemoryStats         `json:"memory_stats"`
+	Networks    map[string]dockerNetStats `json:"networks"`
+	Read        time.Time                 `json:"read"`
 }
 
 type dockerCPUStats struct {
 	CPUUsage struct {
-		TotalUsage uint64 `json:"total_usage"`
+		TotalUsage  uint64   `json:"total_usage"`
+		PerCPUUsage []uint64 `json:"percpu_usage"`
 	} `json:"cpu_usage"`
 	SystemCPUUsage uint64 `json:"system_cpu_usage"`
 	OnlineCPUs     uint32 `json:"online_cpus"`
@@ -53,57 +55,123 @@ type dockerNetStats struct {
 	TxBytes uint64 `json:"tx_bytes"`
 }
 
-func collectContainers(ctx context.Context, configuredSocket, hostRoot string, skip bool, limit int) []model.ContainerStats {
+type dockerSample struct {
+	cpu       dockerCPUStats
+	read      time.Time
+	startedAt string
+}
+
+type dockerInspect struct {
+	RestartCount *int `json:"RestartCount"`
+	State        struct {
+		StartedAt string `json:"StartedAt"`
+	} `json:"State"`
+}
+
+func (c *Collector) collectContainers(ctx context.Context, configuredSocket, hostRoot string, skip bool, limit int) []model.ContainerStats {
 	if skip {
+		c.dockerPrevious = nil
 		return []model.ContainerStats{}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	socket := resolveDockerSocket(configuredSocket, hostRoot)
 	if socket == "" {
+		c.dockerPrevious = nil
 		return []model.ContainerStats{}
 	}
 	client := dockerClient(socket)
 	defer client.CloseIdleConnections()
+	return c.collectDockerContainers(ctx, client, limit)
+}
 
+func (c *Collector) collectDockerContainers(ctx context.Context, client *http.Client, limit int) []model.ContainerStats {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	var summaries []dockerContainerSummary
 	if err := dockerGet(ctx, client, "/v1.41/containers/json?all=1", &summaries); err != nil {
+		c.dockerPrevious = nil
 		return []model.ContainerStats{}
 	}
-	sort.Slice(summaries, func(i, j int) bool {
-		return dockerContainerName(summaries[i]) < dockerContainerName(summaries[j])
-	})
+	sort.Slice(summaries, func(i, j int) bool { return dockerContainerName(summaries[i]) < dockerContainerName(summaries[j]) })
 	if limit <= 0 || limit > maxContainerCount {
 		limit = maxContainerCount
 	}
 	if len(summaries) > limit {
 		summaries = summaries[:limit]
 	}
-
-	result := make([]model.ContainerStats, 0, len(summaries))
-	for _, summary := range summaries {
-		item := model.ContainerStats{
-			ID:     strings.TrimSpace(summary.ID),
-			Name:   dockerContainerName(summary),
-			Image:  strings.TrimSpace(summary.Image),
-			State:  strings.TrimSpace(summary.State),
-			Status: strings.TrimSpace(summary.Status),
-		}
+	result := make([]model.ContainerStats, len(summaries))
+	samples := make([]*dockerSample, len(summaries))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	// One-shot stats avoid Docker's one-second double sample for each container.
+	// Four workers bound daemon load while avoiding serial head-of-line delays.
+	for worker := 0; worker < 4; worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				summary := summaries[index]
+				item := model.ContainerStats{ID: strings.TrimSpace(summary.ID), Name: dockerContainerName(summary), Image: strings.TrimSpace(summary.Image), State: strings.TrimSpace(summary.State), Status: strings.TrimSpace(summary.Status)}
+				if item.ID != "" {
+					var stats dockerContainerStats
+					statsOK := false
+					if strings.EqualFold(item.State, "running") {
+						statsOK = dockerGet(ctx, client, "/v1.41/containers/"+url.PathEscape(item.ID)+"/stats?stream=false&one-shot=true", &stats) == nil && !stats.Read.IsZero()
+					}
+					// Inspect after reading counters. A restart between these calls
+					// then has StartedAt later than stats.Read, so old counters cannot
+					// become the baseline for the new container instance.
+					var inspected dockerInspect
+					inspectErr := dockerGet(ctx, client, "/v1.41/containers/"+url.PathEscape(item.ID)+"/json", &inspected)
+					if inspectErr == nil && inspected.RestartCount != nil && *inspected.RestartCount >= 0 {
+						item.RestartCount = *inspected.RestartCount
+						item.RestartCountAvailable = true
+					}
+					startedAt, startedErr := time.Parse(time.RFC3339Nano, inspected.State.StartedAt)
+					if inspectErr == nil && startedErr == nil && !startedAt.IsZero() && stats.Read.Before(startedAt) {
+						statsOK = false
+					}
+					if statsOK {
+						item.StatsAvailable = true
+						item.MemoryUsageBytes, item.MemoryLimitBytes, item.MemoryPercent = dockerMemoryPercent(stats)
+						item.NetworkRxBytes, item.NetworkTxBytes = dockerNetworkTotals(stats.Networks)
+						// Missing instance metadata, duplicate daemon samples, counter
+						// resets and CPU hotplug must not invent a valid CPU interval.
+						if inspectErr == nil && startedErr == nil && !startedAt.IsZero() {
+							previous, exists := c.dockerPrevious[item.ID]
+							current := dockerSample{cpu: stats.CPUStats, read: stats.Read, startedAt: inspected.State.StartedAt}
+							samples[index] = &current
+							if exists && previous.startedAt == current.startedAt && current.read.After(previous.read) &&
+								current.cpu.SystemCPUUsage > previous.cpu.SystemCPUUsage && current.cpu.CPUUsage.TotalUsage >= previous.cpu.CPUUsage.TotalUsage &&
+								dockerOnlineCPUs(current.cpu) > 0 && dockerOnlineCPUs(current.cpu) == dockerOnlineCPUs(previous.cpu) {
+								stats.PreCPUStats = previous.cpu
+								item.CPUPercent = dockerCPUPercent(stats)
+								item.CPUSampled = true
+							}
+						}
+					}
+				}
+				result[index] = item
+			}
+		}()
+	}
+	for index := range summaries {
+		jobs <- index
+	}
+	close(jobs)
+	workers.Wait()
+	next := make(map[string]dockerSample)
+	filtered := make([]model.ContainerStats, 0, len(result))
+	for index, item := range result {
 		if item.ID == "" {
 			continue
 		}
-		if strings.EqualFold(item.State, "running") {
-			var stats dockerContainerStats
-			if err := dockerGet(ctx, client, "/v1.41/containers/"+url.PathEscape(item.ID)+"/stats?stream=false", &stats); err == nil {
-				item.CPUPercent = dockerCPUPercent(stats)
-				item.MemoryUsageBytes, item.MemoryLimitBytes, item.MemoryPercent = dockerMemoryPercent(stats)
-				item.NetworkRxBytes, item.NetworkTxBytes = dockerNetworkTotals(stats.Networks)
-				item.RestartCount = maxInt(stats.RestartCount, 0)
-			}
+		filtered = append(filtered, item)
+		if samples[index] != nil {
+			next[item.ID] = *samples[index]
 		}
-		result = append(result, item)
 	}
-	return result
+	c.dockerPrevious = next
+	return filtered
 }
 
 func resolveDockerSocket(configured, hostRoot string) string {
@@ -186,10 +254,7 @@ func dockerCPUPercent(stats dockerContainerStats) float64 {
 	}
 	cpuDelta := stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage
 	systemDelta := stats.CPUStats.SystemCPUUsage - stats.PreCPUStats.SystemCPUUsage
-	online := stats.CPUStats.OnlineCPUs
-	if online == 0 {
-		online = 1
-	}
+	online := dockerOnlineCPUs(stats.CPUStats)
 	value := float64(cpuDelta) / float64(systemDelta) * float64(online) * 100
 	if !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0 {
 		return value
@@ -199,12 +264,12 @@ func dockerCPUPercent(stats dockerContainerStats) float64 {
 
 func dockerMemoryPercent(stats dockerContainerStats) (uint64, uint64, float64) {
 	usage := stats.MemoryStats.Usage
-	cache := stats.MemoryStats.Stats["cache"]
-	if cache == 0 {
-		cache = stats.MemoryStats.Stats["inactive_file"]
-	}
-	if cache > 0 && usage > cache {
-		usage -= cache
+	// Match Docker CLI: cgroup v1 total_inactive_file, then v2 inactive_file.
+	// The general cache counter also contains active memory and is not equivalent.
+	if inactive, exists := stats.MemoryStats.Stats["total_inactive_file"]; exists && inactive < usage {
+		usage -= inactive
+	} else if inactive := stats.MemoryStats.Stats["inactive_file"]; inactive < usage {
+		usage -= inactive
 	}
 	limit := stats.MemoryStats.Limit
 	if limit == 0 {
@@ -224,4 +289,11 @@ func dockerNetworkTotals(networks map[string]dockerNetStats) (uint64, uint64) {
 		sent += network.TxBytes
 	}
 	return received, sent
+}
+
+func dockerOnlineCPUs(stats dockerCPUStats) uint32 {
+	if stats.OnlineCPUs > 0 {
+		return stats.OnlineCPUs
+	}
+	return uint32(len(stats.CPUUsage.PerCPUUsage))
 }

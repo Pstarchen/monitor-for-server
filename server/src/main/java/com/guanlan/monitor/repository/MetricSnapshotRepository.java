@@ -25,7 +25,8 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
                    metric.temperatureMax as temperatureMax,
                    metric.diskUsage as diskUsage,
                    metric.networkSentBps as networkSentBps,
-                   metric.networkRecvBps as networkRecvBps
+                   metric.networkRecvBps as networkRecvBps,
+                   metric.networkJson as networkJson
             from MetricSnapshot metric
             where metric.device.id = :deviceId
               and metric.collectedAt between :from and :to
@@ -49,6 +50,7 @@ public interface MetricSnapshotRepository extends JpaRepository<MetricSnapshot, 
         double getDiskUsage();
         double getNetworkSentBps();
         double getNetworkRecvBps();
+        String getNetworkJson();
     }
 }
 

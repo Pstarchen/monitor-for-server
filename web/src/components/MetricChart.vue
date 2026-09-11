@@ -4,12 +4,14 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { init, use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { timeChartPoints } from '@/lib/metric-chart'
 
 use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const props = defineProps<{
   labels: string[]
-  series: { name: string; data: Array<number | null>; color: string }[]
+  timestamps?: string[]
+  series: { name: string; data: Array<number | null>; color: string; timestamps?: string[]; gapBefore?: boolean[] }[]
   unit?: string
   ariaLabel?: string
 }>()
@@ -28,8 +30,11 @@ function renderNow() {
   const dark = document.documentElement.classList.contains('dark')
   const unit = (props.unit ?? '').trim()
   const suffix = unit && unit !== '%' ? ` ${unit}` : unit
+  const timeAxis = Boolean(props.timestamps || props.series.some((item) => item.timestamps))
   const formatValue = (value: unknown) => {
-    const numeric = Number(value)
+    const scalar = Array.isArray(value) ? value[1] : value
+    if (scalar == null) return '--'
+    const numeric = Number(scalar)
     if (!Number.isFinite(numeric)) return '--'
     return `${Math.abs(numeric) >= 100 ? numeric.toFixed(0) : numeric.toFixed(1)}${suffix}`
   }
@@ -45,9 +50,9 @@ function renderNow() {
       axisPointer: { lineStyle: { color: dark ? '#5d636d' : '#b8bcc3' } },
     },
     legend: { top: 0, right: 8, textStyle: { color: dark ? '#a3a3a3' : '#626262' } },
-    xAxis: { type: 'category', data: props.labels, boundaryGap: false, axisLine: { lineStyle: { color: dark ? '#393939' : '#e4e4e4' } }, axisLabel: { color: dark ? '#8d8d8d' : '#767676', hideOverlap: true } },
+    xAxis: { type: timeAxis ? 'time' : 'category', data: timeAxis ? undefined : props.labels, boundaryGap: false, axisLine: { lineStyle: { color: dark ? '#393939' : '#e4e4e4' } }, axisLabel: { color: dark ? '#8d8d8d' : '#767676', hideOverlap: true } },
     yAxis: { type: 'value', axisLabel: { color: dark ? '#8d8d8d' : '#767676', width: 76, overflow: 'truncate', formatter: formatValue }, splitLine: { lineStyle: { color: dark ? '#2b2b2b' : '#eeeeee' } } },
-    series: props.series.map((item) => ({ name: item.name, data: item.data, type: 'line', showSymbol: false, sampling: 'lttb', smooth: 0.25, lineStyle: { width: 2, color: item.color }, itemStyle: { color: item.color }, areaStyle: { opacity: 0.04, color: item.color } })),
+    series: props.series.map((item) => ({ name: item.name, data: timeAxis ? timeChartPoints(item.timestamps ?? props.timestamps ?? [], item.data, item.gapBefore) : item.data, type: 'line', showSymbol: false, connectNulls: false, smooth: false, lineStyle: { width: 2, color: item.color }, itemStyle: { color: item.color }, areaStyle: { opacity: 0.04, color: item.color } })),
   }, true)
   renderedDark = dark
 }
@@ -68,7 +73,7 @@ function resize() {
   else chart.resize()
 }
 
-watch(() => [props.labels, props.series, props.unit], scheduleRender)
+watch(() => [props.labels, props.timestamps, props.series, props.unit], scheduleRender)
 onMounted(() => {
   if (typeof IntersectionObserver !== 'undefined' && root.value) {
     visibilityObserver = new IntersectionObserver((entries) => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowLeft, ArrowUp, BatteryCharging, Box, CheckCircle2, CircleAlert, Copy, Cpu, Fan, FileWarning, Gauge, HardDrive, KeyRound, ListChecks, MemoryStick, MessageSquare, Network, PencilLine, RefreshCw, Send, ServerCog, ShieldAlert, ShieldCheck, Trash2, Thermometer, TriangleAlert, Waypoints, Zap } from 'lucide-vue-next'
@@ -12,6 +12,8 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 import { counterRate } from '@/lib/device-analytics'
+import { createLatestRequest } from '@/lib/latest-request'
+import { containerCpu, containerValue, diskRateAvailable, networkRateAvailable, processCpu } from '@/lib/metric-availability'
 import { bytes, dateTime, percent, rate, rateScale, relativeTime } from '@/lib/format'
 import { matchesRealtimeEvent } from '@/lib/realtime'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
@@ -42,11 +44,18 @@ const statusHistoryError = ref('')
 const containerSelectionId = ref('')
 const processSelectionKey = ref('')
 let refreshTimer = 0
+const metricRequests = createLatestRequest()
 
 const deviceId = computed(() => String(route.params.id))
 const latest = computed(() => device.value?.latest ?? null)
+const networkHint = computed(() => {
+  if (!latest.value) return '暂无数据'
+  if (!networkRateAvailable(latest.value)) return latest.value.network?.available === false ? '网络计数器暂不可用' : '网络速率等待有效采样'
+  return `收 ${rate(latest.value.networkRecvBps)} · 发 ${rate(latest.value.networkSentBps)}`
+})
 const canOperate = computed(() => (auth.user?.role === 'ADMIN' || auth.user?.role === 'OPERATOR') && auth.canManageDevice(deviceId.value))
 const labels = computed(() => history.value.map((item) => new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: rangeHours.value === 1 ? '2-digit' : undefined }).format(new Date(item.collectedAt))))
+const timestamps = computed(() => history.value.map((item) => item.collectedAt))
 const resourceSeries = computed(() => [
   { name: 'CPU', data: history.value.map((item) => item.cpuUsage), color: '#2867a6' },
   { name: '内存', data: history.value.map((item) => item.memoryUsage), color: '#17834d' },
@@ -54,10 +63,10 @@ const resourceSeries = computed(() => [
 ])
 const ioScale = computed(() => rateScale(history.value.reduce((max, item) => Math.max(max, item.networkRecvBps, item.networkSentBps, item.diskReadBps, item.diskWriteBps), 0)))
 const ioSeries = computed(() => [
-  { name: '网络接收', data: history.value.map((item) => item.networkRecvBps / ioScale.value.divisor), color: '#2867a6' },
-  { name: '网络发送', data: history.value.map((item) => item.networkSentBps / ioScale.value.divisor), color: '#17834d' },
-  { name: '磁盘读取', data: history.value.map((item) => item.diskReadBps / ioScale.value.divisor), color: '#986400' },
-  { name: '磁盘写入', data: history.value.map((item) => item.diskWriteBps / ioScale.value.divisor), color: '#c73832' },
+  { name: '网络接收', data: history.value.map((item) => networkRateAvailable(item) ? item.networkRecvBps / ioScale.value.divisor : null), color: '#2867a6' },
+  { name: '网络发送', data: history.value.map((item) => networkRateAvailable(item) ? item.networkSentBps / ioScale.value.divisor : null), color: '#17834d' },
+  { name: '磁盘读取', data: history.value.map((item) => diskRateAvailable(item.disks) ? item.diskReadBps / ioScale.value.divisor : null), color: '#986400' },
+  { name: '磁盘写入', data: history.value.map((item) => diskRateAvailable(item.disks) ? item.diskWriteBps / ioScale.value.divisor : null), color: '#c73832' },
 ])
 const temperatures = computed(() => {
   const values = section('host').temperatures
@@ -95,23 +104,25 @@ const containerTrendPoints = computed(() => history.value.flatMap((metric) => {
   return container ? [{ collectedAt: metric.collectedAt, container }] : []
 }))
 const containerTrendLabels = computed(() => containerTrendPoints.value.map((item) => trendLabel(item.collectedAt)))
+const containerTimestamps = computed(() => containerTrendPoints.value.map((item) => item.collectedAt))
 const containerResourceSeries = computed(() => [
-  { name: 'CPU', data: containerTrendPoints.value.map((item) => item.container.cpuPercent), color: '#2867a6' },
-  { name: '内存', data: containerTrendPoints.value.map((item) => item.container.memoryPercent), color: '#17834d' },
+  { name: 'CPU', data: containerTrendPoints.value.map((item) => containerCpu(item.container)), color: '#2867a6' },
+  { name: '内存', data: containerTrendPoints.value.map((item) => containerValue(item.container, 'memoryPercent')), color: '#17834d' },
 ])
 const containerNetworkRates = computed(() => containerTrendPoints.value.map((point, index) => {
-  if (index === 0) return { rx: 0, tx: 0 }
+  if (index === 0 || point.container.statsAvailable === false) return { rx: null, tx: null }
   const previous = containerTrendPoints.value[index - 1]
+  if (previous.container.statsAvailable === false) return { rx: null, tx: null }
   const seconds = (new Date(point.collectedAt).getTime() - new Date(previous.collectedAt).getTime()) / 1000
   return {
     rx: counterRate(point.container.networkRxBytes, previous.container.networkRxBytes, seconds),
     tx: counterRate(point.container.networkTxBytes, previous.container.networkTxBytes, seconds),
   }
 }))
-const containerNetworkScale = computed(() => rateScale(containerNetworkRates.value.reduce((max, item) => Math.max(max, item.rx, item.tx), 0)))
+const containerNetworkScale = computed(() => rateScale(containerNetworkRates.value.reduce((max, item) => Math.max(max, item.rx ?? 0, item.tx ?? 0), 0)))
 const containerNetworkSeries = computed(() => [
-  { name: '网络接收', data: containerNetworkRates.value.map((item) => item.rx / containerNetworkScale.value.divisor), color: '#2867a6' },
-  { name: '网络发送', data: containerNetworkRates.value.map((item) => item.tx / containerNetworkScale.value.divisor), color: '#17834d' },
+  { name: '网络接收', data: containerNetworkRates.value.map((item) => item.rx == null ? null : item.rx / containerNetworkScale.value.divisor), color: '#2867a6' },
+  { name: '网络发送', data: containerNetworkRates.value.map((item) => item.tx == null ? null : item.tx / containerNetworkScale.value.divisor), color: '#17834d' },
 ])
 const processOptions = computed(() => {
   const options = new Map<string, ProcessMetric>()
@@ -127,17 +138,18 @@ const selectedProcessKey = computed({
   get: () => processOptions.value.some((item) => processKey(item) === processSelectionKey.value) ? processSelectionKey.value : processOptions.value[0] ? processKey(processOptions.value[0]) : '',
   set: (value: string) => { processSelectionKey.value = value },
 })
-const selectedProcess = computed(() => processOptions.value.find((item) => processKey(item) === selectedProcessKey.value) ?? null)
+const selectedProcess = computed(() => latest.value?.processes.find((item) => processKey(item) === selectedProcessKey.value) ?? null)
 const processTrendPoints = computed(() => history.value.flatMap((metric) => {
   const process = metric.processes.find((item) => processKey(item) === selectedProcessKey.value)
   return process ? [{ collectedAt: metric.collectedAt, process }] : []
 }))
 const processTrendLabels = computed(() => processTrendPoints.value.map((item) => trendLabel(item.collectedAt)))
+const processTimestamps = computed(() => processTrendPoints.value.map((item) => item.collectedAt))
 const processSeries = computed(() => [
-  { name: 'CPU', data: processTrendPoints.value.map((item) => item.process.cpuPercent), color: '#986400' },
+  { name: 'CPU', data: processTrendPoints.value.map((item) => processCpu(item.process)), color: '#986400' },
   { name: '内存', data: processTrendPoints.value.map((item) => item.process.memoryPercent), color: '#c73832' },
 ])
-const processCpuLeader = computed(() => (latest.value?.processes ?? []).reduce<ProcessMetric | null>(
+const processCpuLeader = computed(() => (latest.value?.processes ?? []).filter((item) => processCpu(item) != null).reduce<ProcessMetric | null>(
   (leader, process) => !leader || process.cpuPercent > leader.cpuPercent ? process : leader,
   null,
 ))
@@ -146,8 +158,8 @@ const processMemoryLeader = computed(() => (latest.value?.processes ?? []).reduc
   null,
 ))
 const runningContainerCount = computed(() => containers.value.filter((item) => item.state.toLowerCase() === 'running').length)
-const containerRestartTotal = computed(() => containers.value.reduce((total, item) => total + item.restartCount, 0))
-const containerCpuLeader = computed(() => containers.value.reduce<ContainerMetric | null>(
+const containerRestartTotal = computed(() => containers.value.some((item) => item.restartCountAvailable === false) ? '--' : containers.value.reduce((total, item) => total + item.restartCount, 0))
+const containerCpuLeader = computed(() => containers.value.filter((item) => containerCpu(item) != null).reduce<ContainerMetric | null>(
   (leader, container) => !leader || container.cpuPercent > leader.cpuPercent ? container : leader,
   null,
 ))
@@ -225,6 +237,9 @@ function statusLabel(status: Device['status'] | null) {
   return status === 'ONLINE' ? '在线' : status === 'OFFLINE' ? '离线' : status === 'PENDING' ? '待接入' : '--'
 }
 
+function optionalPercent(value: number | null) { return value == null ? '--' : percent(value) }
+function optionalBytes(value: number | null) { return value == null ? '--' : bytes(value) }
+
 function agentUpdateLabel(status: Device['agentUpdateStatus']) {
   const labels: Record<Device['agentUpdateStatus'], string> = {
     IDLE: '空闲',
@@ -301,6 +316,8 @@ async function removeNote(note: DeviceNote) {
 }
 
 async function load(background = false, options: { silent?: boolean; metadata?: boolean } = {}) {
+  const request = metricRequests.start()
+  const id = deviceId.value
   if (background && !options.silent) refreshing.value = true
   else if (!background) loading.value = true
   if (!options.silent) error.value = ''
@@ -308,16 +325,17 @@ async function load(background = false, options: { silent?: boolean; metadata?: 
   const from = new Date(to.getTime() - rangeHours.value * 3600_000)
   try {
     const [deviceResponse, historyResponse] = await Promise.all([
-      api.get<Device>(`/devices/${deviceId.value}`),
-      api.get<Metric[]>(`/devices/${deviceId.value}/metrics/history`, { params: { from: from.toISOString(), to: to.toISOString() } }),
+      api.get<Device>(`/devices/${id}`, { signal: request.signal }),
+      api.get<Metric[]>(`/devices/${id}/metrics/history`, { params: { from: from.toISOString(), to: to.toISOString() }, signal: request.signal }),
     ])
+    if (!request.isCurrent() || id !== deviceId.value) return
     device.value = deviceResponse.data
     history.value = historyResponse.data
     if (options.metadata !== false) await Promise.all([loadNotes(), loadStatusHistory()])
   } catch (cause) {
-    if (!options.silent) error.value = errorMessage(cause)
+    if (request.isCurrent() && !options.silent) error.value = errorMessage(cause)
   } finally {
-    if (!options.silent) {
+    if (request.isCurrent()) {
       loading.value = false
       refreshing.value = false
     }
@@ -378,7 +396,18 @@ onMounted(() => {
   window.addEventListener('xingchen:realtime', onRealtime)
 })
 useVisibilityPolling(() => load(true, { silent: true }))
+watch(deviceId, () => {
+  metricRequests.cancel()
+  device.value = null
+  history.value = []
+  notes.value = []
+  statusEvents.value = []
+  credential.value = null
+  enrollmentToken.value = null
+  void load()
+})
 onBeforeUnmount(() => {
+  metricRequests.cancel()
   window.clearTimeout(refreshTimer)
   window.removeEventListener('xingchen:realtime', onRealtime)
 })
@@ -409,15 +438,15 @@ onBeforeUnmount(() => {
         <MetricCard label="CPU 使用率" :value="latest ? percent(latest.cpuUsage) : '--'" :hint="latest ? `负载 ${latest.load1.toFixed(2)} / ${latest.load5.toFixed(2)} / ${latest.load15.toFixed(2)}` : '暂无数据'" :tone="(latest?.cpuUsage ?? 0) >= 80 ? 'danger' : 'info'"><template #icon><Cpu :size="17" /></template></MetricCard>
         <MetricCard label="内存使用率" :value="latest ? percent(latest.memoryUsage) : '--'" :hint="latest ? `交换分区 ${percent(latest.swapUsage)}` : '暂无数据'" :tone="(latest?.memoryUsage ?? 0) >= 80 ? 'danger' : 'success'"><template #icon><MemoryStick :size="17" /></template></MetricCard>
         <MetricCard label="最高磁盘占用" :value="latest ? percent(latest.diskUsage) : '--'" :hint="latest ? `${latest.disks.length} 个挂载点` : '暂无数据'" :tone="(latest?.diskUsage ?? 0) >= 85 ? 'danger' : 'warning'"><template #icon><HardDrive :size="17" /></template></MetricCard>
-        <MetricCard label="TCP 连接" :value="latest?.tcpConnections ?? '--'" :hint="latest ? `收 ${rate(latest.networkRecvBps)} · 发 ${rate(latest.networkSentBps)}` : '暂无数据'" tone="neutral"><template #icon><Waypoints :size="17" /></template></MetricCard>
+        <MetricCard label="TCP 连接" :value="latest?.tcpConnections ?? '--'" :hint="networkHint" tone="neutral"><template #icon><Waypoints :size="17" /></template></MetricCard>
       </div>
 
       <el-tabs v-model="activeTab" class="detail-tabs">
         <el-tab-pane label="趋势与主机" name="overview">
           <div class="trend-toolbar"><span>趋势时间范围</span><el-segmented v-model="rangeHours" :options="[{ label: '1 小时', value: 1 }, { label: '6 小时', value: 6 }, { label: '24 小时', value: 24 }]" @change="load(true)" /></div>
           <div v-if="history.length" class="chart-grid">
-            <article class="panel"><div class="panel-head"><div><h2>资源使用率</h2><p>CPU、内存与最高磁盘占用</p></div></div><MetricChart :labels="labels" :series="resourceSeries" unit="%" /></article>
-            <article class="panel"><div class="panel-head"><div><h2>磁盘与网络吞吐</h2><p>单位按峰值自动换算为 {{ ioScale.unit }}</p></div></div><MetricChart :labels="labels" :series="ioSeries" :unit="ioScale.unit" /></article>
+            <article class="panel"><div class="panel-head"><div><h2>资源使用率</h2><p>CPU、内存与最高磁盘占用</p></div></div><MetricChart :labels="labels" :timestamps="timestamps" :series="resourceSeries" unit="%" /></article>
+            <article class="panel"><div class="panel-head"><div><h2>磁盘与网络吞吐</h2><p>单位按峰值自动换算为 {{ ioScale.unit }}</p></div></div><MetricChart :labels="labels" :timestamps="timestamps" :series="ioSeries" :unit="ioScale.unit" /></article>
           </div>
           <article v-else class="panel"><EmptyState title="暂无趋势数据" description="Agent 首次上报后即可查看所选时间范围内的指标曲线。" /></article>
 
@@ -537,7 +566,7 @@ onBeforeUnmount(() => {
         </el-tab-pane>
 
         <el-tab-pane :label="`磁盘 (${latest?.disks.length ?? 0})`" name="disks">
-          <article class="panel"><div v-if="latest?.disks.length" class="table-wrap"><table class="data-table"><thead><tr><th>挂载点</th><th>设备</th><th>文件系统</th><th>使用率</th><th>已用 / 总量</th><th>读取</th><th>写入</th><th>SMART</th></tr></thead><tbody><tr v-for="disk in latest.disks" :key="`${disk.device}-${disk.mountpoint}`"><td><strong>{{ disk.mountpoint }}</strong></td><td>{{ disk.device }}</td><td>{{ disk.fileSystem || '--' }}</td><td>{{ percent(disk.usagePercent) }}</td><td>{{ bytes(disk.usedBytes) }} / {{ bytes(disk.totalBytes) }}</td><td>{{ rate(disk.readBytesPerSec) }}</td><td>{{ rate(disk.writeBytesPerSec) }}</td><td><span v-if="disk.smart" class="smart-status" :data-level="smartTone(disk.smart.status)" :title="disk.smart.message"><TriangleAlert v-if="disk.smart.status === 'FAILED'" :size="13" /><ShieldCheck v-else :size="13" />{{ smartLabel(disk.smart.status) }}<small v-if="disk.smart.temperature">{{ disk.smart.temperature }} °C</small></span><span v-else class="muted-value">未采集</span></td></tr></tbody></table></div><EmptyState v-else title="暂无磁盘数据" /></article>
+          <article class="panel"><div v-if="latest?.disks.length" class="table-wrap"><table class="data-table"><thead><tr><th>挂载点</th><th>设备</th><th>文件系统</th><th>使用率</th><th>已用 / 总量</th><th>读取</th><th>写入</th><th>SMART</th></tr></thead><tbody><tr v-for="disk in latest.disks" :key="`${disk.device}-${disk.mountpoint}`"><td><strong>{{ disk.mountpoint }}</strong></td><td>{{ disk.device }}</td><td>{{ disk.fileSystem || '--' }}</td><td>{{ percent(disk.usagePercent) }}</td><td>{{ bytes(disk.usedBytes) }} / {{ bytes(disk.totalBytes) }}</td><td>{{ (disk.ioAvailable === false ? '--' : rate(disk.readBytesPerSec)) }}</td><td>{{ (disk.ioAvailable === false ? '--' : rate(disk.writeBytesPerSec)) }}</td><td><span v-if="disk.smart" class="smart-status" :data-level="smartTone(disk.smart.status)" :title="disk.smart.message"><TriangleAlert v-if="disk.smart.status === 'FAILED'" :size="13" /><ShieldCheck v-else :size="13" />{{ smartLabel(disk.smart.status) }}<small v-if="disk.smart.temperature">{{ disk.smart.temperature }} °C</small></span><span v-else class="muted-value">未采集</span></td></tr></tbody></table></div><EmptyState v-else title="暂无磁盘数据" /></article>
         </el-tab-pane>
 
         <el-tab-pane :label="`进程 (${latest?.processes.length ?? 0})`" name="processes">
@@ -548,17 +577,17 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="processOptions.length" class="analytics-toolbar">
             <label><span>历史进程</span><el-select v-model="selectedProcessKey" filterable aria-label="选择历史进程"><el-option v-for="process in processOptions" :key="processKey(process)" :label="`${process.name || '未命名'} · PID ${process.pid}`" :value="processKey(process)"><span class="analytics-option"><strong>{{ process.name || '未命名进程' }}</strong><small>PID {{ process.pid }}{{ process.username ? ` · ${process.username}` : '' }}</small></span></el-option></el-select></label>
-            <span v-if="selectedProcess" class="analytics-selection">最近 CPU {{ percent(selectedProcess.cpuPercent) }} · 内存 {{ percent(selectedProcess.memoryPercent) }}</span>
+            <span v-if="selectedProcess" class="analytics-selection">最近 CPU {{ optionalPercent(processCpu(selectedProcess)) }} · 内存 {{ percent(selectedProcess.memoryPercent) }}</span>
           </div>
           <div v-if="processTrendPoints.length > 1" class="chart-grid analytics-chart-grid single-chart-grid">
-            <article class="panel"><div class="panel-head"><div><h2>进程资源趋势</h2><p>{{ selectedProcess?.name || '所选进程' }} · PID {{ selectedProcess?.pid ?? '--' }}</p></div><Cpu :size="17" /></div><MetricChart :labels="processTrendLabels" :series="processSeries" unit="%" :aria-label="`${selectedProcess?.name || '进程'}资源趋势`" /></article>
+            <article class="panel"><div class="panel-head"><div><h2>进程资源趋势</h2><p>{{ selectedProcess?.name || '所选进程' }} · PID {{ selectedProcess?.pid ?? '--' }}</p></div><Cpu :size="17" /></div><MetricChart :labels="processTrendLabels" :timestamps="processTimestamps" :series="processSeries" unit="%" :aria-label="`${selectedProcess?.name || '进程'}资源趋势`" /></article>
           </div>
           <div v-else-if="processOptions.length" class="panel analytics-empty"><EmptyState title="暂无进程历史数据" description="该进程在当前时间范围内只有一个采集点，继续采集后会显示趋势。" /></div>
           <article class="panel resource-inventory-panel">
             <div class="panel-head"><div><h2>进程快照</h2><p>按 Agent 采集顺序展示当前资源占用</p></div><ListChecks :size="17" /></div>
             <template v-if="latest?.processes.length">
-              <div class="table-wrap desktop-data-view"><table class="data-table"><thead><tr><th>PID</th><th>进程</th><th>命令行</th><th>用户</th><th>CPU</th><th>内存</th><th>状态</th></tr></thead><tbody><tr v-for="process in latest.processes" :key="process.pid"><td class="mono-value">{{ process.pid }}</td><td><strong>{{ process.name }}</strong></td><td class="mono-value process-command" :title="process.commandLine || undefined">{{ process.commandLine || '--' }}</td><td>{{ process.username || '--' }}</td><td>{{ percent(process.cpuPercent) }}</td><td>{{ percent(process.memoryPercent) }}</td><td><span class="record-state">{{ process.status || '未知' }}</span></td></tr></tbody></table></div>
-              <div class="mobile-data-view resource-record-list"><article v-for="process in latest.processes" :key="process.pid" class="resource-record"><header><div><strong>{{ process.name || '未命名进程' }}</strong><span class="mono-value">PID {{ process.pid }} · {{ process.username || '未知用户' }}</span></div><span class="record-state">{{ process.status || '未知' }}</span></header><dl><div><dt>CPU</dt><dd>{{ percent(process.cpuPercent) }}</dd></div><div><dt>内存</dt><dd>{{ percent(process.memoryPercent) }}</dd></div></dl><p class="mono-value">{{ process.commandLine || '未采集命令行' }}</p></article></div>
+              <div class="table-wrap desktop-data-view"><table class="data-table"><thead><tr><th>PID</th><th>进程</th><th>命令行</th><th>用户</th><th>CPU</th><th>内存</th><th>状态</th></tr></thead><tbody><tr v-for="process in latest.processes" :key="process.pid"><td class="mono-value">{{ process.pid }}</td><td><strong>{{ process.name }}</strong></td><td class="mono-value process-command" :title="process.commandLine || undefined">{{ process.commandLine || '--' }}</td><td>{{ process.username || '--' }}</td><td>{{ optionalPercent(processCpu(process)) }}</td><td>{{ percent(process.memoryPercent) }}</td><td><span class="record-state">{{ process.status || '未知' }}</span></td></tr></tbody></table></div>
+              <div class="mobile-data-view resource-record-list"><article v-for="process in latest.processes" :key="process.pid" class="resource-record"><header><div><strong>{{ process.name || '未命名进程' }}</strong><span class="mono-value">PID {{ process.pid }} · {{ process.username || '未知用户' }}</span></div><span class="record-state">{{ process.status || '未知' }}</span></header><dl><div><dt>CPU</dt><dd>{{ optionalPercent(processCpu(process)) }}</dd></div><div><dt>内存</dt><dd>{{ percent(process.memoryPercent) }}</dd></div></dl><p class="mono-value">{{ process.commandLine || '未采集命令行' }}</p></article></div>
             </template>
             <EmptyState v-else title="暂无进程数据" description="默认保留 CPU 排名前 12 的进程；需要完整清单时，在 Agent 配置启用 collect_all_processes。" />
           </article>
@@ -581,18 +610,18 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="containerOptions.length" class="analytics-toolbar">
             <label><span>历史容器</span><el-select v-model="selectedContainerId" filterable aria-label="选择历史容器"><el-option v-for="container in containerOptions" :key="container.id" :label="container.name || container.id.slice(0, 12)" :value="container.id"><span class="analytics-option"><strong>{{ container.name || '未命名容器' }}</strong><small>{{ container.image || container.id.slice(0, 12) }}</small></span></el-option></el-select></label>
-            <span v-if="selectedContainer" class="analytics-selection">当前 CPU {{ percent(selectedContainer.cpuPercent) }} · 内存 {{ percent(selectedContainer.memoryPercent) }}</span>
+            <span v-if="selectedContainer" class="analytics-selection">当前 CPU {{ optionalPercent(containerCpu(selectedContainer)) }} · 内存 {{ optionalPercent(containerValue(selectedContainer, 'memoryPercent')) }}</span>
           </div>
           <div v-if="containerTrendPoints.length > 1" class="chart-grid analytics-chart-grid">
-            <article class="panel"><div class="panel-head"><div><h2>容器资源趋势</h2><p>{{ selectedContainer?.name || '所选容器' }} · CPU 与内存使用率</p></div><Box :size="17" /></div><MetricChart :labels="containerTrendLabels" :series="containerResourceSeries" unit="%" :aria-label="`${selectedContainer?.name || '容器'}资源趋势`" /></article>
-            <article class="panel"><div class="panel-head"><div><h2>容器网络吞吐</h2><p>按相邻采集点计算，计数器重置会自动归零 · {{ containerNetworkScale.unit }}</p></div><Network :size="17" /></div><MetricChart :labels="containerTrendLabels" :series="containerNetworkSeries" :unit="containerNetworkScale.unit" :aria-label="`${selectedContainer?.name || '容器'}网络吞吐趋势`" /></article>
+            <article class="panel"><div class="panel-head"><div><h2>容器资源趋势</h2><p>{{ selectedContainer?.name || '所选容器' }} · CPU 与内存使用率</p></div><Box :size="17" /></div><MetricChart :labels="containerTrendLabels" :timestamps="containerTimestamps" :series="containerResourceSeries" unit="%" :aria-label="`${selectedContainer?.name || '容器'}资源趋势`" /></article>
+            <article class="panel"><div class="panel-head"><div><h2>容器网络吞吐</h2><p>按相邻采集点计算，计数器重置会自动归零 · {{ containerNetworkScale.unit }}</p></div><Network :size="17" /></div><MetricChart :labels="containerTrendLabels" :timestamps="containerTimestamps" :series="containerNetworkSeries" :unit="containerNetworkScale.unit" :aria-label="`${selectedContainer?.name || '容器'}网络吞吐趋势`" /></article>
           </div>
           <div v-else-if="containerOptions.length" class="panel analytics-empty"><EmptyState title="暂无容器历史数据" description="该容器在当前时间范围内只有一个采集点，继续采集后会显示趋势。" /></div>
           <article class="panel resource-inventory-panel">
             <div class="panel-head"><div><h2>Docker 容器</h2><p>运行状态、资源占用与累计网络流量</p></div><Box :size="17" /></div>
             <template v-if="containers.length">
-              <div class="table-wrap desktop-data-view"><table class="data-table"><thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th><th>网络</th><th>重启</th></tr></thead><tbody><tr v-for="container in containers" :key="container.id"><td><strong>{{ container.name }}</strong><small class="mono-value">{{ container.id.slice(0, 12) }}</small></td><td class="mono-value container-image">{{ container.image || '--' }}</td><td><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /><small>{{ container.status || '--' }}</small></td><td>{{ percent(container.cpuPercent) }}</td><td>{{ percent(container.memoryPercent) }}<small>{{ bytes(container.memoryUsageBytes) }} / {{ bytes(container.memoryLimitBytes) }}</small></td><td><span class="container-network"><ArrowUp :size="12" />{{ bytes(container.networkTxBytes) }}</span><span class="container-network"><ArrowDown :size="12" />{{ bytes(container.networkRxBytes) }}</span></td><td>{{ container.restartCount }}</td></tr></tbody></table></div>
-              <div class="mobile-data-view resource-record-list"><article v-for="container in containers" :key="container.id" class="resource-record"><header><div><strong>{{ container.name || '未命名容器' }}</strong><span class="mono-value">{{ container.image || container.id.slice(0, 12) }}</span></div><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /></header><dl><div><dt>CPU</dt><dd>{{ percent(container.cpuPercent) }}</dd></div><div><dt>内存</dt><dd>{{ percent(container.memoryPercent) }}</dd></div><div><dt>发送 / 接收</dt><dd>{{ bytes(container.networkTxBytes) }} / {{ bytes(container.networkRxBytes) }}</dd></div><div><dt>重启</dt><dd>{{ container.restartCount }}</dd></div></dl><p>{{ container.status || '未提供运行状态详情' }}</p></article></div>
+              <div class="table-wrap desktop-data-view"><table class="data-table"><thead><tr><th>容器</th><th>镜像</th><th>状态</th><th>CPU</th><th>内存</th><th>网络</th><th>重启</th></tr></thead><tbody><tr v-for="container in containers" :key="container.id"><td><strong>{{ container.name }}</strong><small class="mono-value">{{ container.id.slice(0, 12) }}</small></td><td class="mono-value container-image">{{ container.image || '--' }}</td><td><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /><small>{{ container.status || '--' }}</small></td><td>{{ optionalPercent(containerCpu(container)) }}</td><td>{{ optionalPercent(containerValue(container, 'memoryPercent')) }}<small>{{ optionalBytes(containerValue(container, 'memoryUsageBytes')) }} / {{ optionalBytes(containerValue(container, 'memoryLimitBytes')) }}</small></td><td><span class="container-network"><ArrowUp :size="12" />{{ optionalBytes(containerValue(container, 'networkTxBytes')) }}</span><span class="container-network"><ArrowDown :size="12" />{{ optionalBytes(containerValue(container, 'networkRxBytes')) }}</span></td><td>{{ container.restartCountAvailable === false ? '--' : container.restartCount }}</td></tr></tbody></table></div>
+              <div class="mobile-data-view resource-record-list"><article v-for="container in containers" :key="container.id" class="resource-record"><header><div><strong>{{ container.name || '未命名容器' }}</strong><span class="mono-value">{{ container.image || container.id.slice(0, 12) }}</span></div><StatusBadge :status="container.state === 'running' ? 'ONLINE' : 'OFFLINE'" /></header><dl><div><dt>CPU</dt><dd>{{ optionalPercent(containerCpu(container)) }}</dd></div><div><dt>内存</dt><dd>{{ optionalPercent(containerValue(container, 'memoryPercent')) }}</dd></div><div><dt>发送 / 接收</dt><dd>{{ optionalBytes(containerValue(container, 'networkTxBytes')) }} / {{ optionalBytes(containerValue(container, 'networkRxBytes')) }}</dd></div><div><dt>重启</dt><dd>{{ container.restartCountAvailable === false ? '--' : container.restartCount }}</dd></div></dl><p>{{ container.status || '未提供运行状态详情' }}</p></article></div>
             </template>
             <EmptyState v-else title="暂无 Docker 容器" description="Agent 未检测到可访问的 Docker socket；主机监控、服务检查与其他指标不受影响。" />
           </article>

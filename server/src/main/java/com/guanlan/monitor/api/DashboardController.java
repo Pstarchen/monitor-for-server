@@ -2,6 +2,7 @@ package com.guanlan.monitor.api;
 
 import com.guanlan.monitor.api.dto.AlertDtos;
 import com.guanlan.monitor.api.dto.DeviceDtos;
+import com.guanlan.monitor.api.dto.DeviceHealthDtos;
 import com.guanlan.monitor.domain.AlertEvent;
 import com.guanlan.monitor.domain.Device;
 import com.guanlan.monitor.repository.AlertEventRepository;
@@ -36,7 +37,7 @@ public class DashboardController {
         List<DeviceDtos.View> devices = visible == null ? allDevices
                 : allDevices.stream().filter(device -> visible.contains(device.id())).toList();
         List<DeviceDtos.View> measured = devices.stream()
-                .filter(device -> device.status() == Device.Status.ONLINE && device.latest() != null).toList();
+                .filter(DashboardController::hasCurrentMetrics).toList();
         List<DeviceDtos.View> top = measured.stream()
                 .sorted(Comparator.comparingDouble(this::peakResourceUsage).reversed())
                 .limit(5).toList();
@@ -47,8 +48,8 @@ public class DashboardController {
                 devices.stream().filter(device -> device.status() == Device.Status.PENDING).count(),
                 includeAlerts ? activeAlerts(authentication, devices) : 0,
                 average(measured, "cpu"), average(measured, "memory"), average(measured, "disk"),
-                measured.stream().mapToDouble(device -> device.latest().networkSentBps()).sum(),
-                measured.stream().mapToDouble(device -> device.latest().networkRecvBps()).sum(),
+                measured.stream().filter(DashboardController::hasCurrentNetworkRates).mapToDouble(device -> device.latest().networkSentBps()).sum(),
+                measured.stream().filter(DashboardController::hasCurrentNetworkRates).mapToDouble(device -> device.latest().networkRecvBps()).sum(),
                 measured.stream().mapToInt(device -> device.latest().smartFailed()).sum(),
                 measured.stream().mapToInt(device -> device.latest().integrityChanges()).sum(),
                 measured.stream().mapToInt(device -> device.latest().firewallInactive() == null ? 0 : device.latest().firewallInactive()).sum(),
@@ -78,6 +79,17 @@ public class DashboardController {
             case "memory" -> device.latest().memoryUsage();
             default -> device.latest().diskUsage();
         }).average().orElse(0);
+    }
+
+    static boolean hasCurrentMetrics(DeviceDtos.View device) {
+        return device.status() == Device.Status.ONLINE && device.latest() != null
+                && device.health() != null && device.health().state() == DeviceHealthDtos.State.HEALTHY;
+    }
+
+    static boolean hasCurrentNetworkRates(DeviceDtos.View device) {
+        if (!hasCurrentMetrics(device)) return false;
+        var network = device.latest().network();
+        return network == null || (!Boolean.FALSE.equals(network.available()) && !Boolean.FALSE.equals(network.ratesAvailable()));
     }
 
     private double peakResourceUsage(DeviceDtos.View device) {

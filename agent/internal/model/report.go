@@ -106,6 +106,8 @@ type MemoryStats struct {
 }
 
 type DiskStats struct {
+	IODevice         string       `json:"ioDevice"`
+	IOAvailable      bool         `json:"ioAvailable"`
 	Device           string       `json:"device"`
 	Mountpoint       string       `json:"mountpoint"`
 	FileSystem       string       `json:"fileSystem"`
@@ -131,11 +133,14 @@ type SmartHealth struct {
 }
 
 type NetworkStats struct {
-	BytesSentPerSec float64 `json:"bytesSentPerSec"`
-	BytesRecvPerSec float64 `json:"bytesRecvPerSec"`
-	BytesSent       uint64  `json:"bytesSent"`
-	BytesRecv       uint64  `json:"bytesRecv"`
-	TCPConnections  int     `json:"tcpConnections"`
+	SampledInterfaces []string `json:"sampledInterfaces"`
+	Available         bool     `json:"available"`
+	RatesAvailable    bool     `json:"ratesAvailable"`
+	BytesSentPerSec   float64  `json:"bytesSentPerSec"`
+	BytesRecvPerSec   float64  `json:"bytesRecvPerSec"`
+	BytesSent         uint64   `json:"bytesSent"`
+	BytesRecv         uint64   `json:"bytesRecv"`
+	TCPConnections    int      `json:"tcpConnections"`
 }
 
 type NetworkInterface struct {
@@ -154,21 +159,25 @@ type PortStats struct {
 }
 
 type ContainerStats struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	Image            string  `json:"image"`
-	State            string  `json:"state"`
-	Status           string  `json:"status"`
-	CPUPercent       float64 `json:"cpuPercent"`
-	MemoryUsageBytes uint64  `json:"memoryUsageBytes"`
-	MemoryLimitBytes uint64  `json:"memoryLimitBytes"`
-	MemoryPercent    float64 `json:"memoryPercent"`
-	NetworkRxBytes   uint64  `json:"networkRxBytes"`
-	NetworkTxBytes   uint64  `json:"networkTxBytes"`
-	RestartCount     int     `json:"restartCount"`
+	StatsAvailable        bool    `json:"statsAvailable"`
+	CPUSampled            bool    `json:"cpuSampled"`
+	ID                    string  `json:"id"`
+	Name                  string  `json:"name"`
+	Image                 string  `json:"image"`
+	State                 string  `json:"state"`
+	Status                string  `json:"status"`
+	CPUPercent            float64 `json:"cpuPercent"`
+	MemoryUsageBytes      uint64  `json:"memoryUsageBytes"`
+	MemoryLimitBytes      uint64  `json:"memoryLimitBytes"`
+	MemoryPercent         float64 `json:"memoryPercent"`
+	NetworkRxBytes        uint64  `json:"networkRxBytes"`
+	NetworkTxBytes        uint64  `json:"networkTxBytes"`
+	RestartCount          int     `json:"restartCount"`
+	RestartCountAvailable bool    `json:"restartCountAvailable"`
 }
 
 type ProcessStats struct {
+	CPUSampled    bool    `json:"cpuSampled"`
 	PID           int32   `json:"pid"`
 	Name          string  `json:"name"`
 	CommandLine   string  `json:"commandLine,omitempty"`

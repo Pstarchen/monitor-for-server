@@ -194,7 +194,7 @@ Agent 端配置：
 {
   "deviceId": "device-uuid",
   "action": "update",
-  "version": "v1.20.21",
+  "version": "v1.20.22",
   "rolloutId": 123,
   "memberId": 456
 }
@@ -219,7 +219,7 @@ Agent 端配置：
 
 ```json
 {
-  "targetVersion": "v1.20.21",
+  "targetVersion": "v1.20.22",
   "deviceIds": ["device-a", "device-b"],
   "maintenanceWindowId": null,
   "canaryPercent": 10,

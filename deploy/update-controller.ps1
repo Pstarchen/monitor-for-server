@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [switch] $Check,
     [switch] $Apply,
@@ -1013,9 +1013,9 @@ try {
     $services = @('setup', 'server', 'web')
     $imageKeys = @('XINGCHEN_SETUP_IMAGE', 'XINGCHEN_SERVER_IMAGE', 'XINGCHEN_WEB_IMAGE')
     $imageDefaults = @(
-        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.21',
-        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.21',
-        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.21'
+        'ghcr.io/pstarchen/monitor-for-server-setup:v1.20.22',
+        'ghcr.io/pstarchen/monitor-for-server-server:v1.20.22',
+        'ghcr.io/pstarchen/monitor-for-server-web:v1.20.22'
     )
     $sourceContexts = @('.', 'server', 'web')
     $sourceDockerfiles = @('setup/Dockerfile', '', '')

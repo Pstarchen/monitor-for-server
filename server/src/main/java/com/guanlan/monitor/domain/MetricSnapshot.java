@@ -113,6 +113,9 @@ public class MetricSnapshot {
     @Column(name = "network_interfaces_json", columnDefinition = "TEXT")
     private String networkInterfacesJson;
 
+    @Column(name = "network_json", columnDefinition = "TEXT")
+    private String networkJson;
+
     @Column(name = "ports_json", columnDefinition = "TEXT")
     private String portsJson;
 

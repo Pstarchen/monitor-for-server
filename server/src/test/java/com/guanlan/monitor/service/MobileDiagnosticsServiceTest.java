@@ -23,7 +23,7 @@ import static org.mockito.Mockito.when;
 class MobileDiagnosticsServiceTest {
     private final DeviceService devices = mock(DeviceService.class);
     private final MetricService metrics = mock(MetricService.class);
-    private final MobileDiagnosticsService service = new MobileDiagnosticsService(devices, metrics);
+    private final MobileDiagnosticsService service = new MobileDiagnosticsService(devices, metrics, new com.fasterxml.jackson.databind.ObjectMapper());
 
     @Test
     void buildsDiagnosticsAndIgnoresNullItemsFromStoredMetrics() {
@@ -71,7 +71,8 @@ class MobileDiagnosticsServiceTest {
         var result = service.history("device-1", " 6h ");
 
         assertThat(result.range()).isEqualTo("6H");
-        assertThat(result.sampleStepSeconds()).isEqualTo(300);
+        assertThat(result.sampleStepSeconds()).isEqualTo(675);
+        assertThat(result.sampling()).isEqualTo("FIRST_MIN_MAX_LAST");
         assertThat(result.points()).isEmpty();
         assertThat(result.to().getEpochSecond() - result.from().getEpochSecond()).isEqualTo(6 * 60 * 60);
     }
@@ -90,8 +91,8 @@ class MobileDiagnosticsServiceTest {
 
         var result = service.history("device-1", "30D");
 
-        assertThat(result.sampleStepSeconds()).isEqualTo(3_600);
-        assertThat(result.points()).hasSize(720);
+        assertThat(result.sampleStepSeconds()).isEqualTo(81_000);
+        assertThat(result.points()).hasSizeLessThanOrEqualTo(720);
         assertThat(result.points()).extracting("collectedAt").isSorted();
         assertThat(result.points().getLast().collectedAt()).isEqualTo(result.to());
     }
@@ -102,6 +103,52 @@ class MobileDiagnosticsServiceTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("1H");
         verify(metrics, never()).compactHistory(ArgumentMatchers.anyString(), ArgumentMatchers.any(), ArgumentMatchers.any());
+    }
+
+    @Test
+    void retainsIndependentCpuAndNetworkSpikesAtTheirActualTimesAndMarksMissingReports() {
+        when(metrics.compactHistory(ArgumentMatchers.eq("device-1"), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    Instant from = invocation.getArgument(1);
+                    return List.of(sample(from, 0, 10, 10), sample(from, 5, 99, 10),
+                            sample(from, 10, 10, 900), sample(from, 15, 10, 10), sample(from, 100, 10, 10));
+                });
+        var result = service.history("device-1", "6H");
+        assertThat(result.points()).anySatisfy(point -> {
+            assertThat(point.cpuUsage()).isEqualTo(99);
+            assertThat(point.collectedAt()).isEqualTo(result.from().plusSeconds(5));
+        }).anySatisfy(point -> {
+            assertThat(point.networkRecvBps()).isEqualTo(900);
+            assertThat(point.collectedAt()).isEqualTo(result.from().plusSeconds(10));
+        });
+        assertThat(result.points().getLast().gapBefore()).isTrue();
+        assertThat(result.points().getFirst().networkRatesAvailable()).isNull();
+        assertThat(result.points()).extracting("collectedAt").doesNotHaveDuplicates().isSorted();
+    }
+
+    @Test
+    void distinguishesUnavailableNetworkSamplesFromRealZeroAndOldReports() {
+        when(metrics.compactHistory(ArgumentMatchers.eq("device-1"), ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    Instant from = invocation.getArgument(1);
+                    var unavailable = sample(from, 0, 10, 0);
+                    when(unavailable.getNetworkJson()).thenReturn("{\"available\":true,\"ratesAvailable\":false}");
+                    var zero = sample(from, 5, 10, 0);
+                    when(zero.getNetworkJson()).thenReturn("{\"available\":true,\"ratesAvailable\":true}");
+                    return List.of(unavailable, zero);
+                });
+        var result = service.history("device-1", "1H");
+        assertThat(result.points().getFirst().networkRatesAvailable()).isFalse();
+        assertThat(result.points().getLast().networkRatesAvailable()).isTrue();
+        assertThat(result.points().getLast().networkRecvBps()).isZero();
+    }
+
+    private MetricSnapshotRepository.HistorySample sample(Instant from, long seconds, double cpu, double received) {
+        var sample = mock(MetricSnapshotRepository.HistorySample.class);
+        when(sample.getCollectedAt()).thenReturn(from.plusSeconds(seconds));
+        when(sample.getCpuUsage()).thenReturn(cpu);
+        when(sample.getNetworkRecvBps()).thenReturn(received);
+        return sample;
     }
 
     private record HistorySample(Instant getCollectedAt) implements MetricSnapshotRepository.HistorySample {
@@ -115,6 +162,7 @@ class MobileDiagnosticsServiceTest {
         @Override public double getDiskUsage() { return 55; }
         @Override public double getNetworkSentBps() { return 10; }
         @Override public double getNetworkRecvBps() { return 20; }
+        @Override public String getNetworkJson() { return null; }
     }
 
     @SafeVarargs

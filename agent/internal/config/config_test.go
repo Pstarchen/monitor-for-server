@@ -4,8 +4,24 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
+
+func TestLoadExplicitNetworkInterfaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.json")
+	body := []byte(`{"server_url":"https://monitor.example.com","device_id":"device","agent_key":"test-key","network_interfaces":[" eth0 ","wg0","eth0",""]}`)
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load([]string{"-config", path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.NetworkInterfaces, []string{"eth0", "wg0"}) {
+		t.Fatalf("selected network interfaces = %q", cfg.NetworkInterfaces)
+	}
+}
 
 func TestLoadRejectsRemotePlainHTTP(t *testing.T) {
 	dir := t.TempDir()

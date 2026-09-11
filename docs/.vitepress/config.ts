@@ -42,6 +42,7 @@ export default defineConfig({
           { text: '完整新手指南', link: '/user-guide' },
           { text: '总控服务器', link: '/controller-server' },
           { text: '受监控服务器', link: '/monitored-agent' },
+          { text: '指标口径与数据核对', link: '/guide/metric-accuracy' },
         ],
       },
       {

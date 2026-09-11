@@ -30,8 +30,18 @@ public final class MobileDiagnosticsDtos {
             double networkRecvBps,
             long networkSentBytes,
             long networkRecvBytes,
-            int tcpConnections
-    ) {}
+            int tcpConnections,
+            Boolean networkAvailable,
+            Boolean networkRatesAvailable,
+            List<String> sampledInterfaces
+    ) {
+        public Totals(double cpuUsage, double memoryUsage, double swapUsage, double load1, double load5,
+                      double load15, double temperatureCelsius, double networkSentBps, double networkRecvBps,
+                      long networkSentBytes, long networkRecvBytes, int tcpConnections) {
+            this(cpuUsage, memoryUsage, swapUsage, load1, load5, load15, temperatureCelsius, networkSentBps,
+                    networkRecvBps, networkSentBytes, networkRecvBytes, tcpConnections, null, null, null);
+        }
+    }
 
     public record NetworkInterface(String name, int mtu, List<String> flags, List<String> addresses) {}
 
@@ -45,8 +55,16 @@ public final class MobileDiagnosticsDtos {
             double usagePercent,
             double readBytesPerSec,
             double writeBytesPerSec,
-            Smart smart
-    ) {}
+            Smart smart,
+            String ioDevice,
+            Boolean ioAvailable
+    ) {
+        public Disk(String device, String mountpoint, String fileSystem, long totalBytes, long usedBytes,
+                    long freeBytes, double usagePercent, double readBytesPerSec, double writeBytesPerSec, Smart smart) {
+            this(device, mountpoint, fileSystem, totalBytes, usedBytes, freeBytes, usagePercent,
+                    readBytesPerSec, writeBytesPerSec, smart, null, null);
+        }
+    }
 
     public record Smart(boolean available, boolean healthy, String status, long temperatureCelsius) {}
 
@@ -56,8 +74,13 @@ public final class MobileDiagnosticsDtos {
             String username,
             double cpuPercent,
             double memoryPercent,
-            String status
-    ) {}
+            String status,
+            Boolean cpuSampled
+    ) {
+        public Process(int pid, String name, String username, double cpuPercent, double memoryPercent, String status) {
+            this(pid, name, username, cpuPercent, memoryPercent, status, null);
+        }
+    }
 
     public record Health(
             boolean smartFailure,
@@ -72,7 +95,8 @@ public final class MobileDiagnosticsDtos {
             Instant from,
             Instant to,
             long sampleStepSeconds,
-            List<HistoryPoint> points
+            List<HistoryPoint> points,
+            String sampling
     ) {}
 
     public record HistoryPoint(
@@ -86,6 +110,8 @@ public final class MobileDiagnosticsDtos {
             double temperatureCelsius,
             double diskUsage,
             double networkSentBps,
-            double networkRecvBps
+            double networkRecvBps,
+            boolean gapBefore,
+            Boolean networkRatesAvailable
     ) {}
 }

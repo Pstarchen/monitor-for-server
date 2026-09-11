@@ -91,8 +91,8 @@ public class MetricService {
         metric.setLoad5(nonNegativeFinite(report.cpu().load5()));
         metric.setLoad15(nonNegativeFinite(report.cpu().load15()));
         metric.setDiskUsage(disks.stream().mapToDouble(disk -> clampPercent(disk.usagePercent())).max().orElse(0));
-        metric.setDiskReadBps(disks.stream().mapToDouble(disk -> nonNegativeFinite(disk.readBytesPerSec())).max().orElse(0));
-        metric.setDiskWriteBps(disks.stream().mapToDouble(disk -> nonNegativeFinite(disk.writeBytesPerSec())).max().orElse(0));
+        metric.setDiskReadBps(diskThroughput(disks, true));
+        metric.setDiskWriteBps(diskThroughput(disks, false));
         metric.setNetworkSentBps(nonNegativeFinite(report.network().bytesSentPerSec()));
         metric.setNetworkRecvBps(nonNegativeFinite(report.network().bytesRecvPerSec()));
         metric.setNetworkSentBytes(Math.max(0, report.network().bytesSent()));
@@ -103,8 +103,12 @@ public class MetricService {
                 .max().orElse(0));
         metric.setGpuUsage(maxOptional(gpus.stream().mapToDouble(gpu -> clampPercent(gpu.usagePercent())).boxed().toList()));
         metric.setBatteryPercent(minOptional(batteries.stream().mapToDouble(battery -> clampPercent(battery.percent())).boxed().toList()));
-        metric.setContainerCpuUsage(maxOptional(containers.stream().mapToDouble(container -> nonNegativeFinite(container.cpuPercent())).boxed().toList()));
-        metric.setContainerMemoryUsage(maxOptional(containers.stream().mapToDouble(container -> clampPercent(container.memoryPercent())).boxed().toList()));
+        metric.setContainerCpuUsage(maxOptional(containers.stream()
+                .filter(container -> !Boolean.FALSE.equals(container.statsAvailable()) && !Boolean.FALSE.equals(container.cpuSampled()))
+                .mapToDouble(container -> nonNegativeFinite(container.cpuPercent())).boxed().toList()));
+        metric.setContainerMemoryUsage(maxOptional(containers.stream()
+                .filter(container -> !Boolean.FALSE.equals(container.statsAvailable()))
+                .mapToDouble(container -> clampPercent(container.memoryPercent())).boxed().toList()));
         metric.setSmartPassed(smartCount(disks, "PASSED"));
         metric.setSmartFailed(smartCount(disks, "FAILED"));
         metric.setSmartUnknown(smartCount(disks, "UNKNOWN"));
@@ -114,6 +118,7 @@ public class MetricService {
         metric.setProcessesJson(json(report.processes() == null ? List.of() : report.processes()));
         metric.setServicesJson(json(report.services() == null ? List.of() : report.services()));
         metric.setNetworkInterfacesJson(json(report.networkInterfaces() == null ? List.of() : report.networkInterfaces()));
+        metric.setNetworkJson(json(report.network()));
         metric.setPortsJson(json(report.ports() == null ? List.of() : report.ports()));
         metric.setContainersJson(json(containers));
         metric.setFansJson(json(fans));
@@ -189,6 +194,25 @@ public class MetricService {
 
     private double clampPercent(double value) { return Double.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0; }
     private double nonNegativeFinite(double value) { return Double.isFinite(value) ? Math.max(0, value) : 0; }
+
+    static double diskThroughput(List<AgentReportRequest.DiskStats> disks, boolean read) {
+        Map<String, Double> devices = new HashMap<>();
+        double legacyMaximum = 0;
+        boolean legacy = true;
+        for (AgentReportRequest.DiskStats disk : disks) {
+            if (disk == null) continue;
+            double raw = read ? disk.readBytesPerSec() : disk.writeBytesPerSec();
+            double value = Double.isFinite(raw) ? Math.max(0, raw) : 0;
+            legacyMaximum = Math.max(legacyMaximum, value);
+            if (disk.ioAvailable() != null) legacy = false;
+            if (Boolean.TRUE.equals(disk.ioAvailable()) && disk.ioDevice() != null && !disk.ioDevice().isBlank()) {
+                devices.merge(disk.ioDevice(), value, Math::max);
+            }
+        }
+        // Older Agents repeated host-wide I/O on every mount. Only sum reports
+        // that explicitly identify their I/O counters, and count aliases once.
+        return legacy ? legacyMaximum : devices.values().stream().mapToDouble(Double::doubleValue).sum();
+    }
 
     private Double maxOptional(List<Double> values) {
         return values.stream().filter(value -> value != null && Double.isFinite(value)).max(Double::compareTo).orElse(null);

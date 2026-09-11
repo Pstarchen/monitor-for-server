@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { alignTrendValues, trendRangeValue, trendWindow } from './dashboard-trend'
+import { alignTrendValues, newestTrendPoint, trendRangeValue, trendWindow } from './dashboard-trend'
 
 describe('trendWindow', () => {
+  it('uses the newest actual snapshot regardless of the history response order', () => {
+    const live = { collectedAt: '2026-08-30T12:05:00.000Z', cpuUsage: 90 }
+    const historical = { collectedAt: '2026-08-30T12:04:00.000Z', cpuUsage: 10 }
+    expect(newestTrendPoint(live, historical)).toBe(live)
+    expect(newestTrendPoint(historical, live)).toBe(live)
+    expect(newestTrendPoint(null, historical)).toBe(historical)
+  })
   it('returns a UTC-safe range with the requested duration', () => {
     const now = new Date('2026-08-30T12:34:56.000Z')
     const window = trendWindow(6, now)

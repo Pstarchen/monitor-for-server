@@ -36,6 +36,7 @@ type Config struct {
 	SkipContainerCollection  bool
 	ContainerCollectionLimit int
 	DiskMountpoints          []string
+	NetworkInterfaces        []string
 	HostRoot                 string
 	DockerSocket             string
 	LogPaths                 []string
@@ -71,6 +72,7 @@ type fileConfig struct {
 	SkipContainerCollection  bool           `json:"skip_container_collection"`
 	ContainerCollectionLimit int            `json:"container_collection_limit"`
 	DiskMountpoints          []string       `json:"disk_mountpoints"`
+	NetworkInterfaces        []string       `json:"network_interfaces"`
 	HostRoot                 string         `json:"host_root"`
 	DockerSocket             string         `json:"docker_socket"`
 	LogPaths                 []string       `json:"log_paths"`
@@ -160,6 +162,7 @@ func Load(args []string) (Config, error) {
 		SkipContainerCollection:  file.SkipContainerCollection,
 		ContainerCollectionLimit: positiveOrDefault(file.ContainerCollectionLimit, 100),
 		DiskMountpoints:          cleanList(file.DiskMountpoints),
+		NetworkInterfaces:        cleanList(file.NetworkInterfaces),
 		HostRoot:                 strings.TrimSpace(file.HostRoot),
 		DockerSocket:             strings.TrimSpace(file.DockerSocket),
 		LogPaths:                 cleanList(file.LogPaths),

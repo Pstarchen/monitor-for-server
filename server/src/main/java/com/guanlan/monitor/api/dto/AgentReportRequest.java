@@ -93,8 +93,15 @@ public record AgentReportRequest(
             @PositiveOrZero long totalBytes, @PositiveOrZero long usedBytes, @PositiveOrZero long freeBytes,
             @Min(0) @Max(100) double usagePercent,
             @PositiveOrZero double readBytesPerSec, @PositiveOrZero double writeBytesPerSec,
-            @Valid SmartHealth smart
-    ) {}
+            @Valid SmartHealth smart, @Size(max = 255) String ioDevice, Boolean ioAvailable
+    ) {
+        public DiskStats(String device, String mountpoint, String fileSystem, long totalBytes, long usedBytes,
+                         long freeBytes, double usagePercent, double readBytesPerSec, double writeBytesPerSec,
+                         SmartHealth smart) {
+            this(device, mountpoint, fileSystem, totalBytes, usedBytes, freeBytes, usagePercent,
+                    readBytesPerSec, writeBytesPerSec, smart, null, null);
+        }
+    }
 
     public record SmartHealth(
             @Size(max = 16) String status, @Size(max = 255) String message,
@@ -105,7 +112,13 @@ public record AgentReportRequest(
 
     public record NetworkStats(@PositiveOrZero double bytesSentPerSec, @PositiveOrZero double bytesRecvPerSec,
                                @PositiveOrZero long bytesSent, @PositiveOrZero long bytesRecv,
-                               @PositiveOrZero int tcpConnections) {}
+                               @PositiveOrZero int tcpConnections,
+                               @Size(max = 512) List<@NotBlank @Size(max = 255) String> sampledInterfaces,
+                               Boolean available, Boolean ratesAvailable) {
+        public NetworkStats(double bytesSentPerSec, double bytesRecvPerSec, long bytesSent, long bytesRecv, int tcpConnections) {
+            this(bytesSentPerSec, bytesRecvPerSec, bytesSent, bytesRecv, tcpConnections, null, null, null);
+        }
+    }
 
     public record NetworkInterface(@NotBlank @Size(max = 255) String name, @PositiveOrZero int mtu,
                                    @Size(max = 32) String hardwareAddr, @Size(max = 16) List<@NotBlank @Size(max = 40) String> flags,
@@ -119,12 +132,25 @@ public record AgentReportRequest(
                                  @Size(max = 255) String status, @PositiveOrZero double cpuPercent,
                                  @PositiveOrZero long memoryUsageBytes, @PositiveOrZero long memoryLimitBytes,
                                  @Min(0) @Max(100) double memoryPercent, @PositiveOrZero long networkRxBytes,
-                                 @PositiveOrZero long networkTxBytes, @PositiveOrZero int restartCount) {}
+                                 @PositiveOrZero long networkTxBytes, @PositiveOrZero int restartCount,
+                                 Boolean statsAvailable, Boolean cpuSampled, Boolean restartCountAvailable) {
+        public ContainerStats(String id, String name, String image, String state, String status, double cpuPercent,
+                              long memoryUsageBytes, long memoryLimitBytes, double memoryPercent, long networkRxBytes,
+                              long networkTxBytes, int restartCount) {
+            this(id, name, image, state, status, cpuPercent, memoryUsageBytes, memoryLimitBytes, memoryPercent,
+                    networkRxBytes, networkTxBytes, restartCount, null, null, null);
+        }
+    }
 
     public record ProcessStats(@PositiveOrZero int pid, @Size(max = 255) String name, @Size(max = 2048) String commandLine,
                                @Size(max = 255) String username,
                                @PositiveOrZero double cpuPercent, @Min(0) @Max(100) double memoryPercent,
-                               @Size(max = 80) String status) {}
+                               @Size(max = 80) String status, Boolean cpuSampled) {
+        public ProcessStats(int pid, String name, String commandLine, String username, double cpuPercent,
+                            double memoryPercent, String status) {
+            this(pid, name, commandLine, username, cpuPercent, memoryPercent, status, null);
+        }
+    }
 
     public record ServiceStatus(@NotBlank @Size(max = 255) String name, @Size(max = 80) String status) {}
 

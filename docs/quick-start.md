@@ -27,13 +27,13 @@ description: 安装星辰监控总控，完成首次配置并接入第一台服�
 能够访问 GitHub 和 GHCR 时，下载固定版本的统一管理脚本并安装：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.21
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.22/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.22
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时，使用 Gitee 入口：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.21
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.22/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.22
 ```
 
 `xingchen.sh` 提供 `install`、`update`、`status`、`logs` 和 `restart` 五个直接动作；不带动作运行时会打开交互菜单。安装器在 `public` 模式会通过受支持的系统包管理器补齐 `curl`、Git、Docker Engine 和 Compose v2，然后生成数据库凭据、准备固定版本镜像并等待 Web 健康检查通过。安装器不会把数据库密码打印到日志。
@@ -49,7 +49,7 @@ sudo xingchen restart
 sudo xingchen update
 ```
 
-普通更新沿用现有 `.env` 中的来源、镜像和网络策略，优先按 `XINGCHEN_SOURCE_REPOSITORIES` 判断发布来源，未配置时才参考 Git origin；部署目录不需要保留 `.git`。使用 `sudo xingchen update --version v1.20.21` 可固定目标版本。确需切换公共来源时，使用 `--source gitee` 或 `--source github`，这也会切换六个镜像及相关发布策略；内部或离线部署不能直接运行普通在线更新。
+普通更新沿用现有 `.env` 中的来源、镜像和网络策略，优先按 `XINGCHEN_SOURCE_REPOSITORIES` 判断发布来源，未配置时才参考 Git origin；部署目录不需要保留 `.git`。使用 `sudo xingchen update --version v1.20.22` 可固定目标版本。确需切换公共来源时，使用 `--source gitee` 或 `--source github`，这也会切换六个镜像及相关发布策略；内部或离线部署不能直接运行普通在线更新。
 
 在线更新会先从目标版本 Setup 镜像提取并校验更新包，再备份数据库、切换服务和检查健康状态。`v1.20.18` 及更早版本首次迁移时，须先按[部署与运维](./deployment.md)使用已验证的发布包补齐新版管理器和 bootstrap。不要把下载 URL 改成可变的 `main` 分支；入口和安装目标都应固定稳定 `vX.Y.Z`。内部 manifest、固定 digest、源码构建和存量离线升级也见该文档。
 

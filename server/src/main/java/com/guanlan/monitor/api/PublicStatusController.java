@@ -43,12 +43,13 @@ public class PublicStatusController {
     public record PublicDevice(String id, String name, String groupName, String os, Device.Status status, Instant lastSeenAt, double cpuUsage, double memoryUsage, double diskUsage, double networkSentBps, double networkRecvBps, long networkSentBytes, long networkRecvBytes, long uptimeSeconds) {
         static PublicDevice from(DeviceDtos.View device) {
             var latest = device.latest();
+            boolean current = DashboardController.hasCurrentNetworkRates(device);
             long uptime = 0;
             if (device.hardware() != null && device.hardware().get("host") instanceof java.util.Map<?, ?> host) {
                 Object raw = host.get("uptimeSeconds");
                 if (raw instanceof Number value) uptime = Math.max(0, value.longValue());
             }
-            return new PublicDevice(device.id(), device.name(), device.groupName(), device.os(), device.status(), device.lastSeenAt(), latest == null ? 0 : latest.cpuUsage(), latest == null ? 0 : latest.memoryUsage(), latest == null ? 0 : latest.diskUsage(), latest == null ? 0 : latest.networkSentBps(), latest == null ? 0 : latest.networkRecvBps(), latest == null ? 0 : latest.networkSentBytes(), latest == null ? 0 : latest.networkRecvBytes(), uptime);
+            return new PublicDevice(device.id(), device.name(), device.groupName(), device.os(), device.status(), device.lastSeenAt(), latest == null ? 0 : latest.cpuUsage(), latest == null ? 0 : latest.memoryUsage(), latest == null ? 0 : latest.diskUsage(), current ? latest.networkSentBps() : 0, current ? latest.networkRecvBps() : 0, latest == null ? 0 : latest.networkSentBytes(), latest == null ? 0 : latest.networkRecvBytes(), uptime);
         }
     }
 }

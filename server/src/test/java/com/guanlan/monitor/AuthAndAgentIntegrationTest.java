@@ -884,7 +884,8 @@ class AuthAndAgentIntegrationTest {
                         .param("range", "6H").header("Authorization", authorization))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.range").value("6H"))
-                .andExpect(jsonPath("$.sampleStepSeconds").value(300))
+                .andExpect(jsonPath("$.sampleStepSeconds").value(675))
+                .andExpect(jsonPath("$.sampling").value("FIRST_MIN_MAX_LAST"))
                 .andExpect(jsonPath("$.points.length()").value(1));
         mvc.perform(get("/api/devices/" + hidden.device().id()).header("Authorization", authorization))
                 .andExpect(status().isForbidden());
@@ -1056,6 +1057,50 @@ class AuthAndAgentIntegrationTest {
         assertThat(metricSnapshots.countByDeviceId(credential.device().id())).isEqualTo(2);
         assertThat(metricSnapshots.findTopByDeviceIdOrderByCollectedAtDesc(credential.device().id()).orElseThrow().getCollectedAt()).isEqualTo(current);
         assertThat(deviceRepository.findById(credential.device().id()).orElseThrow().getHostname()).isEqualTo("current-host");
+    }
+
+    @Test
+    @WithMockUser(username = "test-admin", roles = "ADMIN")
+    void samplingMetadataSurvivesIngestLatestAndCompactHistory() throws Exception {
+        var credential = devices.create(new DeviceDtos.CreateRequest("sampling-node", "lab", "tests", "127.0.0.34"));
+        var report = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(sampleReport());
+        var network = (com.fasterxml.jackson.databind.node.ObjectNode) report.path("network");
+        network.put("available", true);
+        network.put("ratesAvailable", false);
+        network.putArray("sampledInterfaces").add("eth0");
+        var disk = (com.fasterxml.jackson.databind.node.ObjectNode) report.path("disks").get(0);
+        disk.put("ioDevice", "block:253:0");
+        disk.put("ioAvailable", false);
+        report.putArray("containers").addObject().put("id", "container-1").put("name", "api")
+                .put("statsAvailable", false).put("cpuSampled", false).put("restartCountAvailable", false);
+        report.putArray("processes").addObject().put("pid", 123).put("name", "worker").put("cpuSampled", false);
+        reportMetric(credential, mapper.writeValueAsString(report));
+
+        mvc.perform(get("/api/devices/" + credential.device().id() + "/metrics/latest"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.network.available").value(true))
+                .andExpect(jsonPath("$.network.ratesAvailable").value(false))
+                .andExpect(jsonPath("$.network.sampledInterfaces[0]").value("eth0"))
+                .andExpect(jsonPath("$.disks[0].ioAvailable").value(false))
+                .andExpect(jsonPath("$.containers[0].cpuSampled").value(false))
+                .andExpect(jsonPath("$.containers[0].restartCountAvailable").value(false))
+                .andExpect(jsonPath("$.processes[0].cpuSampled").value(false));
+        mvc.perform(get("/api/v2/devices/" + credential.device().id() + "/metrics/history").param("range", "1H"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.points[0].networkRatesAvailable").value(false));
+        mvc.perform(get("/api/v2/devices/" + credential.device().id() + "/diagnostics"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.networkAvailable").value(true))
+                .andExpect(jsonPath("$.totals.networkRatesAvailable").value(false))
+                .andExpect(jsonPath("$.totals.sampledInterfaces[0]").value("eth0"))
+                .andExpect(jsonPath("$.disks[0].ioDevice").value("block:253:0"))
+                .andExpect(jsonPath("$.disks[0].ioAvailable").value(false))
+                .andExpect(jsonPath("$.topCpuProcesses.length()").value(0))
+                .andExpect(jsonPath("$.topMemoryProcesses[0].cpuSampled").value(false));
+        var stored = metricSnapshots.findTopByDeviceIdOrderByCollectedAtDesc(credential.device().id()).orElseThrow();
+        assertThat(stored.getDiskReadBps()).isZero();
+        assertThat(stored.getContainerCpuUsage()).isNull();
+        assertThat(stored.getContainerMemoryUsage()).isNull();
     }
 
     private String sampleReport() throws Exception {

@@ -5,7 +5,7 @@ export function percent(value: number | null | undefined): string {
 export function bytes(value: number | null | undefined): string {
   const size = Math.max(0, Number(value ?? 0))
   if (size < 1024) return `${size.toFixed(0)} B`
-  const units = ['KB', 'MB', 'GB', 'TB', 'PB']
+  const units = ['KiB', 'MiB', 'GiB', 'TiB', 'PiB']
   let current = size / 1024
   let index = 0
   while (current >= 1024 && index < units.length - 1) {
@@ -26,10 +26,10 @@ export type RateScale = {
 
 const rateScales: RateScale[] = [
   { divisor: 1, unit: 'B/s' },
-  { divisor: 1024, unit: 'KB/s' },
-  { divisor: 1024 ** 2, unit: 'MB/s' },
-  { divisor: 1024 ** 3, unit: 'GB/s' },
-  { divisor: 1024 ** 4, unit: 'TB/s' },
+  { divisor: 1024, unit: 'KiB/s' },
+  { divisor: 1024 ** 2, unit: 'MiB/s' },
+  { divisor: 1024 ** 3, unit: 'GiB/s' },
+  { divisor: 1024 ** 4, unit: 'TiB/s' },
 ]
 
 export function rateScale(value: number | null | undefined): RateScale {

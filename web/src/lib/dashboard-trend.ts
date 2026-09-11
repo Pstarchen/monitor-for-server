@@ -1,6 +1,13 @@
 export type TrendRangeHours = 1 | 6 | 24
 export type TimestampedTrendPoint = { collectedAt: string }
 
+export function newestTrendPoint<T extends TimestampedTrendPoint>(...points: Array<T | null | undefined>): T | null {
+  return points.reduce<T | null>((latest, point) => {
+    if (!point || !Number.isFinite(Date.parse(point.collectedAt))) return latest
+    return !latest || Date.parse(point.collectedAt) > Date.parse(latest.collectedAt) ? point : latest
+  }, null)
+}
+
 export function trendWindow(rangeHours: TrendRangeHours, now = new Date()): { from: Date; to: Date } {
   const to = new Date(now)
   const from = new Date(to.getTime() - rangeHours * 3600_000)

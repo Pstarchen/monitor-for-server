@@ -146,8 +146,8 @@ public class AlertService {
                 case MEMORY_USAGE -> metric.getMemoryUsage();
                 case DISK_USAGE -> metric.getDiskUsage();
                 case LOAD_1 -> metric.getLoad1();
-                case DISK_READ_BPS -> metric.getDiskReadBps();
-                case DISK_WRITE_BPS -> metric.getDiskWriteBps();
+                case DISK_READ_BPS -> diskRate(metric, metric.getDiskReadBps());
+                case DISK_WRITE_BPS -> diskRate(metric, metric.getDiskWriteBps());
                 case CONTAINER_CPU_USAGE -> metric.getContainerCpuUsage();
                 case CONTAINER_MEMORY_USAGE -> metric.getContainerMemoryUsage();
                 case GPU_USAGE -> metric.getGpuUsage();
@@ -156,8 +156,8 @@ public class AlertService {
                 case INTEGRITY_CHANGES -> (double) metric.getIntegrityChanges();
                 case FIREWALL_INACTIVE -> metric.getFirewallInactive() == null ? null : metric.getFirewallInactive().doubleValue();
                 case TCP_CONNECTIONS -> (double) metric.getTcpConnections();
-                case NETWORK_RECV_BPS -> metric.getNetworkRecvBps();
-                case NETWORK_SENT_BPS -> metric.getNetworkSentBps();
+                case NETWORK_RECV_BPS -> networkRate(metric, metric.getNetworkRecvBps());
+                case NETWORK_SENT_BPS -> networkRate(metric, metric.getNetworkSentBps());
                 case TEMPERATURE -> metric.getTemperatureMax();
                 case FAN_RPM -> fanRpm(metric);
                 case DEVICE_OFFLINE -> 0d;
@@ -382,6 +382,33 @@ public class AlertService {
                 "status", event.getStatus().name(),
                 "severity", event.getRule().getSeverity().name(),
                 "message", event.getMessage()));
+    }
+
+    private Double networkRate(MetricSnapshot metric, double value) {
+        if (metric.getNetworkJson() == null || metric.getNetworkJson().isBlank()) return value;
+        try {
+            var network = mapper.readTree(metric.getNetworkJson());
+            return network.path("available").asBoolean(true) && network.path("ratesAvailable").asBoolean(true) ? value : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Double diskRate(MetricSnapshot metric, double value) {
+        if (metric.getDisksJson() == null || metric.getDisksJson().isBlank()) return value;
+        try {
+            var disks = mapper.readTree(metric.getDisksJson());
+            if (!disks.isArray() || disks.isEmpty()) return null;
+            boolean explicit = false;
+            boolean available = false;
+            for (var disk : disks) {
+                explicit |= disk.hasNonNull("ioAvailable");
+                available |= disk.path("ioAvailable").asBoolean(false) && !disk.path("ioDevice").asText("").isBlank();
+            }
+            return !explicit || available ? value : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private AlertRule requireRule(Long id) {

@@ -23,16 +23,16 @@
 能够访问 GitHub 和 GHCR 时，使用固定版本的一行入口：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.21
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.22/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.22
 ```
 
 中国大陆服务器或无法访问 GitHub/GHCR 时，使用 Gitee 和腾讯云 TCR：
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.21
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.22/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.22
 ```
 
-两个入口都固定到 `v1.20.21`，不要替换为可变的 `main`。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。`CN=true` 直接拉取 `ccr.ccs.tencentyun.com/xc_monitor` 下的六个公开预构建镜像，不在目标机编译；它不代表离线，如果目标机也无法访问 Gitee、腾讯云 TCR 或系统包源，就应使用内部源或已校验的离线 bundle。
+两个入口都固定到 `v1.20.22`，不要替换为可变的 `main`。默认安装目录是 `/opt/guanlan-monitor`，可通过 `--install-dir <绝对路径>` 修改。`CN=true` 直接拉取 `ccr.ccs.tencentyun.com/xc_monitor` 下的六个公开预构建镜像，不在目标机编译；它不代表离线，如果目标机也无法访问 Gitee、腾讯云 TCR 或系统包源，就应使用内部源或已校验的离线 bundle。
 
 需要禁止所有公共代码托管和镜像服务时，先在可联网发布机把 setup、server、web、agent、PostgreSQL、Redis 六个 digest 固定镜像晋级到内部 Registry，并把四平台 Agent 制品发布到内部 HTTPS 域。目标机配置 `.env` 后执行：
 
@@ -46,7 +46,7 @@ bash ./deploy/install-controller.sh --network-mode internal --no-source-fallback
 XINGCHEN_NETWORK_MODE=internal
 XINGCHEN_ALLOW_GITEE=false
 XINGCHEN_CONTROLLER_ALLOW_GITHUB_API=false
-XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.21/manifest.json
+XINGCHEN_RELEASE_MANIFEST_URLS=https://release.internal.example/xingchen/v1.20.22/manifest.json
 XINGCHEN_RELEASE_MANIFEST_SHA256=<受信 manifest 摘要>
 XINGCHEN_AGENT_RELEASE_BASE_URLS=https://release.internal.example/xingchen
 ```
@@ -116,8 +116,8 @@ sudo xingchen update
 已有公共源部署可先检查一个已发布且包含更新包的目标版本，再执行更新。默认目录示例：
 
 ```bash
-sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.21 --check
-sudo xingchen update --version v1.20.21
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.22 --check
+sudo xingchen update --version v1.20.22
 ```
 
 `--check` 沿用当前来源准备并校验候选，不切换运行服务；它不会把离线部署自动转为公共源。`v1.20.18` 及更早版本首次迁移时，先使用已验证的发布包补齐新版管理器和 bootstrap，详见[部署与运维](deployment.md)。底层 `update-controller.sh/.ps1` 的当前源码构建和其他维护参数也在该文档说明，不作为跨版本在线更新入口。
@@ -128,12 +128,12 @@ sudo xingchen update --version v1.20.21
 
 在线更新捕获到 `SIGHUP`、`SIGINT` 或 `SIGTERM` 时，也会执行上述恢复和健康检查；管理器不修改源码检出或 Git origin。回滚健康时退出码为 `10`，恢复不完整时为 `11`，并保留受保护的 `.controller-update-snapshot.*`。`SIGKILL` 或断电无法触发信号处理；重新登录后先运行 `sudo xingchen status` 并检查日志和保留快照。存在未处理快照时，后续在线更新会拒绝继续，应先人工确认并完成恢复，不要盲目重跑同版本或删除快照、数据卷。
 
-完全断网的已有部署必须使用离线包内的 `upgrade-offline.sh/.ps1`，不能再次运行新装入口。例如将已有 amd64 部署升级到 `v1.20.21`：
+完全断网的已有部署必须使用离线包内的 `upgrade-offline.sh/.ps1`，不能再次运行新装入口。例如将已有 amd64 部署升级到 `v1.20.22`：
 
 ```bash
-sha256sum -c xingchen-monitor-offline-v1.20.21-amd64.tar.gz.sha256
-tar -xzf xingchen-monitor-offline-v1.20.21-amd64.tar.gz
-cd xingchen-monitor-offline-v1.20.21-amd64
+sha256sum -c xingchen-monitor-offline-v1.20.22-amd64.tar.gz.sha256
+tar -xzf xingchen-monitor-offline-v1.20.22-amd64.tar.gz
+cd xingchen-monitor-offline-v1.20.22-amd64
 sudo ./upgrade-offline.sh --project-root /opt/guanlan-monitor --check
 sudo ./upgrade-offline.sh --project-root /opt/guanlan-monitor --apply
 ```

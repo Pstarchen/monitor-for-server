@@ -122,7 +122,7 @@ Windows 总控不会自动采集 Windows 宿主机。完成总控安装后，还
 ### 4.1 Linux：从 Gitee 安装
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.21
+curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.22/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo CN=true ./xingchen.sh install --version v1.20.22
 ```
 
 该入口从 Gitee 取得固定版本编排文件，并从腾讯云 TCR 拉取六个公开预构建镜像；目标机不访问 GitHub/GHCR，也不编译应用。
@@ -130,7 +130,7 @@ curl -fsSL --proto '=https' --tlsv1.2 'https://gitee.com/starchen520/monitor-for
 ### 4.2 Linux：能够访问 GitHub 时
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.21/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.21
+curl -fsSL --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Pstarchen/monitor-for-server/v1.20.22/deploy/xingchen.sh' -o xingchen.sh && chmod +x xingchen.sh && sudo ./xingchen.sh install --version v1.20.22
 ```
 
 安装器会自动完成这些工作：
@@ -608,8 +608,8 @@ sudo xingchen update
 需要固定版本时，先用目标版本 bootstrap 预检，再应用。以下示例假定安装目录为 `/opt/guanlan-monitor`，目标版本已发布且包含更新包：
 
 ```bash
-sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.21 --check
-sudo xingchen update --version v1.20.21
+sudo bash /opt/guanlan-monitor/deploy/bootstrap-controller-update.sh --project-root /opt/guanlan-monitor --version v1.20.22 --check
+sudo xingchen update --version v1.20.22
 ```
 
 bootstrap 从目标 Setup 镜像提取更新包，验证版本、架构、镜像 ID 和包内摘要。`--check` 准备并校验候选，不切换运行服务；正式更新由目标版本更新器备份数据库后执行。

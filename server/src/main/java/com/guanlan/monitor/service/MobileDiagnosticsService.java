@@ -18,15 +18,29 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.TreeMap;
+import java.util.function.ToDoubleFunction;
 
 @Service
 @RequiredArgsConstructor
 public class MobileDiagnosticsService {
     private static final int MAX_HISTORY_POINTS = 720;
     private static final int TOP_PROCESS_LIMIT = 5;
+    private static final List<ToDoubleFunction<MetricSnapshotRepository.HistorySample>> HISTORY_VALUES = List.of(
+            MetricSnapshotRepository.HistorySample::getCpuUsage,
+            MetricSnapshotRepository.HistorySample::getMemoryUsage,
+            MetricSnapshotRepository.HistorySample::getSwapUsage,
+            MetricSnapshotRepository.HistorySample::getLoad1,
+            MetricSnapshotRepository.HistorySample::getLoad5,
+            MetricSnapshotRepository.HistorySample::getLoad15,
+            MetricSnapshotRepository.HistorySample::getTemperatureMax,
+            MetricSnapshotRepository.HistorySample::getDiskUsage,
+            MetricSnapshotRepository.HistorySample::getNetworkSentBps,
+            MetricSnapshotRepository.HistorySample::getNetworkRecvBps);
 
     private final DeviceService devices;
     private final MetricService metrics;
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
     public MobileDiagnosticsDtos.Diagnostics diagnostics(String deviceId) {
         DeviceDtos.View device = devices.get(deviceId);
@@ -44,11 +58,14 @@ public class MobileDiagnosticsService {
                         metric.cpuUsage(), metric.memoryUsage(), metric.swapUsage(),
                         metric.load1(), metric.load5(), metric.load15(), metric.temperatureMax(),
                         metric.networkSentBps(), metric.networkRecvBps(),
-                        metric.networkSentBytes(), metric.networkRecvBytes(), metric.tcpConnections()),
+                        metric.networkSentBytes(), metric.networkRecvBytes(), metric.tcpConnections(),
+                        metric.network() == null ? null : metric.network().available(),
+                        metric.network() == null ? null : metric.network().ratesAvailable(),
+                        metric.network() == null ? null : metric.network().sampledInterfaces()),
                 metric.networkInterfaces().stream()
                         .filter(Objects::nonNull).map(this::networkInterface).toList(),
                 disks,
-                topProcesses(processes, Comparator.comparingDouble(MobileDiagnosticsDtos.Process::cpuPercent).reversed()),
+                topProcesses(processes.stream().filter(process -> !Boolean.FALSE.equals(process.cpuSampled())).toList(), Comparator.comparingDouble(MobileDiagnosticsDtos.Process::cpuPercent).reversed()),
                 topProcesses(processes, Comparator.comparingDouble(MobileDiagnosticsDtos.Process::memoryPercent).reversed()),
                 health(metric, disks)
         );
@@ -59,38 +76,74 @@ public class MobileDiagnosticsService {
         Instant to = Instant.now();
         Instant from = to.minus(range.duration);
         List<MetricSnapshotRepository.HistorySample> raw = metrics.compactHistory(deviceId, from, to);
-        List<MobileDiagnosticsDtos.HistoryPoint> points = downsample(raw, from, range.sampleStepSeconds);
+        int pointsPerBucket = 2 + HISTORY_VALUES.size() * 2;
+        long bucketCount = MAX_HISTORY_POINTS / pointsPerBucket;
+        // Include the endpoint in the final bucket so the bound also holds
+        // when a report lands exactly at the requested upper limit.
+        long step = Math.max(range.sampleStepSeconds, (range.duration.toSeconds() + bucketCount - 1) / bucketCount);
+        List<MobileDiagnosticsDtos.HistoryPoint> points = downsample(raw, from, step, bucketCount);
         return new MobileDiagnosticsDtos.History(
-                deviceId, range.wireValue, from, to, range.sampleStepSeconds, points);
+                deviceId, range.wireValue, from, to, step, points, "FIRST_MIN_MAX_LAST");
     }
 
     private List<MobileDiagnosticsDtos.HistoryPoint> downsample(List<MetricSnapshotRepository.HistorySample> raw, Instant from,
-                                                                 long sampleStepSeconds) {
+                                                                 long sampleStepSeconds, long bucketCount) {
         if (raw.isEmpty()) return List.of();
-        List<MobileDiagnosticsDtos.HistoryPoint> points = new ArrayList<>();
-        long activeBucket = Long.MIN_VALUE;
-        MetricSnapshotRepository.HistorySample activeMetric = null;
-        for (MetricSnapshotRepository.HistorySample metric : raw) {
-            long secondsFromStart = Math.max(0, Duration.between(from, metric.getCollectedAt()).getSeconds());
-            long bucket = secondsFromStart / sampleStepSeconds;
-            if (activeMetric != null && bucket != activeBucket) {
-                points.add(historyPoint(activeMetric));
-            }
-            activeBucket = bucket;
-            activeMetric = metric;
+        var buckets = new TreeMap<Long, List<Integer>>();
+        for (int index = 0; index < raw.size(); index++) {
+            long seconds = Math.max(0, Duration.between(from, raw.get(index).getCollectedAt()).getSeconds());
+            long bucket = Math.min(bucketCount - 1, seconds / sampleStepSeconds);
+            buckets.computeIfAbsent(bucket, ignored -> new ArrayList<>()).add(index);
         }
-        if (activeMetric != null) points.add(historyPoint(activeMetric));
-        if (points.size() > MAX_HISTORY_POINTS) {
-            return List.copyOf(points.subList(points.size() - MAX_HISTORY_POINTS, points.size()));
+        var selected = new java.util.TreeSet<Integer>();
+        for (List<Integer> indices : buckets.values()) {
+            selected.add(indices.getFirst());
+            selected.add(indices.getLast());
+            for (var value : HISTORY_VALUES) {
+                int minimum = indices.getFirst();
+                int maximum = minimum;
+                for (int index : indices) {
+                    if (value.applyAsDouble(raw.get(index)) < value.applyAsDouble(raw.get(minimum))) minimum = index;
+                    if (value.applyAsDouble(raw.get(index)) > value.applyAsDouble(raw.get(maximum))) maximum = index;
+                }
+                selected.add(minimum);
+                selected.add(maximum);
+            }
+        }
+        long[] intervals = new long[Math.max(0, raw.size() - 1)];
+        for (int index = 1; index < raw.size(); index++) {
+            intervals[index - 1] = Duration.between(raw.get(index - 1).getCollectedAt(), raw.get(index).getCollectedAt()).toMillis();
+        }
+        long[] positiveIntervals = java.util.Arrays.stream(intervals).filter(value -> value > 0).sorted().toArray();
+        long gapThresholdMs = positiveIntervals.length == 0 ? Long.MAX_VALUE
+                : Math.max(1_000, positiveIntervals[(positiveIntervals.length - 1) / 2] * 3);
+        List<MobileDiagnosticsDtos.HistoryPoint> points = new ArrayList<>();
+        int previous = 0;
+        for (int index : selected) {
+            boolean gap = false;
+            for (int cursor = previous; cursor < index; cursor++) gap |= intervals[cursor] > gapThresholdMs;
+            points.add(historyPoint(raw.get(index), gap));
+            previous = index;
         }
         return List.copyOf(points);
     }
 
-    private MobileDiagnosticsDtos.HistoryPoint historyPoint(MetricSnapshotRepository.HistorySample metric) {
+    private MobileDiagnosticsDtos.HistoryPoint historyPoint(MetricSnapshotRepository.HistorySample metric, boolean gapBefore) {
+        Boolean networkRatesAvailable = null;
+        if (metric.getNetworkJson() != null) {
+            try {
+                var network = mapper.readTree(metric.getNetworkJson());
+                if (network.hasNonNull("available") || network.hasNonNull("ratesAvailable")) {
+                    networkRatesAvailable = network.path("available").asBoolean(true) && network.path("ratesAvailable").asBoolean(true);
+                }
+            } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
+                // Historical reports without sampling metadata keep their original semantics.
+            }
+        }
         return new MobileDiagnosticsDtos.HistoryPoint(
                 metric.getCollectedAt(), metric.getCpuUsage(), metric.getMemoryUsage(), metric.getSwapUsage(),
                 metric.getLoad1(), metric.getLoad5(), metric.getLoad15(), metric.getTemperatureMax(),
-                metric.getDiskUsage(), metric.getNetworkSentBps(), metric.getNetworkRecvBps());
+                metric.getDiskUsage(), metric.getNetworkSentBps(), metric.getNetworkRecvBps(), gapBefore, networkRatesAvailable);
     }
 
     private MobileDiagnosticsDtos.NetworkInterface networkInterface(AgentReportRequest.NetworkInterface item) {
@@ -107,13 +160,13 @@ public class MobileDiagnosticsService {
         return new MobileDiagnosticsDtos.Disk(
                 text(item.device()), text(item.mountpoint()), text(item.fileSystem()),
                 item.totalBytes(), item.usedBytes(), item.freeBytes(), item.usagePercent(),
-                item.readBytesPerSec(), item.writeBytesPerSec(), smart);
+                item.readBytesPerSec(), item.writeBytesPerSec(), smart, item.ioDevice(), item.ioAvailable());
     }
 
     private MobileDiagnosticsDtos.Process process(AgentReportRequest.ProcessStats item) {
         return new MobileDiagnosticsDtos.Process(
                 item.pid(), text(item.name()), text(item.username()), item.cpuPercent(),
-                item.memoryPercent(), text(item.status()));
+                item.memoryPercent(), text(item.status()), item.cpuSampled());
     }
 
     private List<MobileDiagnosticsDtos.Process> topProcesses(List<MobileDiagnosticsDtos.Process> processes,

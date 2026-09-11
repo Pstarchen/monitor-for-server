@@ -12,9 +12,10 @@ import EmptyState from '@/components/EmptyState.vue'
 import ServiceAvailabilityCard from '@/components/ServiceAvailabilityCard.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { api, errorMessage } from '@/lib/api'
-import { alignTrendValues, trendRangeValue, type TrendRangeHours } from '@/lib/dashboard-trend'
+import { newestTrendPoint, trendRangeValue, type TrendRangeHours } from '@/lib/dashboard-trend'
 import { dateTime, percent, rate, rateScale, relativeTime, uptime } from '@/lib/format'
 import { matchesRealtimeEvent } from '@/lib/realtime'
+import { networkRateAvailable } from '@/lib/metric-availability'
 import { useVisibilityPolling } from '@/lib/visibility-polling'
 import type { Dashboard, Device, DeviceNote, DeviceStatus, MetricHistoryPoint, MetricHistoryResponse, ServiceCheck } from '@/types'
 
@@ -41,6 +42,7 @@ const sort = ref<SortKey>('attention')
 const trendDeviceIds = ref<string[]>([])
 const trendRangeHours = ref<TrendRangeHours>(6)
 const trendHistories = ref<Record<string, MetricHistoryPoint[]>>({})
+const trendSampling = ref<Record<string, Pick<MetricHistoryResponse, 'sampling' | 'sampleStepSeconds'>>>({})
 const trendLoading = ref(false)
 const trendError = ref('')
 let refreshTimer = 0
@@ -75,31 +77,38 @@ const filteredDevices = computed(() => {
 })
 
 const onlineServices = computed(() => serviceChecks.value.filter((service) => service.latest?.success).length)
+const currentNetworkAvailable = computed(() => dashboard.value?.devices.some((device) => device.health.state === 'HEALTHY' && device.status === 'ONLINE' && device.latest && networkRateAvailable(device.latest)) ?? false)
 const trendDevices = computed(() => (dashboard.value?.devices ?? []).filter((device) => device.latest || device.status === 'ONLINE'))
-const selectedTrendDevices = computed(() => trendDevices.value.filter((device) => trendDeviceIds.value.includes(device.id)))
+const selectedTrendDevices = computed(() => trendDeviceIds.value.flatMap((id) => trendDevices.value.filter((device) => device.id === id)))
 const trendDevice = computed(() => selectedTrendDevices.value[0] ?? null)
 const trendDeviceId = computed(() => trendDeviceIds.value[0] ?? '')
 const trendHistory = computed(() => trendDeviceId.value ? trendHistories.value[trendDeviceId.value] ?? [] : [])
-const trendLatest = computed(() => trendHistory.value[trendHistory.value.length - 1] ?? trendDevice.value?.latest ?? null)
+const trendLatest = computed(() => newestTrendPoint<Pick<MetricHistoryPoint, 'collectedAt' | 'cpuUsage' | 'memoryUsage' | 'diskUsage' | 'load1' | 'load5' | 'load15'>>(trendDevice.value?.latest, trendHistory.value[trendHistory.value.length - 1]))
+const trendSamplingHint = computed(() => trendSampling.value[trendDeviceId.value]?.sampling === 'FIRST_MIN_MAX_LAST'
+  ? '保留各指标的区间极值与首末真实采集点；横轴按采集时间展示，缺报处断开'
+  : '历史按区间抽样；当前值来自最新采集快照')
 const trendLabels = computed(() => trendHistory.value.map((item) => new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit', minute: '2-digit', second: trendRangeHours.value === 1 ? '2-digit' : undefined,
 }).format(new Date(item.collectedAt))))
 const trendIoScale = computed(() => rateScale(selectedTrendDevices.value.flatMap((device) => trendHistories.value[device.id] ?? []).reduce((max, item) => Math.max(max, item.networkRecvBps, item.networkSentBps), 0)))
 const trendPalette = ['#2867a6', '#17834d', '#986400', '#c73832']
 
-function alignedValues(deviceId: string, read: (metric: MetricHistoryPoint) => number) {
+function seriesValues(deviceId: string, read: (metric: MetricHistoryPoint) => number | null) {
   const source = trendHistories.value[deviceId] ?? []
-  if (deviceId === trendDeviceId.value) return source.map(read)
-  return alignTrendValues(trendHistory.value, source, read)
+  return {
+    data: source.map(read),
+    timestamps: source.map((point) => point.collectedAt),
+    gapBefore: trendSampling.value[deviceId]?.sampling === 'FIRST_MIN_MAX_LAST' ? source.map((point) => Boolean(point.gapBefore)) : undefined,
+  }
 }
 
 const trendResourceSeries = computed(() => selectedTrendDevices.value.flatMap((device, index) => [
-  { name: `${device.name} · CPU`, data: alignedValues(device.id, (item) => item.cpuUsage), color: trendPalette[index % trendPalette.length] },
-  { name: `${device.name} · 内存`, data: alignedValues(device.id, (item) => item.memoryUsage), color: trendPalette[(index + 1) % trendPalette.length] },
+  { name: `${device.name} · CPU`, ...seriesValues(device.id, (item) => item.cpuUsage), color: trendPalette[index % trendPalette.length] },
+  { name: `${device.name} · 内存`, ...seriesValues(device.id, (item) => item.memoryUsage), color: trendPalette[(index + 1) % trendPalette.length] },
 ]))
 const trendIoSeries = computed(() => selectedTrendDevices.value.flatMap((device, index) => [
-  { name: `${device.name} · 接收`, data: alignedValues(device.id, (item) => item.networkRecvBps / trendIoScale.value.divisor), color: trendPalette[index % trendPalette.length] },
-  { name: `${device.name} · 发送`, data: alignedValues(device.id, (item) => item.networkSentBps / trendIoScale.value.divisor), color: trendPalette[(index + 1) % trendPalette.length] },
+  { name: `${device.name} · 接收`, ...seriesValues(device.id, (item) => item.networkRatesAvailable === false ? null : item.networkRecvBps / trendIoScale.value.divisor), color: trendPalette[index % trendPalette.length] },
+  { name: `${device.name} · 发送`, ...seriesValues(device.id, (item) => item.networkRatesAvailable === false ? null : item.networkSentBps / trendIoScale.value.divisor), color: trendPalette[(index + 1) % trendPalette.length] },
 ]))
 const trendLoad = computed(() => trendLatest.value ? `${trendLatest.value.load1.toFixed(2)} / ${trendLatest.value.load5.toFixed(2)} / ${trendLatest.value.load15.toFixed(2)}` : '--')
 
@@ -110,14 +119,16 @@ function syncTrendDevice() {
 }
 
 async function loadTrend() {
+  const requestId = ++trendRequestId
+  trendController?.abort()
   const ids = [...trendDeviceIds.value]
   if (!ids.length) {
     trendHistories.value = {}
+    trendSampling.value = {}
+    trendLoading.value = false
     trendError.value = ''
     return
   }
-  const requestId = ++trendRequestId
-  trendController?.abort()
   trendController = new AbortController()
   trendLoading.value = true
   trendError.value = ''
@@ -128,9 +139,13 @@ async function loadTrend() {
     })))
     if (requestId !== trendRequestId) return
     const next: Record<string, MetricHistoryPoint[]> = {}
+    const sampling: typeof trendSampling.value = {}
     let failures = 0
     responses.forEach((response, index) => {
-      if (response.status === 'fulfilled') next[ids[index]] = response.value.data.points
+      if (response.status === 'fulfilled') {
+        next[ids[index]] = response.value.data.points
+        sampling[ids[index]] = response.value.data
+      }
       else failures += 1
     })
     if (failures === ids.length) {
@@ -138,6 +153,7 @@ async function loadTrend() {
       throw failed?.reason ?? new Error('趋势数据加载失败')
     }
     trendHistories.value = next
+    trendSampling.value = sampling
     if (failures) trendError.value = `${failures} 台设备趋势暂时不可用`
   } catch (cause) {
     if (requestId === trendRequestId) trendError.value = errorMessage(cause)
@@ -276,7 +292,7 @@ onBeforeUnmount(() => {
         <MetricCard label="设备总数" :value="dashboard.totalDevices" :hint="`${dashboard.pendingDevices} 台等待接入`" tone="info"><template #icon><Server :size="17" /></template></MetricCard>
         <MetricCard label="在线设备" :value="dashboard.onlineDevices" :hint="`${dashboard.offlineDevices} 台离线`" :tone="dashboard.offlineDevices ? 'warning' : 'success'"><template #icon><Activity :size="17" /></template></MetricCard>
         <MetricCard label="活动告警" :value="dashboard.activeAlerts" hint="待处理与已确认" :tone="dashboard.activeAlerts ? 'danger' : 'success'"><template #icon><BellRing :size="17" /></template></MetricCard>
-        <MetricCard label="实时下行" :value="rate(dashboard.networkRecvBps)" :hint="`上行 ${rate(dashboard.networkSentBps)}`" tone="neutral"><template #icon><ArrowDown :size="17" /></template></MetricCard>
+        <MetricCard label="实时下行" :value="currentNetworkAvailable ? rate(dashboard.networkRecvBps) : '--'" :hint="currentNetworkAvailable ? `上行 ${rate(dashboard.networkSentBps)}` : '等待有效网络采样'" tone="neutral"><template #icon><ArrowDown :size="17" /></template></MetricCard>
         <MetricCard label="SMART 异常" :value="dashboard.smartFailures" :hint="dashboard.smartFailures ? '磁盘健康需要关注' : '未发现失败磁盘'" :tone="dashboard.smartFailures ? 'danger' : 'success'"><template #icon><ShieldCheck :size="17" /></template></MetricCard>
         <MetricCard label="完整性变更" :value="dashboard.integrityChanges" :hint="dashboard.integrityChanges ? '最近采集发现文件变化' : '未发现基线文件变化'" :tone="dashboard.integrityChanges ? 'warning' : 'success'"><template #icon><FileWarning :size="17" /></template></MetricCard>
         <MetricCard label="防火墙未启用" :value="dashboard.firewallInactive" :hint="dashboard.firewallInactive ? '请检查主机安全策略' : '已启用或暂无数据'" :tone="dashboard.firewallInactive ? 'danger' : 'success'"><template #icon><ShieldAlert :size="17" /></template></MetricCard>
@@ -290,8 +306,8 @@ onBeforeUnmount(() => {
 
       <section class="section">
         <div class="section-heading">
-          <div><h2>资源趋势</h2><p>按节点查看历史资源和网络吞吐，帮助定位短时尖峰</p></div>
-          <span v-if="trendDevice" class="filter-count">最近采集 {{ relativeTime(trendDevice.lastSeenAt) }}</span>
+          <div><h2>资源趋势</h2><p>{{ trendSamplingHint }}</p></div>
+          <span v-if="trendLatest" class="filter-count">最近采集 {{ relativeTime(trendLatest.collectedAt) }}</span>
         </div>
         <article class="panel trend-panel">
           <div class="trend-panel-toolbar">
@@ -423,8 +439,8 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <footer>
-              <span><ArrowDown :size="13" />{{ device.latest ? rate(device.latest.networkRecvBps) : '--' }}</span>
-              <span><ArrowUp :size="13" />{{ device.latest ? rate(device.latest.networkSentBps) : '--' }}</span>
+              <span><ArrowDown :size="13" />{{ device.health.state === 'HEALTHY' && device.latest && networkRateAvailable(device.latest) ? rate(device.latest.networkRecvBps) : '--' }}</span>
+              <span><ArrowUp :size="13" />{{ device.health.state === 'HEALTHY' && device.latest && networkRateAvailable(device.latest) ? rate(device.latest.networkSentBps) : '--' }}</span>
               <span class="server-os">{{ device.os || device.architecture || '系统待识别' }}</span>
             </footer>
           </article>

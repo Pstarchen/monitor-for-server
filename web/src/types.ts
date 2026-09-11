@@ -37,6 +37,8 @@ export interface DiskMetric {
   usagePercent: number
   readBytesPerSec: number
   writeBytesPerSec: number
+  ioDevice?: string | null
+  ioAvailable?: boolean | null
   smart?: SmartHealthMetric | null
 }
 
@@ -56,6 +58,7 @@ export interface ProcessMetric {
   commandLine: string
   username: string
   cpuPercent: number
+  cpuSampled?: boolean | null
   memoryPercent: number
   status: string
 }
@@ -90,6 +93,9 @@ export interface ContainerMetric {
   networkRxBytes: number
   networkTxBytes: number
   restartCount: number
+  statsAvailable?: boolean | null
+  cpuSampled?: boolean | null
+  restartCountAvailable?: boolean | null
 }
 
 export interface FanMetric { name: string; rpm: number }
@@ -118,6 +124,7 @@ export interface Metric {
   networkRecvBps: number
   networkSentBytes: number
   networkRecvBytes: number
+  network?: { available?: boolean | null; ratesAvailable?: boolean | null; sampledInterfaces?: string[] | null } | null
   tcpConnections: number
   temperatureMax: number
   gpuUsage: number | null
@@ -413,6 +420,8 @@ export interface Settings {
 
 export interface MetricHistoryPoint {
   collectedAt: string
+  gapBefore?: boolean
+  networkRatesAvailable?: boolean | null
   cpuUsage: number
   memoryUsage: number
   swapUsage: number
@@ -431,6 +440,7 @@ export interface MetricHistoryResponse {
   from: string
   to: string
   sampleStepSeconds: number
+  sampling?: 'FIRST_MIN_MAX_LAST'
   points: MetricHistoryPoint[]
 }
 

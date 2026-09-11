@@ -36,9 +36,9 @@ let scrollFrame = 0
 
 const commands: Record<InstallMode, string> = {
   linux: `curl -fsSL --proto '=https' --tlsv1.2 \\
-  'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.21/deploy/xingchen.sh' -o xingchen.sh &&
-sudo bash xingchen.sh install --source gitee --version v1.20.21`,
-  windows: `git clone --depth 1 --branch v1.20.21 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
+  'https://gitee.com/starchen520/monitor-for-server/raw/v1.20.22/deploy/xingchen.sh' -o xingchen.sh &&
+sudo bash xingchen.sh install --source gitee --version v1.20.22`,
+  windows: `git clone --depth 1 --branch v1.20.22 https://github.com/Pstarchen/monitor-for-server.git xingchen-monitor
 if ($LASTEXITCODE -ne 0) { throw 'Clone failed' }
 Set-Location xingchen-monitor
 powershell -ExecutionPolicy Bypass -File .\\deploy\\install-controller.ps1`,
@@ -283,7 +283,7 @@ async function copyCommand() {
             </button>
           </div>
           <pre role="tabpanel"><code>{{ currentCommand }}</code></pre>
-          <div class="console-status"><span><i /> v1.20.21</span><span>PORT 18080</span></div>
+          <div class="console-status"><span><i /> v1.20.22</span><span>PORT 18080</span></div>
           <p class="sr-only" aria-live="polite">{{ copyState === 'copied' ? '安装命令已复制到剪贴板' : copyState === 'error' ? '复制失败，请手动选择命令' : '' }}</p>
         </div>
         <div class="install-copy reveal-item" data-reveal="right">
